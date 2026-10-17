@@ -14,6 +14,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:shared_preferences_platform_interface/shared_preferences_platform_interface.dart';
 
 import 'app.dart';
 import 'core/constants/app_constants.dart';
@@ -28,7 +29,19 @@ Future<void> main() async {
   await SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
 
   // 1) 本地存储（同步注入，所有设置 Provider 在首帧即可读取）
-  final SharedPreferences prefs = await SharedPreferences.getInstance();
+  // 容错：存储引擎异常（插件被裁剪/磁盘故障/损坏数据）时降级为
+  // 内存存储 —— 应用仍可启动播放，仅设置不跨启动持久；绝不黑屏。
+  // 等价于官方 setMockInitialValues 的公开 API 写法（后者标记为
+  // visibleForTesting，生产代码改用平台接口直接注入，语义相同）。
+  SharedPreferences prefs;
+  try {
+    prefs = await SharedPreferences.getInstance();
+  } catch (e) {
+    debugPrint('SharedPreferences 不可用，降级为内存存储: $e');
+    SharedPreferencesStorePlatform.instance =
+        InMemorySharedPreferencesStore.withData(<String, Object>{});
+    prefs = await SharedPreferences.getInstance();
+  }
 
   // 2) Android 13+ 通知权限（通知栏媒体控制的前提）
   if (!kIsWeb && Platform.isAndroid) {

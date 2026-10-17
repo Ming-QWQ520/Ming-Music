@@ -24,6 +24,8 @@ dependencies:
 
   # --- 本地存储 ---
   shared_preferences: ^2.5.3
+  # 平台接口：main.dart 启动容错注入 InMemorySharedPreferencesStore 用
+  shared_preferences_platform_interface: ^2.4.2
   path_provider: ^2.1.5      # 通知栏封面缓存 / 背景图片持久化
 
   # --- 设备能力 ---
