@@ -69,24 +69,43 @@ class PlayerNotifier extends Notifier<PlayerState> {
   StreamSubscription<AppProcessingState>? _processingSub;
   final Random _random = Random();
 
+  /// 首次 build() 返回前 Riverpod 禁止读写 this.state（抛
+  /// "Tried to read the state of an uninitialized provider"）。
+  /// 内核流的当前值可能在 build 返回前经微任务送达（BehaviorSubject
+  /// 回放），监听回调必须用本标志位挡住这些早期事件。
+  bool _ready = false;
+
+  /// 最近一次已生效的状态：依赖变化导致重建时恢复现场，避免 UI 跳变
+  PlayerState? _lastState;
+
+  @override
+  set state(PlayerState value) {
+    _lastState = value;
+    super.state = value;
+  }
+
   @override
   PlayerState build() {
     _handler = ref.watch(audioHandlerProvider);
+    _ready = false; // 重建期间静默监听回调，直到新初始值返回
 
     // 订阅内核细粒度流 → 映射进不可变状态（低频字段，重建代价可控）
     _playingSub = _handler.player.playingStream.listen((bool p) {
+      if (!_ready) return;
       state = state.copyWith(playing: p);
     });
     _indexSub = _handler.player.sequenceStateStream
         .map((SequenceState? s) => s?.currentIndex ?? -1)
         .distinct()
         .listen((int i) {
-      if (i >= 0) state = state.copyWith(index: i);
+      if (!_ready || i < 0) return;
+      state = state.copyWith(index: i);
     });
     _processingSub = _handler.player.processingStateStream
         .map(_mapProcessing)
         .distinct()
         .listen((AppProcessingState ps) {
+      if (!_ready) return;
       state = state.copyWith(processing: ps);
     });
 
@@ -99,7 +118,12 @@ class PlayerNotifier extends Notifier<PlayerState> {
     // 通知栏的上一首/下一首交给本 Notifier，保证洗牌/循环逻辑一致
     _handler.setSkipHandlers(onNext: next, onPrevious: previous);
 
-    return state;
+    // ⚠️ 必须返回全新构造的初始值，绝不能 return state ——
+    // 首次构建时 state 尚未初始化，读取即抛 StateError（2026-10 启动崩溃根因）。
+    // 首次返回默认空状态；重建时恢复最近状态保持连续性。
+    final PlayerState initial = _lastState ?? const PlayerState();
+    _ready = true;
+    return initial;
   }
 
   static AppProcessingState _mapProcessing(ProcessingState s) => switch (s) {
