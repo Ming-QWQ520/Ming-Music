@@ -1,0 +1,170 @@
+/// 网易云评论 / 点赞 API（参考 Zephyr-Music api/netease/comment.ts）。
+///
+///  - /comment/new：新版评论（sortType 1=推荐 2=热度 3=时间，cursor 翻页）；
+///  - POST /comment：发送(t=1)/回复(t=2)/删除(t=0)，os=android 绕风控；
+///  - POST /comment/like：评论点赞（需登录）。
+library;
+
+import '../../../core/api/netease_api.dart';
+
+/// 评论条目
+class CommentItem {
+  const CommentItem({
+    required this.commentId,
+    required this.content,
+    required this.time,
+    required this.likedCount,
+    required this.userId,
+    required this.nickname,
+    required this.avatarUrl,
+    this.ipLocation = '',
+  });
+
+  final int commentId;
+  final String content;
+
+  /// 发表时间（毫秒时间戳）
+  final int time;
+  final int likedCount;
+  final int userId;
+  final String nickname;
+  final String avatarUrl;
+  final String ipLocation;
+
+  bool get isVipComment => false;
+
+  static CommentItem fromMap(Map<String, Object?> c) {
+    final Object? userRaw = c['user'];
+    final Map<String, Object?> user =
+        userRaw is Map<String, Object?> ? userRaw : const <String, Object?>{};
+    final Object? ipRaw = c['ipLocation'];
+    String ip = '';
+    if (ipRaw is Map<String, Object?>) {
+      ip = (ipRaw['location'] as String?) ?? '';
+    } else if (ipRaw is String) {
+      ip = ipRaw;
+    }
+    ip = ip.isEmpty
+        ? ((user['locationInfo'] is Map<String, Object?>
+                ? (user['locationInfo']! as Map<String, Object?>)['location']
+                : null) as String?) ??
+            ''
+        : ip;
+    return CommentItem(
+      commentId: (c['commentId'] as num?)?.toInt() ?? 0,
+      content: (c['content'] as String?) ?? '',
+      time: (c['time'] as num?)?.toInt() ?? 0,
+      likedCount: (c['likedCount'] as num?)?.toInt() ?? 0,
+      userId: (user['userId'] as num?)?.toInt() ?? 0,
+      nickname: (user['nickname'] as String?) ?? '未知用户',
+      avatarUrl: (user['avatarUrl'] as String?) ?? '',
+      ipLocation: ip,
+    );
+  }
+}
+
+/// 评论分页结果
+class CommentPage {
+  const CommentPage({
+    required this.comments,
+    required this.totalCount,
+    required this.hasMore,
+    this.cursor,
+  });
+
+  final List<CommentItem> comments;
+  final int totalCount;
+  final bool hasMore;
+  final int? cursor;
+}
+
+class CommentsRepository {
+  CommentsRepository(this._api);
+
+  final NeteaseApi _api;
+
+  /// 拉取歌曲评论（type=0 歌曲）
+  Future<CommentPage> fetchComments(
+    int songId, {
+    int sortType = 1,
+    int pageNo = 1,
+    int pageSize = 20,
+    int? cursor,
+  }) async {
+    final Map<String, String> params = <String, String>{
+      'id': '$songId',
+      'type': '0',
+      'sortType': '$sortType',
+      'pageNo': '$pageNo',
+      'pageSize': '$pageSize',
+    };
+    if (cursor != null && sortType == 3) params['cursor'] = '$cursor';
+    final Map<String, Object?> res = await _api.get(
+      '/comment/new',
+      params,
+      throwOnCode: false,
+    );
+    final Map<String, Object?> payload = apiPayload(res);
+    final Object? list = payload['comments'];
+    final List<CommentItem> comments = list is List<Object?>
+        ? list
+            .whereType<Map<String, Object?>>()
+            .map(CommentItem.fromMap)
+            .toList(growable: false)
+        : const <CommentItem>[];
+    return CommentPage(
+      comments: comments,
+      totalCount: (payload['totalCount'] as num?)?.toInt() ?? 0,
+      hasMore: payload['hasMore'] == true,
+      cursor: (payload['cursor'] as num?)?.toInt(),
+    );
+  }
+
+  /// 发送/回复/删除评论。返回 (code, message)
+  Future<(int, String)> action({
+    required int t,
+    required int songId,
+    String? content,
+    int? commentId,
+  }) async {
+    final Map<String, String> params = <String, String>{
+      't': '$t',
+      'type': '0',
+      'id': '$songId',
+      // 网易云评论接口风控：os=android 模拟移动端绕过「请切换至移动端」
+      'os': 'android',
+    };
+    if (content != null && content.isNotEmpty) params['content'] = content;
+    if (commentId != null) params['commentId'] = '$commentId';
+    final Map<String, Object?> res =
+        await _api.post('/comment', params, throwOnCode: false);
+    final Map<String, Object?> payload = apiPayload(res);
+    return (
+      (payload['code'] as num?)?.toInt() ?? 0,
+      (payload['message'] as String?) ?? (payload['msg'] as String?) ?? ''
+    );
+  }
+
+  /// 评论点赞 / 取消点赞（需登录）。返回 (code, message)
+  Future<(int, String)> like({
+    required int songId,
+    required int commentId,
+    required bool like,
+  }) async {
+    final Map<String, Object?> res = await _api.post(
+      '/comment/like',
+      <String, String>{
+        'id': '$songId',
+        'cid': '$commentId',
+        't': like ? '1' : '0',
+        'type': '0',
+      },
+      throwOnCode: false,
+    );
+    final Map<String, Object?> payload = apiPayload(res);
+    return (
+      (payload['code'] as num?)?.toInt() ?? 0,
+      (payload['message'] as String?) ?? (payload['msg'] as String?) ?? ''
+    );
+  }
+}

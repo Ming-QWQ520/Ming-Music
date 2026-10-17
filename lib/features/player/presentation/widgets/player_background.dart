@@ -17,6 +17,8 @@ import '../../../../core/widgets/cover_image.dart';
 import '../../../library/domain/track.dart';
 import '../../../settings/domain/settings_models.dart';
 import '../../../settings/providers/settings_providers.dart';
+import '../../domain/np_settings.dart';
+import '../../providers/np_settings_providers.dart';
 import '../../providers/player_providers.dart';
 
 class PlayerBackground extends ConsumerWidget {
@@ -27,14 +29,26 @@ class PlayerBackground extends ConsumerWidget {
     final BackgroundConfig config = ref.watch(backgroundProvider);
     final Track? track =
         ref.watch(playerProvider.select((PlayerState s) => s.currentTrack));
+    // 播放页自定义：模糊强度 / 变暗程度（仅对封面模糊与自定义图片背景生效）
+    final double bgBlur =
+        ref.watch(npSettingsProvider.select((NpPlayerSettings s) => s.bgBlur));
+    final double bgDim =
+        ref.watch(npSettingsProvider.select((NpPlayerSettings s) => s.bgDim));
 
     final Widget child = switch (config.type) {
-      BackgroundType.blurCover => _BlurCoverBackground(cover: track?.cover),
+      BackgroundType.blurCover => _BlurCoverBackground(
+          cover: track?.cover,
+          blurSigma: bgBlur.clamp(4, 40),
+          dim: bgDim / 100,
+        ),
       BackgroundType.gradient => _GradientBackground(
           preset: kGradientPresets[
               config.gradientIndex.clamp(0, kGradientPresets.length - 1)],
         ),
-      BackgroundType.image => _ImageBackground(path: config.imagePath),
+      BackgroundType.image => _ImageBackground(
+          path: config.imagePath,
+          dim: bgDim / 100,
+        ),
     };
 
     return RepaintBoundary(
@@ -65,33 +79,44 @@ class PlayerBackground extends ConsumerWidget {
 // ---------------------------------------------------------------- 模糊封面
 
 class _BlurCoverBackground extends StatelessWidget {
-  const _BlurCoverBackground({this.cover});
+  const _BlurCoverBackground({
+    this.cover,
+    this.blurSigma = 46,
+    this.dim = 0.42,
+  });
 
   final String? cover;
 
+  /// 模糊半径（播放页自定义滑杆 4 - 40）
+  final double blurSigma;
+
+  /// 变暗程度 0 - 1
+  final double dim;
+
   @override
   Widget build(BuildContext context) {
+    final double d = dim.clamp(0.0, 0.85);
     return Stack(
       fit: StackFit.expand,
       children: <Widget>[
         // 对源图做模糊（ImageFiltered），避免全屏 BackdropFilter 的 GPU 开销
         ImageFiltered(
-          imageFilter: ImageFilter.blur(sigmaX: 46, sigmaY: 46),
+          imageFilter: ImageFilter.blur(sigmaX: blurSigma, sigmaY: blurSigma),
           child: Transform.scale(
             scale: 1.35, // 放大避免模糊边缘露黑
             child: CoverImage(src: cover, size: 1024, radius: 0),
           ),
         ),
-        // 暗色纱罩保证前景可读性
+        // 暗色纱罩保证前景可读性（强度可调）
         DecoratedBox(
           decoration: BoxDecoration(
             gradient: LinearGradient(
               begin: Alignment.topCenter,
               end: Alignment.bottomCenter,
               colors: <Color>[
-                Colors.black.withValues(alpha: 0.42),
-                Colors.black.withValues(alpha: 0.30),
-                Colors.black.withValues(alpha: 0.58),
+                Colors.black.withValues(alpha: d),
+                Colors.black.withValues(alpha: d * 0.7),
+                Colors.black.withValues(alpha: (d * 1.35).clamp(0.0, 0.9)),
               ],
             ),
           ),
@@ -168,9 +193,12 @@ class _GlowBlob extends StatelessWidget {
 // ---------------------------------------------------------------- 本地图片
 
 class _ImageBackground extends StatelessWidget {
-  const _ImageBackground({this.path});
+  const _ImageBackground({this.path, this.dim = 0.45});
 
   final String? path;
+
+  /// 变暗程度 0 - 1
+  final double dim;
 
   @override
   Widget build(BuildContext context) {
@@ -182,6 +210,7 @@ class _ImageBackground extends StatelessWidget {
       return _GradientBackground(preset: kGradientPresets[0]);
     }
 
+    final double d = dim.clamp(0.0, 0.85);
     return Stack(
       fit: StackFit.expand,
       children: <Widget>[
@@ -197,9 +226,9 @@ class _ImageBackground extends StatelessWidget {
               begin: Alignment.topCenter,
               end: Alignment.bottomCenter,
               colors: <Color>[
-                Colors.black.withValues(alpha: 0.46),
-                Colors.black.withValues(alpha: 0.34),
-                Colors.black.withValues(alpha: 0.60),
+                Colors.black.withValues(alpha: d),
+                Colors.black.withValues(alpha: d * 0.75),
+                Colors.black.withValues(alpha: (d * 1.3).clamp(0.0, 0.9)),
               ],
             ),
           ),

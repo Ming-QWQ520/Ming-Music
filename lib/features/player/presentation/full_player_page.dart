@@ -1,27 +1,33 @@
-/// 全屏播放页（参考图3 网易云黑胶风格）：
+/// 全屏播放页（仿 Zephyr-Music 播放界面，支持高度自定义）：
 ///
-///  - 上半区：黑胶唱片（播放旋转/暂停停转）⇄ 逐字歌词页（点击黑胶切换）；
-///  - 下半区（固定）：歌名+VIP / 歌手 / 红心 → 进度条 → 五键控制栏 →
-///    底部音质徽章 + 歌词切换；
-///  - 手势：下滑收起播放页；左右滑动切歌（避开边缘 20px，避坑指南 4）；
-///  - 平板（>=600dp）：双列 = 左（黑胶 + 控制）/ 右（歌词）。
+///  - 显示模式（NpDisplayMode）：自适应（平板双列 / 手机可切换）/ 仅封面 / 仅歌词；
+///  - 歌词页交互：单击任意区域切换封面/歌词；双击歌词行 seek 到该行；
+///    切换视图时直接显示当前播放行（直显设置，无滑动动画）；
+///  - 顶栏：收起 / 队列名 / 评论入口 / 播放页自定义 / 喜欢（登录走网易云）；
+///  - hidePlayerControls：隐藏控制栏（仅保留进度条）；
+///  - 手势：下滑收起播放页；左右滑动切歌（避开边缘 20px，避坑指南 4）。
 library;
 
 import 'package:flutter/material.dart' hide RepeatMode;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/constants/app_constants.dart';
+import '../../auth/providers/auth_providers.dart';
+import '../../comments/presentation/comments_page.dart';
 import '../../library/domain/track.dart';
 import '../../library/providers/library_providers.dart';
 import '../../settings/domain/settings_models.dart' show AudioQuality;
 import '../../settings/providers/settings_providers.dart'
     show audioQualityProvider;
+import '../domain/np_settings.dart';
+import '../providers/np_settings_providers.dart';
 import '../providers/player_providers.dart';
+import 'np_settings_sheet.dart';
+import 'widgets/cover_art_view.dart';
 import 'widgets/karaoke_lyrics_view.dart';
 import 'widgets/player_background.dart';
 import 'widgets/progress_bar.dart';
 import 'widgets/queue_sheet.dart';
-import 'widgets/vinyl_disc.dart';
 
 /// 自定义转场路由：上滑进入、下滑退出，沉浸背景
 class FullPlayerRoute<T> extends PageRouteBuilder<T> {
@@ -60,7 +66,8 @@ class FullPlayerPage extends ConsumerStatefulWidget {
 }
 
 class _FullPlayerPageState extends ConsumerState<FullPlayerPage> {
-  bool _showLyrics = false;
+  /// 手机端封面/歌词切换：null = 跟随显示模式（both 默认封面）
+  bool? _paneOverride;
   bool _edgeBlocked = false;
   double _dragDy = 0;
 
@@ -98,14 +105,11 @@ class _FullPlayerPageState extends ConsumerState<FullPlayerPage> {
     }
   }
 
-  void _toggleLyricsPage() {
-    setState(() => _showLyrics = !_showLyrics);
-  }
-
   // ---------------------------------------------------------------- build
 
   @override
   Widget build(BuildContext context) {
+    final NpPlayerSettings cfg = ref.watch(npSettingsProvider);
     final bool isWide =
         MediaQuery.sizeOf(context).width >= AppConstants.wideBreakpoint;
 
@@ -119,6 +123,21 @@ class _FullPlayerPageState extends ConsumerState<FullPlayerPage> {
         ref.read(playerProvider.notifier).clearError();
       }
     });
+
+    final bool switchable;
+    final bool showLyrics;
+    switch (cfg.displayMode) {
+      case NpDisplayMode.both:
+        // 手机：单列可切换（默认封面）；平板：双列
+        switchable = !isWide;
+        showLyrics = _paneOverride ?? false;
+      case NpDisplayMode.cover:
+        switchable = false;
+        showLyrics = false;
+      case NpDisplayMode.lyrics:
+        switchable = false;
+        showLyrics = true;
+    }
 
     return Scaffold(
       backgroundColor: Colors.transparent,
@@ -134,10 +153,19 @@ class _FullPlayerPageState extends ConsumerState<FullPlayerPage> {
             const PlayerBackground(),
             SafeArea(
               child: isWide
-                  ? _TabletBody()
+                  ? _TabletBody(
+                      mode: cfg.displayMode,
+                      directShow: cfg.directShowLyrics,
+                    )
                   : _PhoneBody(
-                      showLyrics: _showLyrics,
-                      onToggleLyrics: _toggleLyricsPage,
+                      showLyrics: showLyrics,
+                      switchable: switchable,
+                      directShow: cfg.directShowLyrics,
+                      onToggleLyrics: switchable
+                          ? () => setState(() {
+                                _paneOverride = !showLyrics;
+                              })
+                          : null,
                     ),
             ),
           ],
@@ -152,14 +180,19 @@ class _FullPlayerPageState extends ConsumerState<FullPlayerPage> {
 class _PhoneBody extends ConsumerWidget {
   const _PhoneBody({
     required this.showLyrics,
+    required this.switchable,
+    required this.directShow,
     required this.onToggleLyrics,
   });
 
   final bool showLyrics;
-  final VoidCallback onToggleLyrics;
+  final bool switchable;
+  final bool directShow;
+  final VoidCallback? onToggleLyrics;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final NpPlayerSettings cfg = ref.watch(npSettingsProvider);
     final Track? track =
         ref.watch(playerProvider.select((PlayerState s) => s.currentTrack));
     final bool playing =
@@ -168,7 +201,7 @@ class _PhoneBody extends ConsumerWidget {
     return Column(
       children: <Widget>[
         const _TopBar(),
-        // 上半区：黑胶 ⇄ 歌词
+        // 上半区：封面 ⇄ 歌词
         Expanded(
           child: AnimatedSwitcher(
             duration: AppConstants.playerPageFlip,
@@ -177,95 +210,148 @@ class _PhoneBody extends ConsumerWidget {
             transitionBuilder: (Widget child, Animation<double> anim) =>
                 FadeTransition(opacity: anim, child: child),
             child: showLyrics
-                ? const SizedBox(
-                    key: ValueKey<String>('lyrics'),
+                ? SizedBox(
+                    key: const ValueKey<String>('lyrics'),
                     width: double.infinity,
-                    child: KaraokeLyricsView(),
+                    // 单击歌词区域切换视图；直显当前播放行
+                    child: KaraokeLyricsView(
+                      key: const ValueKey<String>('lyrics-view'),
+                      onToggleView: onToggleLyrics,
+                      directShow: directShow,
+                      lineExtent: _lyricExtent(cfg),
+                    ),
                   )
-                : Container(
-                    key: const ValueKey<String>('vinyl'),
-                    alignment: Alignment.center,
+                : SizedBox(
+                    key: const ValueKey<String>('cover'),
+                    width: double.infinity,
                     child: GestureDetector(
                       onTap: onToggleLyrics,
-                      child: VinylDisc(
-                        cover: track?.cover,
-                        playing: playing,
-                        size: _vinylSize(context),
+                      child: Center(
+                        child: CoverArtView(
+                          style: cfg.coverStyle,
+                          cover: track?.cover,
+                          playing: playing,
+                          size: _coverSize(context),
+                          scale: cfg.coverScale,
+                          shadow: cfg.coverShadow,
+                        ),
                       ),
                     ),
                   ),
           ),
         ),
-        _InfoSection(),
-        const _ProgressSection(),
-        const _ControlBar(),
-        _BottomStrip(
-          onToggleLyrics: onToggleLyrics,
-          showLyrics: showLyrics,
-        ),
+        if (!cfg.hidePlayerControls) ...<Widget>[
+          _InfoSection(),
+          const _ProgressSection(),
+          const _ControlBar(),
+          _BottomStrip(
+            onToggleLyrics: onToggleLyrics,
+            showLyrics: showLyrics,
+          ),
+        ] else
+          const _ProgressSection(),
       ],
     );
   }
 
-  double _vinylSize(BuildContext context) {
+  double _coverSize(BuildContext context) {
     final double h = MediaQuery.sizeOf(context).height;
     final double w = MediaQuery.sizeOf(context).width;
-    return (h * 0.42).clamp(200.0, w * 0.88);
+    return (h * (showLyrics ? 0.36 : 0.42)).clamp(200.0, w * 0.88);
+  }
+
+  double _lyricExtent(NpPlayerSettings cfg) {
+    // 行高随字号/行距微调：基础 58 + 超出默认部分的补偿
+    return (AppConstants.yrcLineExtent +
+            (cfg.lyricFontSize - 17) * 0.9 +
+            (cfg.lyricLineGap - 14) * 0.45)
+        .clamp(44.0, 96.0);
   }
 }
 
 // ---------------------------------------------------------------- 平板
 
 class _TabletBody extends ConsumerWidget {
-  const _TabletBody();
+  const _TabletBody({required this.mode, required this.directShow});
+
+  final NpDisplayMode mode;
+  final bool directShow;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final NpPlayerSettings cfg = ref.watch(npSettingsProvider);
     final Track? track =
         ref.watch(playerProvider.select((PlayerState s) => s.currentTrack));
     final bool playing =
         ref.watch(playerProvider.select((PlayerState s) => s.playing));
 
-    return Column(
+    final Widget coverColumn = Column(
       children: <Widget>[
-        const _TopBar(),
         Expanded(
-          child: Row(
-            children: <Widget>[
-              // 左：黑胶 + 信息 + 控制
-              Expanded(
-                flex: 5,
-                child: Column(
-                  children: <Widget>[
-                    Expanded(
-                      child: Center(
-                        child: VinylDisc(
-                          cover: track?.cover,
-                          playing: playing,
-                          size: 300,
-                        ),
-                      ),
-                    ),
-                    _InfoSection(),
-                    const _ProgressSection(),
-                    const _ControlBar(),
-                    const SizedBox(height: 12),
-                  ],
-                ),
-              ),
-              // 右：歌词
-              Expanded(
-                flex: 5,
-                child: Container(
-                  margin: const EdgeInsets.fromLTRB(8, 12, 8, 24),
-                  child: const KaraokeLyricsView(),
-                ),
-              ),
-            ],
+          child: Center(
+            child: CoverArtView(
+              style: cfg.coverStyle,
+              cover: track?.cover,
+              playing: playing,
+              size: 300,
+              scale: cfg.coverScale,
+              shadow: cfg.coverShadow,
+            ),
           ),
         ),
+        _InfoSection(),
+        const _ProgressSection(),
+        if (!cfg.hidePlayerControls) ...<Widget>[
+          const _ControlBar(),
+          const SizedBox(height: 12),
+        ],
       ],
     );
+
+    switch (mode) {
+      case NpDisplayMode.both:
+        return Column(
+          children: <Widget>[
+            const _TopBar(),
+            Expanded(
+              child: Row(
+                children: <Widget>[
+                  Expanded(flex: 5, child: coverColumn),
+                  Expanded(
+                    flex: 5,
+                    child: Container(
+                      margin: const EdgeInsets.fromLTRB(8, 12, 8, 24),
+                      child: KaraokeLyricsView(
+                        directShow: directShow,
+                        onToggleView: null,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        );
+      case NpDisplayMode.lyrics:
+        return Column(
+          children: <Widget>[
+            const _TopBar(),
+            Expanded(
+              child: KaraokeLyricsView(
+                directShow: directShow,
+                onToggleView: null,
+              ),
+            ),
+          ],
+        );
+      case NpDisplayMode.cover:
+        return Column(
+          children: <Widget>[
+            const _TopBar(),
+            Expanded(child: coverColumn),
+          ],
+        );
+    }
   }
 }
 
@@ -306,13 +392,46 @@ class _TopBar extends ConsumerWidget {
               ),
             ),
           ),
+          const _CommentButton(),
+          IconButton(
+            tooltip: '播放页自定义',
+            icon: Icon(
+              Icons.tune_rounded,
+              size: 22,
+              color: Colors.white.withValues(alpha: 0.85),
+            ),
+            onPressed: () => showNpSettingsSheet(context),
+          ),
           const _FavoriteButton(),
-          const SizedBox(width: 12),
+          const SizedBox(width: 4),
         ],
       ),
     );
   }
 }
+
+// ---------------------------------------------------------------- 评论入口
+
+class _CommentButton extends ConsumerWidget {
+  const _CommentButton();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final Track? track =
+        ref.watch(playerProvider.select((PlayerState s) => s.currentTrack));
+    return IconButton(
+      tooltip: '评论',
+      icon: Icon(
+        Icons.mode_comment_outlined,
+        size: 21,
+        color: Colors.white.withValues(alpha: 0.85),
+      ),
+      onPressed: track == null ? null : () => showCommentsPage(context, track),
+    );
+  }
+}
+
+// ---------------------------------------------------------------- 喜欢
 
 class _FavoriteButton extends ConsumerWidget {
   const _FavoriteButton();
@@ -321,11 +440,47 @@ class _FavoriteButton extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final Track? track =
         ref.watch(playerProvider.select((PlayerState s) => s.currentTrack));
-    final bool fav = track == null
-        ? false
-        : ref.watch(favoriteTracksProvider
-            .select((List<Track> l) => l.any((Track t) => t.id == track.id)));
+    final AuthState auth = ref.watch(authProvider);
 
+    if (track == null) {
+      return IconButton(
+        onPressed: null,
+        icon: Icon(Icons.favorite_border_rounded,
+            color: Colors.white.withValues(alpha: 0.4), size: 24),
+      );
+    }
+
+    if (auth.loggedIn && track.neteaseId != null) {
+      // 网易云喜欢
+      final bool fav = auth.likedIds.contains(track.neteaseId);
+      return IconButton(
+        tooltip: fav ? '取消喜欢' : '喜欢',
+        icon: AnimatedSwitcher(
+          duration: const Duration(milliseconds: 200),
+          child: Icon(
+            fav ? Icons.favorite_rounded : Icons.favorite_border_rounded,
+            key: ValueKey<bool>(fav),
+            color: fav
+                ? AppConstants.brandColor
+                : Colors.white.withValues(alpha: 0.85),
+            size: 24,
+          ),
+        ),
+        onPressed: () async {
+          final String? error = await ref
+              .read(authProvider.notifier)
+              .toggleLikeSong(track.neteaseId!);
+          if (error != null && context.mounted) {
+            ScaffoldMessenger.of(context)
+                .showSnackBar(SnackBar(content: Text(error)));
+          }
+        },
+      );
+    }
+
+    // 本地收藏（游客）
+    final bool fav = ref.watch(favoriteTracksProvider
+        .select((List<Track> l) => l.any((Track t) => t.id == track.id)));
     return IconButton(
       tooltip: fav ? '取消收藏' : '收藏',
       icon: AnimatedSwitcher(
@@ -339,9 +494,7 @@ class _FavoriteButton extends ConsumerWidget {
           size: 24,
         ),
       ),
-      onPressed: track == null
-          ? null
-          : () => ref.read(favoriteTracksProvider.notifier).toggle(track),
+      onPressed: () => ref.read(favoriteTracksProvider.notifier).toggle(track),
     );
   }
 }
@@ -553,7 +706,7 @@ class _BottomStrip extends ConsumerWidget {
     required this.showLyrics,
   });
 
-  final VoidCallback onToggleLyrics;
+  final VoidCallback? onToggleLyrics;
   final bool showLyrics;
 
   @override
@@ -572,17 +725,18 @@ class _BottomStrip extends ConsumerWidget {
             ),
           ),
           const Spacer(),
-          IconButton(
-            tooltip: showLyrics ? '黑胶视图' : '逐字歌词',
-            onPressed: onToggleLyrics,
-            icon: Icon(
-              Icons.lyrics_rounded,
-              size: 22,
-              color: showLyrics
-                  ? AppConstants.brandColor
-                  : Colors.white.withValues(alpha: 0.7),
+          if (onToggleLyrics != null)
+            IconButton(
+              tooltip: showLyrics ? '封面视图' : '逐字歌词',
+              onPressed: onToggleLyrics,
+              icon: Icon(
+                Icons.lyrics_rounded,
+                size: 22,
+                color: showLyrics
+                    ? AppConstants.brandColor
+                    : Colors.white.withValues(alpha: 0.7),
+              ),
             ),
-          ),
         ],
       ),
     );

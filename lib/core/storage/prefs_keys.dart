@@ -12,4 +12,7 @@ class PrefsKeys {
   static const String customTracks = 'library.customTracks';
   static const String anonCookie = 'netease.anonCookie';
   static const String audioQuality = 'netease.audioQuality';
+  static const String userCookie = 'netease.userCookie';
+  static const String likedComments = 'netease.likedComments';
+  static const String npSettings = 'np.settings';
 }

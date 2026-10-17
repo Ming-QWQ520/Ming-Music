@@ -1,6 +1,6 @@
 /// 主页面架构：手机/平板双端自适应导航 + 悬浮 Mini 播放条。
 ///
-/// 三个 Tab：发现（网易云首页风格）/ 我的（收藏与自定义曲目）/ 设置。
+/// 两个 Tab：发现（网易云首页风格）/ 我的（仿网易云，集成登录与设置）。
 ///
 /// 布局规范：
 ///  - 手机（宽度 < 600dp）：底部 NavigationBar，Mini 播放条悬浮于其上方；
@@ -15,7 +15,6 @@ import '../../../core/constants/app_constants.dart';
 import '../../discover/presentation/discover_page.dart';
 import '../../library/presentation/my_music_page.dart';
 import '../../player/presentation/widgets/mini_player.dart';
-import '../../settings/presentation/settings_page.dart';
 
 /// 当前 Tab
 final NotifierProvider<TabNotifier, int> selectedTabProvider =
@@ -34,7 +33,6 @@ class MainScaffold extends ConsumerWidget {
   static const List<Widget> _pages = <Widget>[
     DiscoverPage(),
     MyMusicPage(),
-    SettingsPage(),
   ];
 
   @override
@@ -107,11 +105,6 @@ class MainScaffold extends ConsumerWidget {
                 selectedIcon: Icon(Icons.person_rounded),
                 label: '我的',
               ),
-              NavigationDestination(
-                icon: Icon(Icons.settings_outlined),
-                selectedIcon: Icon(Icons.settings_rounded),
-                label: '设置',
-              ),
             ],
           ),
         ],
@@ -149,11 +142,6 @@ class _RailNav extends StatelessWidget {
           icon: Icon(Icons.person_outline_rounded),
           selectedIcon: Icon(Icons.person_rounded),
           label: Text('我的'),
-        ),
-        NavigationRailDestination(
-          icon: Icon(Icons.settings_outlined),
-          selectedIcon: Icon(Icons.settings_rounded),
-          label: Text('设置'),
         ),
       ],
     );
