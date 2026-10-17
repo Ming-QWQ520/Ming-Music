@@ -1,0 +1,22 @@
+# MingMusic 静态分析配置：目标 flutter analyze 零报错
+#
+# 严格类型检查（dart-run-static-analysis 官方 skill 建议）：
+#   strict-casts / strict-inference / strict-raw-types
+#   防止隐式降型、动态推断与裸类型导致的运行时错误
+include: package:flutter_lints/flutter.yaml
+
+analyzer:
+  exclude:
+    - build/**
+    - android/**
+  language:
+    strict-casts: true
+    strict-inference: true
+    strict-raw-types: true
+
+linter:
+  rules:
+    prefer_single_quotes: true
+    sort_child_properties_last: true
+    always_declare_return_types: true
+    prefer_final_locals: true
