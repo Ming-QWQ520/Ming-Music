@@ -18,15 +18,17 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:just_audio/just_audio.dart'
     show LoopMode, ProcessingState, SequenceState;
 
+import '../../auth/providers/auth_providers.dart' show authProvider;
 import '../../discover/data/netease_providers.dart';
 import '../../discover/data/netease_repository.dart';
 import '../../library/domain/track.dart';
 import '../../../core/api/netease_models.dart' show SongUrlInfo;
-import '../../settings/domain/settings_models.dart' show AudioQualityX;
+import '../../settings/domain/settings_models.dart' show AudioQuality, AudioQualityX;
 import '../../settings/providers/settings_providers.dart'
-    show audioQualityProvider;
+    show audioQualityProvider, sharedPreferencesProvider;
 import '../domain/player_state.dart';
 import '../services/ming_audio_handler.dart';
+import '../services/queue_persistence.dart';
 
 /// 导出状态模型：UI 层只需 import player_providers 即可获得
 /// PlayerState / AppProcessingState / RepeatMode 类型。
@@ -48,6 +50,50 @@ final StreamProvider<Duration> bufferedPositionProvider =
     StreamProvider<Duration>(
   (Ref ref) => ref.watch(audioHandlerProvider).player.bufferedPositionStream,
 );
+
+/// 队列持久化 + 历史快照 + 播放统计服务
+final Provider<QueuePersistence> queuePersistenceProvider =
+    Provider<QueuePersistence>(
+  (Ref ref) => QueuePersistence(ref.watch(sharedPreferencesProvider)),
+);
+
+/// 队列历史快照（最多 3 个，最新在前；启动时从磁盘恢复）
+final NotifierProvider<QueueHistoryNotifier, List<QueueSnapshot>>
+    queueHistoryProvider =
+    NotifierProvider<QueueHistoryNotifier, List<QueueSnapshot>>(
+        QueueHistoryNotifier.new);
+
+class QueueHistoryNotifier extends Notifier<List<QueueSnapshot>> {
+  @override
+  List<QueueSnapshot> build() {
+    final QueuePersistence persistence = ref.watch(queuePersistenceProvider);
+    return persistence.loadHistory();
+  }
+
+  Future<void> push(String title, List<Track> tracks) async {
+    state = await ref
+        .read(queuePersistenceProvider)
+        .pushHistory(title, tracks);
+  }
+
+  Future<void> removeAt(int index) async {
+    state = await ref.read(queuePersistenceProvider).removeAt(index);
+  }
+}
+
+/// 本机播放次数（neteaseId → count；增量写入后整体替换触发刷新）
+final NotifierProvider<PlayStatsNotifier, Map<int, int>> playStatsProvider =
+    NotifierProvider<PlayStatsNotifier, Map<int, int>>(PlayStatsNotifier.new);
+
+class PlayStatsNotifier extends Notifier<Map<int, int>> {
+  @override
+  Map<int, int> build() => ref.watch(queuePersistenceProvider).loadPlayStats();
+
+  Future<void> increment(int neteaseId) async {
+    await ref.read(queuePersistenceProvider).incrementPlay(neteaseId);
+    state = ref.read(queuePersistenceProvider).loadPlayStats();
+  }
+}
 
 /// 当前曲目时长流
 final StreamProvider<Duration> durationProvider = StreamProvider<Duration>(
@@ -77,6 +123,13 @@ class PlayerNotifier extends Notifier<PlayerState> {
   StreamSubscription<int>? _indexSub;
   StreamSubscription<AppProcessingState>? _processingSub;
   final Random _random = Random();
+
+  /// 队列/下标变更落盘节流定时器
+  Timer? _persistDebounce;
+
+  /// 当前曲目播放计次/听歌打卡定时器
+  Timer? _playStatTimer;
+  int? _statSongId;
 
   /// 首次 build() 返回前 Riverpod 禁止读写 this.state（抛
   /// "Tried to read the state of an uninitialized provider"）。
@@ -125,6 +178,9 @@ class PlayerNotifier extends Notifier<PlayerState> {
       _playingSub?.cancel();
       _indexSub?.cancel();
       _processingSub?.cancel();
+      _persistDebounce?.cancel();
+      _playStatTimer?.cancel();
+      _scrobbleTimer?.cancel();
     });
 
     // 通知栏的上一首/下一首交给本 Notifier，保证洗牌/循环逻辑一致
@@ -136,6 +192,66 @@ class PlayerNotifier extends Notifier<PlayerState> {
     final PlayerState initial = _lastState ?? const PlayerState();
     _ready = true;
     return initial;
+  }
+
+  // ------------------------------------------------------------ 持久化
+
+  /// 队列变更落盘（500ms 节流，切歌/增删共用）
+  void _schedulePersist() {
+    _persistDebounce?.cancel();
+    _persistDebounce = Timer(const Duration(milliseconds: 500), () {
+      final PlayerState s = state;
+      if (!s.loaded) return;
+      ref
+          .read(queuePersistenceProvider)
+          .saveQueueState(s.queue, s.index, s.queueTitle);
+    });
+  }
+
+  /// 启动恢复：重建队列（不自动播放；曲目直链过期时点击播放自动重解析）
+  Future<void> restoreQueue() async {
+    final ({List<Track> queue, int index, String? queueTitle})? saved =
+        ref.read(queuePersistenceProvider).loadQueueState();
+    if (saved == null || state.loaded) return;
+    state = state.copyWith(
+      queue: saved.queue,
+      index: saved.index,
+      queueTitle: saved.queueTitle,
+      loaded: true,
+      processing: AppProcessingState.idle,
+    );
+  }
+
+  // ------------------------------------------------------------ 播放统计
+
+  /// 曲目开播后计时：10s 计次（本机总听次数），30s 听歌打卡（登录后）
+  void _schedulePlayStat(Track track) {
+    final int? songId = track.neteaseId;
+    _playStatTimer?.cancel();
+    _statSongId = songId;
+    if (songId == null) return;
+    _playStatTimer = Timer(const Duration(seconds: 10), () {
+      if (_statSongId != songId) return;
+      ref.read(playStatsProvider.notifier).increment(songId);
+      _scrobbleAfter30s(songId);
+    });
+  }
+
+  Timer? _scrobbleTimer;
+
+  Future<void> _scrobbleAfter30s(int songId) async {
+    _scrobbleTimer?.cancel();
+    _scrobbleTimer = Timer(const Duration(seconds: 20), () async {
+      final bool loggedIn = ref.read(authProvider).loggedIn;
+      if (!loggedIn) return;
+      try {
+        await ref
+            .read(neteaseRepositoryProvider)
+            .scrobble(songId, 0, 30);
+      } catch (_) {
+        // 打卡失败静默：不影响播放
+      }
+    });
   }
 
   static AppProcessingState _mapProcessing(ProcessingState s) => switch (s) {
@@ -179,6 +295,12 @@ class PlayerNotifier extends Notifier<PlayerState> {
       if (startIdx < 0) {
         startIdx = safeStart.clamp(0, resolved.length - 1);
       }
+      // 装载新队列前：旧队列入历史快照（去重，最多 3 个）
+      if (state.loaded && state.hasQueue) {
+        unawaited(ref
+            .read(queueHistoryProvider.notifier)
+            .push(state.queueTitle ?? '播放列表', state.queue));
+      }
       state = state.copyWith(
         queue: resolved,
         index: startIdx,
@@ -187,11 +309,110 @@ class PlayerNotifier extends Notifier<PlayerState> {
       );
       await _handler.loadQueue(resolved, initialIndex: startIdx);
       await _handler.play();
+      _schedulePlayStat(resolved[startIdx]);
+      _schedulePersist();
     } catch (e) {
       state = state.copyWith(
         processing: AppProcessingState.idle,
         error: '加载播放列表失败：$e',
       );
+    }
+  }
+
+  /// 切换音质：全队列按新音质重新解析直链，保留当前进度续播。
+  /// 返回 null 表示成功，否则为错误信息。
+  Future<String?> switchQuality(AudioQuality quality) async {
+    if (!state.hasQueue) return '当前没有播放队列';
+    final AudioQuality current = ref.read(audioQualityProvider);
+    if (quality == current) return null;
+
+    final Duration pos = _handler.player.position;
+    final bool wasPlaying = state.playing;
+    final List<Track> queue = state.queue;
+    final int index = state.index.clamp(0, queue.length - 1);
+
+    // 音质变化必须绕过直链缓存重新解析
+    _urlCache.clear();
+    state = state.copyWith(processing: AppProcessingState.loading);
+    try {
+      final NeteaseRepository repo = ref.read(neteaseRepositoryProvider);
+      final List<int> ids = <int>[
+        for (final Track t in queue)
+          if (t.neteaseId != null) t.neteaseId!,
+      ];
+      final Map<int, SongUrlInfo> urlById = <int, SongUrlInfo>{};
+      if (ids.isNotEmpty) {
+        for (final SongUrlInfo u in await repo.songUrls(ids,
+            level: quality.apiValue)) {
+          urlById[u.id] = u;
+        }
+      }
+      final List<Track> rebuilt = <Track>[
+        for (final Track t in queue)
+          if (t.neteaseId == null)
+            t
+          else if (urlById[t.neteaseId!]?.playable ?? false)
+            t.copyWith(source: urlById[t.neteaseId!]!.url)
+          else
+            t, // 新音质拿不到链接（如未登录无损）：保留原曲目避免丢队列
+      ];
+      // 拿到新直链的曲目进缓存
+      urlById.forEach((int id, SongUrlInfo u) => _urlCache[id] = u);
+
+      int newIndex = index;
+      final Track target = queue[index];
+      final int found = rebuilt.indexWhere((Track t) => t.id == target.id);
+      if (found >= 0) newIndex = found;
+
+      ref.read(audioQualityProvider.notifier).set(quality);
+      state = state.copyWith(
+        queue: rebuilt,
+        index: newIndex,
+        processing: AppProcessingState.buffering,
+      );
+      await _handler.loadQueue(rebuilt, initialIndex: newIndex);
+      // 保留进度续播
+      if (pos > Duration.zero) await _handler.seek(pos);
+      if (wasPlaying) {
+        await _handler.play();
+      }
+      _schedulePersist();
+      return null;
+    } catch (e) {
+      state = state.copyWith(
+        processing: AppProcessingState.idle,
+        error: '切换音质失败：$e',
+      );
+      return '$e';
+    }
+  }
+
+  /// 相似歌曲插播：解析后插入当前曲目之后并立即切换播放。
+  /// 返回 null 表示成功，否则为错误信息。
+  Future<String?> playSimilarNext(Track track) async {
+    if (!state.hasQueue) return '当前没有播放队列';
+    try {
+      final List<Track> resolved = await resolveTracks(<Track>[track]);
+      if (resolved.isEmpty) return '该歌曲暂不可播放（VIP 或版权受限）';
+      final Track target = resolved.first;
+      final List<Track> q = List<Track>.of(state.queue);
+      // 去重：队列已存在则先移除（同步校正下标）
+      final int existing = q.indexWhere((Track t) => t.id == target.id);
+      int index = state.index;
+      if (existing >= 0) {
+        q.removeAt(existing);
+        if (existing < index) index--;
+      }
+      final int at = (index + 1).clamp(0, q.length);
+      q.insert(at, target);
+      state = state.copyWith(queue: q, index: index);
+      await _handler.loadQueue(q, initialIndex: at);
+      await _handler.play();
+      _schedulePlayStat(target);
+      _schedulePersist();
+      return null;
+    } catch (e) {
+      return '插播失败：$e';
     }
   }
 
@@ -287,7 +508,9 @@ class PlayerNotifier extends Notifier<PlayerState> {
     if (wasCurrent) {
       await _handler.loadQueue(next, initialIndex: nextIndex);
       await _handler.play();
+      _schedulePlayStat(next[nextIndex]);
     }
+    _schedulePersist();
   }
 
   /// 清空队列（播放列表弹窗垃圾桶）
@@ -301,6 +524,7 @@ class PlayerNotifier extends Notifier<PlayerState> {
       clearQueueTitle: true,
       processing: AppProcessingState.idle,
     );
+    await ref.read(queuePersistenceProvider).clearQueueState();
   }
 
   Future<void> playPause() async {
@@ -357,6 +581,8 @@ class PlayerNotifier extends Notifier<PlayerState> {
     if (!state.playing) {
       await _handler.play();
     }
+    _schedulePlayStat(state.queue[safe]);
+    _schedulePersist();
   }
 
   Future<void> seek(Duration position) => _handler.seek(position);

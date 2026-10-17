@@ -1,4 +1,4 @@
-/// 歌单 / 排行榜详情页（参考图6）：大图头部 + 播放全部 + 序号歌曲列表。
+/// 歌单 / 排行榜详情页：纯文字头部（无封面）+ 播放全部 + 序号歌曲列表。
 library;
 
 import 'package:flutter/material.dart';
@@ -6,7 +6,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/api/netease_models.dart';
 import '../../../core/constants/app_constants.dart';
-import '../../../core/widgets/cover_image.dart';
 import '../data/netease_providers.dart';
 import '../../library/domain/track.dart';
 import '../../player/providers/player_providers.dart';
@@ -105,45 +104,17 @@ class _DetailBody extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final String? cover =
-        meta?.coverUrl ?? (tracks.isEmpty ? null : tracks.first.coverUrl);
-
+    // 需求：歌单详情页不显示歌单封面 —— 头部为纯文字信息
     return CustomScrollView(
       slivers: <Widget>[
         SliverAppBar(
           pinned: true,
-          expandedHeight: 108,
           backgroundColor: AppConstants.darkScaffold,
           title: Text(
             title,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w600),
-          ),
-          flexibleSpace: FlexibleSpaceBar(
-            background: Stack(
-              fit: StackFit.expand,
-              children: <Widget>[
-                if (cover != null)
-                  Image.network(
-                    cover,
-                    fit: BoxFit.cover,
-                    errorBuilder: (_, __, ___) => const SizedBox.shrink(),
-                  ),
-                DecoratedBox(
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                      colors: <Color>[
-                        Colors.black.withValues(alpha: 0.25),
-                        Colors.black.withValues(alpha: 0.75),
-                      ],
-                    ),
-                  ),
-                ),
-              ],
-            ),
           ),
         ),
         SliverToBoxAdapter(
@@ -219,13 +190,7 @@ class _HeaderCard extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: <Widget>[
-          CoverImage(
-            src: meta?.coverUrl,
-            size: 86,
-            radius: 12,
-            coverSize: CoverSize.large,
-          ),
-          const SizedBox(width: 14),
+          // 无封面头部：名称 + 统计信息（需求）
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,

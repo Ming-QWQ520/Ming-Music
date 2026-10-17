@@ -575,32 +575,37 @@ class _PlaylistRowInner extends StatelessWidget {
               ],
             ),
           ),
-          const SizedBox(height: 10),
-          SizedBox(
-            height: 132,
-            child: ListView.separated(
-              scrollDirection: Axis.horizontal,
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              itemCount: playlists!.length,
-              separatorBuilder: (_, __) => const SizedBox(width: 12),
-              itemBuilder: (BuildContext ctx, int i) {
-                final NeteaseUserPlaylist pl = playlists![i];
-                return _PlaylistCard(
-                  playlist: pl,
-                  onTap: () => Navigator.of(context).push<void>(
-                    MaterialPageRoute<void>(
-                      builder: (BuildContext _) => PlaylistDetailPage.playlist(
-                        meta: PlaylistMeta(
-                          id: pl.id,
-                          name: pl.name,
-                          coverUrl: pl.coverUrl,
-                          trackCount: pl.trackCount,
+          const SizedBox(height: 6),
+          // 仿网易云：无封面文字列表行（需求：我的页不显示歌单封面）
+          Container(
+            margin: const EdgeInsets.symmetric(horizontal: 16),
+            decoration: BoxDecoration(
+              color: theme.colorScheme.surfaceContainerHighest
+                  .withValues(alpha: 0.5),
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: Column(
+              children: <Widget>[
+                for (int i = 0; i < playlists!.length; i++)
+                  _PlaylistRowTile(
+                    playlist: playlists![i],
+                    isLast: i == playlists!.length - 1,
+                    isFirst: i == 0,
+                    onTap: () => Navigator.of(context).push<void>(
+                      MaterialPageRoute<void>(
+                        builder: (BuildContext _) =>
+                            PlaylistDetailPage.playlist(
+                          meta: PlaylistMeta(
+                            id: playlists![i].id,
+                            name: playlists![i].name,
+                            coverUrl: playlists![i].coverUrl,
+                            trackCount: playlists![i].trackCount,
+                          ),
                         ),
                       ),
                     ),
                   ),
-                );
-              },
+              ],
             ),
           ),
         ],
@@ -609,36 +614,59 @@ class _PlaylistRowInner extends StatelessWidget {
   }
 }
 
-class _PlaylistCard extends StatelessWidget {
-  const _PlaylistCard({required this.playlist, required this.onTap});
+class _PlaylistRowTile extends StatelessWidget {
+  const _PlaylistRowTile({
+    required this.playlist,
+    required this.onTap,
+    this.isLast = false,
+    this.isFirst = false,
+  });
 
   final NeteaseUserPlaylist playlist;
   final VoidCallback onTap;
+  final bool isLast;
+  final bool isFirst;
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
+    final ThemeData theme = Theme.of(context);
+    // 网易云样式：首个歌单为「我喜欢的音乐」红心图标，其余为列表图标
+    final Widget row = ListTile(
+      dense: true,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 14),
+      leading: Icon(
+        isFirst ? Icons.favorite_rounded : Icons.queue_music_rounded,
+        size: 20,
+        color: isFirst
+            ? AppConstants.brandColor
+            : theme.colorScheme.onSurfaceVariant,
+      ),
+      title: Text(
+        playlist.name,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: const TextStyle(fontSize: 14.5),
+      ),
+      subtitle: Text(
+        '${playlist.trackCount}首',
+        style: TextStyle(
+            fontSize: 11, color: theme.colorScheme.onSurfaceVariant),
+      ),
+      trailing: Icon(Icons.chevron_right_rounded,
+          size: 18, color: theme.colorScheme.onSurfaceVariant),
       onTap: onTap,
-      child: SizedBox(
-        width: 92,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: <Widget>[
-            SizedBox(
-              width: 92,
-              height: 92,
-              child: CoverImage(src: playlist.coverUrl, size: 92, radius: 12),
-            ),
-            const SizedBox(height: 6),
-            Text(
-              playlist.name,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 11.5, height: 1.3),
-            ),
-          ],
+    );
+    if (isLast) return row;
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        border: Border(
+          bottom: BorderSide(
+            color: theme.dividerColor.withValues(alpha: 0.3),
+            width: 0.6,
+          ),
         ),
       ),
+      child: row,
     );
   }
 }

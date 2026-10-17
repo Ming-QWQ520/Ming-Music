@@ -14,13 +14,14 @@ import 'package:flutter/material.dart' hide RepeatMode;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/constants/app_constants.dart';
-import '../../auth/providers/auth_providers.dart';
 import '../../comments/presentation/comments_page.dart';
 import '../../comments/providers/comments_providers.dart'
     show songCommentCountProvider;
+import '../../discover/presentation/mv_player_page.dart';
+import '../../discover/presentation/song_wiki_page.dart';
 import '../../library/domain/track.dart';
-import '../../library/providers/library_providers.dart';
-import '../../settings/domain/settings_models.dart' show AudioQuality;
+import '../../settings/domain/settings_models.dart'
+    show AudioQuality, AudioQualityX;
 import '../../settings/providers/settings_providers.dart'
     show audioQualityProvider;
 import '../domain/np_settings.dart';
@@ -29,9 +30,11 @@ import '../providers/player_providers.dart';
 import 'np_settings_sheet.dart';
 import 'widgets/cover_art_view.dart';
 import 'widgets/karaoke_lyrics_view.dart';
+import 'widgets/media_output_sheet.dart';
 import 'widgets/player_background.dart';
 import 'widgets/progress_bar.dart';
 import 'widgets/queue_sheet.dart';
+import 'widgets/similar_songs_sheet.dart';
 
 /// 自定义转场路由：上滑进入、下滑退出，沉浸背景
 class FullPlayerRoute<T> extends PageRouteBuilder<T> {
@@ -215,7 +218,6 @@ class _PhoneBody extends ConsumerWidget {
                     child: KaraokeLyricsView(
                       key: const ValueKey<String>('lyrics-view'),
                       onToggleView: onToggleLyrics,
-                      lineExtent: _lyricExtent(cfg),
                     ),
                   )
                 : SizedBox(
@@ -241,10 +243,7 @@ class _PhoneBody extends ConsumerWidget {
           _InfoSection(),
           const _ProgressSection(),
           const _ControlBar(),
-          _BottomStrip(
-            onToggleLyrics: onToggleLyrics,
-            showLyrics: showLyrics,
-          ),
+          const _BottomStrip(),
         ] else
           const _ProgressSection(),
       ],
@@ -255,14 +254,6 @@ class _PhoneBody extends ConsumerWidget {
     final double h = MediaQuery.sizeOf(context).height;
     final double w = MediaQuery.sizeOf(context).width;
     return (h * (showLyrics ? 0.36 : 0.42)).clamp(200.0, w * 0.88);
-  }
-
-  double _lyricExtent(NpPlayerSettings cfg) {
-    // 行高随字号/行距微调：基础 58 + 超出默认部分的补偿
-    return (AppConstants.yrcLineExtent +
-            (cfg.lyricFontSize - 17) * 0.9 +
-            (cfg.lyricLineGap - 14) * 0.45)
-        .clamp(44.0, 96.0);
   }
 }
 
@@ -398,8 +389,7 @@ class _TopBar extends ConsumerWidget {
             ),
             onPressed: () => showNpSettingsSheet(context),
           ),
-          const _FavoriteButton(),
-          const SizedBox(width: 4),
+          const SizedBox(width: 10),
         ],
       ),
     );
@@ -423,74 +413,6 @@ class _CommentButton extends ConsumerWidget {
         color: Colors.white.withValues(alpha: 0.85),
       ),
       onPressed: track == null ? null : () => showCommentsPage(context, track),
-    );
-  }
-}
-
-// ---------------------------------------------------------------- 喜欢
-
-class _FavoriteButton extends ConsumerWidget {
-  const _FavoriteButton();
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final Track? track =
-        ref.watch(playerProvider.select((PlayerState s) => s.currentTrack));
-    final AuthState auth = ref.watch(authProvider);
-
-    if (track == null) {
-      return IconButton(
-        onPressed: null,
-        icon: Icon(Icons.favorite_border_rounded,
-            color: Colors.white.withValues(alpha: 0.4), size: 24),
-      );
-    }
-
-    if (auth.loggedIn && track.neteaseId != null) {
-      // 网易云喜欢
-      final bool fav = auth.likedIds.contains(track.neteaseId);
-      return IconButton(
-        tooltip: fav ? '取消喜欢' : '喜欢',
-        icon: AnimatedSwitcher(
-          duration: const Duration(milliseconds: 200),
-          child: Icon(
-            fav ? Icons.favorite_rounded : Icons.favorite_border_rounded,
-            key: ValueKey<bool>(fav),
-            color: fav
-                ? AppConstants.brandColor
-                : Colors.white.withValues(alpha: 0.85),
-            size: 24,
-          ),
-        ),
-        onPressed: () async {
-          final String? error = await ref
-              .read(authProvider.notifier)
-              .toggleLikeSong(track.neteaseId!);
-          if (error != null && context.mounted) {
-            ScaffoldMessenger.of(context)
-                .showSnackBar(SnackBar(content: Text(error)));
-          }
-        },
-      );
-    }
-
-    // 本地收藏（游客）
-    final bool fav = ref.watch(favoriteTracksProvider
-        .select((List<Track> l) => l.any((Track t) => t.id == track.id)));
-    return IconButton(
-      tooltip: fav ? '取消收藏' : '收藏',
-      icon: AnimatedSwitcher(
-        duration: const Duration(milliseconds: 200),
-        child: Icon(
-          fav ? Icons.favorite_rounded : Icons.favorite_border_rounded,
-          key: ValueKey<bool>(fav),
-          color: fav
-              ? AppConstants.brandColor
-              : Colors.white.withValues(alpha: 0.85),
-          size: 24,
-        ),
-      ),
-      onPressed: () => ref.read(favoriteTracksProvider.notifier).toggle(track),
     );
   }
 }
@@ -544,6 +466,11 @@ class _InfoSection extends ConsumerWidget {
                     ),
                   ),
                 ),
+              ],
+              // MV 闭环入口：歌曲带 MV 时展示胶囊，点击进入 MV 播放页
+              if (track?.mvId != null) ...<Widget>[
+                const SizedBox(width: 8),
+                _MvPill(mvId: track!.mvId!, title: track.title),
               ],
             ],
           ),
@@ -620,6 +547,47 @@ class _CountsRow extends ConsumerWidget {
   }
 }
 
+// ---------------------------------------------------------------- MV 入口
+
+/// MV 胶囊按钮（歌曲详情 mv 字段非零时展示，闭环：/mv/url + /mv/detail 播放页）
+class _MvPill extends StatelessWidget {
+  const _MvPill({required this.mvId, required this.title});
+
+  final int mvId;
+  final String title;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: () => openMvPlayer(context, mvId: mvId, fallbackTitle: title),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2.5),
+        decoration: BoxDecoration(
+          border: Border.all(
+              color: Colors.white.withValues(alpha: 0.45), width: 1),
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            Icon(Icons.play_circle_outline_rounded,
+                size: 13, color: Colors.white.withValues(alpha: 0.85)),
+            const SizedBox(width: 3),
+            Text(
+              'MV',
+              style: TextStyle(
+                color: Colors.white.withValues(alpha: 0.85),
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 // ---------------------------------------------------------------- 进度
 
 class _ProgressSection extends ConsumerWidget {
@@ -627,12 +595,36 @@ class _ProgressSection extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final AudioQuality quality = ref.watch(audioQualityProvider);
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 2),
       child: PlayerProgressBar(
-        // 仿网易云：进度行中央显示音质标签
-        centerLabel: Text(
+        // 仿网易云：进度行中央为音质标签（可点击弹音质选择）
+        centerLabel: const _QualityButton(),
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------- 音质切换
+
+/// 音质标签按钮：点击弹出音质选择，切换后全队列重解析并保留进度续播
+class _QualityButton extends ConsumerWidget {
+  const _QualityButton();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final AudioQuality quality = ref.watch(audioQualityProvider);
+    return GestureDetector(
+      onTap: () => _showQualitySheet(context, ref, quality),
+      behavior: HitTestBehavior.opaque,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(
+              color: Colors.white.withValues(alpha: 0.25), width: 1),
+        ),
+        child: Text(
           switch (quality) {
             AudioQuality.standard => '标准音质',
             AudioQuality.higher => '较高音质',
@@ -643,6 +635,95 @@ class _ProgressSection extends ConsumerWidget {
             color: Colors.white.withValues(alpha: 0.55),
             fontSize: 11.5,
           ),
+        ),
+      ),
+    );
+  }
+
+  void _showQualitySheet(
+    BuildContext context,
+    WidgetRef ref,
+    AudioQuality current,
+  ) {
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (BuildContext ctx) => _QualitySheet(current: current),
+    );
+  }
+}
+
+class _QualitySheet extends ConsumerStatefulWidget {
+  const _QualitySheet({required this.current});
+
+  final AudioQuality current;
+
+  @override
+  ConsumerState<_QualitySheet> createState() => _QualitySheetState();
+}
+
+class _QualitySheetState extends ConsumerState<_QualitySheet> {
+  String? _switching;
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    return Container(
+      decoration: const BoxDecoration(
+        color: AppConstants.darkSurface,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
+      ),
+      child: SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            const SizedBox(height: 10),
+            Text('选择音质',
+                style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w700,
+                    color: theme.colorScheme.onSurface)),
+            const SizedBox(height: 6),
+            for (final AudioQuality q in AudioQuality.values)
+              ListTile(
+                title: Text(
+                  q.label,
+                  style: TextStyle(
+                    fontSize: 15,
+                    fontWeight:
+                        q == widget.current ? FontWeight.w700 : FontWeight.w400,
+                    color: q == widget.current
+                        ? AppConstants.brandColor
+                        : theme.colorScheme.onSurface,
+                  ),
+                ),
+                trailing: _switching == q.name
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : (q == widget.current
+                        ? const Icon(Icons.check_rounded,
+                            color: AppConstants.brandColor, size: 20)
+                        : null),
+                onTap: _switching != null
+                    ? null
+                    : () async {
+                        setState(() => _switching = q.name);
+                        final String? error = await ref
+                            .read(playerProvider.notifier)
+                            .switchQuality(q);
+                        if (!context.mounted) return;
+                        Navigator.of(context).pop();
+                        if (error != null) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(content: Text('切换失败：$error')));
+                        }
+                      },
+              ),
+            const SizedBox(height: 8),
+          ],
         ),
       ),
     );
@@ -768,35 +849,100 @@ class _RepeatButton extends ConsumerWidget {
 
 // ---------------------------------------------------------------- 底部条
 
+/// 仿网易云播放页底部功能条（左→右）：
+/// 媒体输出（附近设备投音）/ 相似歌曲（插播下一首）/ 歌词百科 / 设置
 class _BottomStrip extends ConsumerWidget {
-  const _BottomStrip({
-    required this.onToggleLyrics,
-    required this.showLyrics,
-  });
-
-  final VoidCallback? onToggleLyrics;
-  final bool showLyrics;
+  const _BottomStrip();
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final Track? track =
+        ref.watch(playerProvider.select((PlayerState s) => s.currentTrack));
+    final Color tint = Colors.white.withValues(alpha: 0.75);
+
     return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 0, 20, 10),
+      padding: const EdgeInsets.fromLTRB(28, 2, 28, 10),
       child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: <Widget>[
-          const Spacer(),
-          if (onToggleLyrics != null)
-            IconButton(
-              tooltip: showLyrics ? '封面视图' : '逐字歌词',
-              onPressed: onToggleLyrics,
-              icon: Icon(
-                Icons.lyrics_rounded,
-                size: 22,
-                color: showLyrics
-                    ? AppConstants.brandColor
-                    : Colors.white.withValues(alpha: 0.7),
-              ),
-            ),
+          _StripButton(
+            icon: Icons.sensors_rounded,
+            label: '媒体输出',
+            color: tint,
+            onTap: track == null
+                ? null
+                : () => showMediaOutputSheet(context),
+          ),
+          _StripButton(
+            icon: Icons.graphic_eq_rounded,
+            label: '相似歌曲',
+            color: tint,
+            onTap: track?.neteaseId == null
+                ? null
+                : () => showSimilarSongsSheet(context, track!),
+          ),
+          _StripButton(
+            icon: Icons.menu_book_rounded,
+            label: '歌词百科',
+            color: tint,
+            onTap: track?.neteaseId == null
+                ? null
+                : () => Navigator.of(context).push<void>(
+                      MaterialPageRoute<void>(
+                        builder: (BuildContext _) => SongWikiPage(
+                          songId: track!.neteaseId!,
+                          title: track.title,
+                          artist: track.artist,
+                          mvId: track.mvId,
+                        ),
+                      ),
+                    ),
+          ),
+          _StripButton(
+            icon: Icons.settings_outlined,
+            label: '设置',
+            color: tint,
+            onTap: () => showNpSettingsSheet(context),
+          ),
         ],
+      ),
+    );
+  }
+}
+
+class _StripButton extends StatelessWidget {
+  const _StripButton({
+    required this.icon,
+    required this.label,
+    required this.color,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String label;
+  final Color color;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final bool disabled = onTap == null;
+    final Color c = disabled ? color.withValues(alpha: 0.3) : color;
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(10),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            Icon(icon, size: 22, color: c),
+            const SizedBox(height: 3),
+            Text(
+              label,
+              style: TextStyle(fontSize: 10.5, color: c),
+            ),
+          ],
+        ),
       ),
     );
   }

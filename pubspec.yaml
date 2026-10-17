@@ -21,6 +21,7 @@ dependencies:
   # --- 音频引擎 ---
   just_audio: ^0.10.3        # 播放内核
   audio_service: ^0.18.18    # 后台播放 / 通知栏 / 锁屏控制
+  video_player: ^2.9.2       # MV 播放页（/mv/url 直链视频）
 
   # --- 本地存储 ---
   shared_preferences: ^2.5.3

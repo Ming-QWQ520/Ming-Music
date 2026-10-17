@@ -71,7 +71,29 @@ Future<void> main() async {
         sharedPreferencesProvider.overrideWithValue(prefs),
         audioHandlerProvider.overrideWithValue(audioHandler),
       ],
-      child: const MingMusicApp(),
+      child: const _MingMusicBootstrap(),
     ),
   );
+}
+
+/// 启动后异步恢复上次的播放队列（不自动播放，只回填 UI 列表）
+class _MingMusicBootstrap extends ConsumerStatefulWidget {
+  const _MingMusicBootstrap();
+
+  @override
+  ConsumerState<_MingMusicBootstrap> createState() =>
+      _MingMusicBootstrapState();
+}
+
+class _MingMusicBootstrapState extends ConsumerState<_MingMusicBootstrap> {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      ref.read(playerProvider.notifier).restoreQueue();
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) => const MingMusicApp();
 }

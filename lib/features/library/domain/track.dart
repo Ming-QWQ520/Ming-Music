@@ -19,6 +19,7 @@ class Track {
     this.isNetwork = false,
     this.isCustom = false,
     this.neteaseId,
+    this.mvId,
     this.fee = 0,
   });
 
@@ -26,6 +27,9 @@ class Track {
 
   /// 网易云歌曲 id（在线曲目非空）
   final int? neteaseId;
+
+  /// 网易云 MV id（song/detail 的 mv 字段，非零表示有 MV，百科页/MV 播放入口）
+  final int? mvId;
 
   final String title;
   final String artist;
@@ -64,6 +68,7 @@ class Track {
     return Track(
       id: id,
       neteaseId: neteaseId,
+      mvId: mvId,
       title: title ?? this.title,
       artist: artist ?? this.artist,
       album: album ?? this.album,
@@ -80,6 +85,7 @@ class Track {
   Map<String, Object?> toMap() => <String, Object?>{
         'id': id,
         'neteaseId': neteaseId,
+        'mvId': mvId,
         'title': title,
         'artist': artist,
         'album': album,
@@ -95,6 +101,7 @@ class Track {
   factory Track.fromMap(Map<Object?, Object?> map) => Track(
         id: map['id'] as String,
         neteaseId: (map['neteaseId'] as num?)?.toInt(),
+        mvId: (map['mvId'] as num?)?.toInt(),
         title: map['title'] as String? ?? '未知歌曲',
         artist: map['artist'] as String? ?? '未知歌手',
         album: map['album'] as String? ?? '单曲',

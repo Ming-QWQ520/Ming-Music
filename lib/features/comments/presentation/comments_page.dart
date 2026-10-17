@@ -223,6 +223,11 @@ class _CommentsBodyState extends ConsumerState<_CommentsBody> {
             );
           }
           final CommentItem c = comments[i];
+          // 对齐 Zephyr：自己的评论可删除（t=0）
+          final int? myUserId =
+              ref.watch(authProvider.select((AuthState s) => s.profile?.userId));
+          final bool isMine =
+              myUserId != null && myUserId == c.userId;
           return _CommentRow(
             comment: c,
             liked: liked.contains(c.commentId),
@@ -233,6 +238,32 @@ class _CommentsBodyState extends ConsumerState<_CommentsBody> {
               if (error != null) _showError(error);
             },
             onReply: () => startReply(c),
+            onDelete: isMine
+                ? () async {
+                    final bool? ok = await showDialog<bool>(
+                      context: context,
+                      builder: (BuildContext ctx) => AlertDialog(
+                        title: const Text('删除评论'),
+                        content: const Text('确定删除这条评论吗？'),
+                        actions: <Widget>[
+                          TextButton(
+                            onPressed: () => Navigator.of(ctx).pop(false),
+                            child: const Text('取消'),
+                          ),
+                          FilledButton(
+                            onPressed: () => Navigator.of(ctx).pop(true),
+                            child: const Text('删除'),
+                          ),
+                        ],
+                      ),
+                    );
+                    if (ok != true) return;
+                    final String? error = await ref
+                        .read(commentsProvider(widget.songId).notifier)
+                        .delete(c);
+                    if (error != null) _showError(error);
+                  }
+                : null,
           );
         },
       ),
@@ -413,12 +444,16 @@ class _CommentRow extends StatelessWidget {
     required this.liked,
     required this.onLike,
     required this.onReply,
+    this.onDelete,
   });
 
   final CommentItem comment;
   final bool liked;
   final VoidCallback onLike;
   final VoidCallback onReply;
+
+  /// 自己的评论展示删除入口（null = 非本人无删除）
+  final VoidCallback? onDelete;
 
   @override
   Widget build(BuildContext context) {
@@ -549,6 +584,22 @@ class _CommentRow extends StatelessWidget {
                           ),
                         ),
                       ),
+                      if (onDelete != null) ...<Widget>[
+                        const SizedBox(width: 10),
+                        InkWell(
+                          onTap: onDelete,
+                          borderRadius: BorderRadius.circular(12),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 4, vertical: 2),
+                            child: Icon(
+                              Icons.delete_outline_rounded,
+                              size: 15,
+                              color: theme.colorScheme.onSurfaceVariant,
+                            ),
+                          ),
+                        ),
+                      ],
                     ],
                   ),
                 ],

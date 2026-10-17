@@ -137,12 +137,98 @@ class NeteaseRepository {
     );
   }
 
+  /// 听歌打卡（/scrobble）：登录后播放计次上报（对齐网易云听歌排行）
+  Future<void> scrobble(int id, int sourceId, int timeSec) async {
+    await _api.get('/scrobble', <String, String>{
+      'id': '$id',
+      'sourceid': '$sourceId',
+      'time': '$timeSec',
+    });
+  }
+
   /// 歌曲详情批量补全（搜索结果之外的 id 场景备用）
   Future<List<Song>> songDetails(List<int> ids) async {
     if (ids.isEmpty) return const <Song>[];
     final Map<String, Object?> res =
         await _api.get('/song/detail', <String, String>{'ids': ids.join(',')});
     return _songsFrom(res['songs']);
+  }
+
+  // -------------------------------------------------- 相似歌曲 / 歌曲百科 / MV
+
+  /// 相似歌曲（/simi/song → songs，旧版字段 artists/album/duration）
+  Future<List<Song>> simiSongs(int id) async {
+    final Map<String, Object?> res =
+        await _api.get('/simi/song', <String, String>{'id': '$id'});
+    return _songsFrom(res['songs']);
+  }
+
+  /// 歌曲百科（/song/wiki/summary）：曲风/推荐标签/获奖成就/影视节目/乐评
+  Future<SongWikiSummary> songWiki(int id) async {
+    final Map<String, Object?> res = await _api
+        .get('/song/wiki/summary', <String, String>{'id': '$id'});
+    final Map<String, Object?> payload = apiPayload(res);
+    return SongWikiSummary.fromJson(payload);
+  }
+
+  /// MV 播放地址（/mv/url → data.url，r 为分辨率）
+  Future<MvUrlInfo> mvUrl(int id) async {
+    final Map<String, Object?> res =
+        await _api.get('/mv/url', <String, String>{'id': '$id'});
+    final Map<String, Object?> payload = apiPayload(res);
+    return MvUrlInfo.fromJson(payload);
+  }
+
+  /// MV 详情（/mv/detail → data：标题/艺人/封面/时长/播放量）
+  Future<MvDetail> mvDetail(int mvid) async {
+    final Map<String, Object?> res =
+        await _api.get('/mv/detail', <String, String>{'mvid': '$mvid'});
+    final Map<String, Object?> payload = apiPayload(res);
+    return MvDetail.fromJson(mvid, payload);
+  }
+
+  /// 艺人详情（/artist/detail → data：身份描述/作品规模）
+  Future<ArtistDetailInfo> artistDetail(int id) async {
+    final Map<String, Object?> res =
+        await _api.get('/artist/detail', <String, String>{'id': '$id'});
+    final Map<String, Object?> payload = apiPayload(res);
+    return ArtistDetailInfo.fromJson(payload);
+  }
+
+  /// 艺人热门 50 首（/artist/top/song → songs）
+  Future<List<Song>> artistTopSongs(int id) async {
+    final Map<String, Object?> res =
+        await _api.get('/artist/top/song', <String, String>{'id': '$id'});
+    return _songsFrom(res['songs']);
+  }
+
+  /// 歌手名搜索 → 首位艺人 id（歌曲百科艺人卡定位用）
+  Future<int?> artistIdByName(String name) async {
+    final Map<String, Object?> res = await _api.get('/search', <String, String>{
+      'keywords': name,
+      'type': '100',
+      'limit': '1',
+    });
+    final Object? result = res['result'];
+    final Object? artists =
+        result is Map<String, Object?> ? result['artists'] : null;
+    if (artists is! List<Object?> || artists.isEmpty) return null;
+    final Map<String, Object?> first =
+        artists.first as Map<String, Object?>;
+    return (first['id'] as num?)?.toInt();
+  }
+
+  /// 相似歌单（/simi/playlist → playlists，旧版字段 coverImgUrl）
+  Future<List<PlaylistMeta>> simiPlaylists(int id) async {
+    final Map<String, Object?> res =
+        await _api.get('/simi/playlist', <String, String>{'id': '$id'});
+    final Object? list = res['playlists'];
+    if (list is! List<Object?>) return const <PlaylistMeta>[];
+    return list
+        .whereType<Map<String, Object?>>()
+        .map(PlaylistMeta.fromJson)
+        .where((PlaylistMeta p) => p.id != 0)
+        .toList(growable: false);
   }
 
   List<Song> _songsFrom(Object? raw) {

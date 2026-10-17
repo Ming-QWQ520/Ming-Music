@@ -57,33 +57,49 @@ final Provider<ParsedLyrics> currentLyricsProvider =
     loading: () => const ParsedLyrics(),
     error: (Object e, StackTrace st) => const ParsedLyrics(),
     data: (LyricData data) {
+      // 翻译/音译对 yrc 与 lrc 两种形态都解析（修复英文歌无中文翻译：
+      // 此前 yrc 分支提前 return 丢弃 tlyric）
+      Map<int, String> translationsOf() {
+        if (data.translationText == null ||
+            data.translationText!.isEmpty) {
+          return const <int, String>{};
+        }
+        final Map<int, String> out = <int, String>{};
+        for (final LyricLine line in parseLrc(data.translationText!)) {
+          out[line.time.inMilliseconds] = line.text;
+        }
+        return out;
+      }
+
+      Map<int, String> romanizationsOf() {
+        if (data.romanizationText == null ||
+            data.romanizationText!.isEmpty) {
+          return const <int, String>{};
+        }
+        final Map<int, String> out = <int, String>{};
+        for (final LyricLine line in parseLrc(data.romanizationText!)) {
+          out[line.time.inMilliseconds] = line.text;
+        }
+        return out;
+      }
+
       // 逐字歌词优先
       if (data.hasYrc) {
         final List<YrcLine> lines = parseYrc(data.yrcText!);
         if (lines.isNotEmpty) {
-          return ParsedLyrics(yrcLines: lines);
-        }
-      }
-      // LRC 回退 + 翻译/音译对齐
-      final Map<int, String> translations = <int, String>{};
-      if (data.translationText != null && data.translationText!.isNotEmpty) {
-        for (final LyricLine line in parseLrc(data.translationText!)) {
-          translations[line.time.inMilliseconds] = line.text;
-        }
-      }
-      final Map<int, String> romanizations = <int, String>{};
-      if (data.romanizationText != null &&
-          data.romanizationText!.isNotEmpty) {
-        for (final LyricLine line in parseLrc(data.romanizationText!)) {
-          romanizations[line.time.inMilliseconds] = line.text;
+          return ParsedLyrics(
+            yrcLines: lines,
+            translations: translationsOf(),
+            romanizations: romanizationsOf(),
+          );
         }
       }
       final List<LyricLine> lines =
           data.hasLrc ? parseLrc(data.lrcText!) : const <LyricLine>[];
       return ParsedLyrics(
         lrcLines: lines,
-        translations: translations,
-        romanizations: romanizations,
+        translations: translationsOf(),
+        romanizations: romanizationsOf(),
       );
     },
   );

@@ -12,6 +12,17 @@
     <!-- Android 13+ 通知栏媒体控制需要运行时申请 -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
+    <!-- ============ 媒体输出（发现附近设备，仿网易云投屏） ============ -->
+    <!-- Android 12+：蓝牙扫描/连接 -->
+    <uses-permission android:name="android.permission.BLUETOOTH_SCAN"
+        android:usesPermissionFlags="neverForLocation" />
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+    <!-- Android 13+：发现附近设备（WLAN/局域网设备发现） -->
+    <uses-permission android:name="android.permission.NEARBY_WIFI_DEVICES"
+        android:usesPermissionFlags="neverForLocation" />
+    <!-- Android 11-：蓝牙/局域网设备发现需要定位权限 -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+
     <application
         android:label="MingMusic"
         android:name="${applicationName}"

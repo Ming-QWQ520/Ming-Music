@@ -159,6 +159,27 @@ class CommentsController extends FamilyAsyncNotifier<CommentPage?, int> {
     return _errorMessage(code, msg);
   }
 
+  /// 删除自己的评论（t=0，对齐 Zephyr deleteComment）。返回错误文案（null 成功）
+  Future<String?> delete(CommentItem comment) async {
+    final (int code, String msg) = await ref
+        .read(commentsRepositoryProvider)
+        .action(t: 0, songId: arg, commentId: comment.commentId);
+    if (code != 200) return _errorMessage(code, msg);
+    // 本地移除 + 计数减一
+    final CommentPage? page = state.value;
+    if (page != null) {
+      state = AsyncValue<CommentPage?>.data(CommentPage(
+        comments: page.comments
+            .where((CommentItem c) => c.commentId != comment.commentId)
+            .toList(growable: false),
+        totalCount: page.totalCount > 0 ? page.totalCount - 1 : 0,
+        hasMore: page.hasMore,
+        cursor: page.cursor,
+      ));
+    }
+    return null;
+  }
+
   /// 点赞 / 取消点赞（乐观更新 + 失败回滚）。返回错误文案（null 成功）
   Future<String?> toggleLike(CommentItem comment) async {
     final AuthState auth = ref.read(authProvider);

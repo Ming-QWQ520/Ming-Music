@@ -1,10 +1,14 @@
 /// Mini 播放条（参考图1/2 底部胶囊样式）：
 ///  - 圆角胶囊 + 局部液态玻璃材质（LiquidGlassContainer）；
 ///  - 单行：圆角封面 + 「歌名 - 歌手」 + 播放按钮 + 播放列表按钮；
+///  - 进度条：播放按钮四周的圆环（顶部中心为起点，顺时针），
+///    替代旧版底部细线（需求）；
 ///  - 点击主体进入全屏播放页（上滑转场）；
 ///  - `select` 只订阅 playing / currentTrack / hasQueue，
-///    进度线独立成 RepaintBoundary 隔离的子组件（避坑指南 3）。
+///    圆环独立成 RepaintBoundary 隔离的子组件（避坑指南 3）。
 library;
+
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -35,35 +39,28 @@ class MiniPlayer extends ConsumerWidget {
         borderRadius: 24,
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
         onTap: () => openFullPlayer(context),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
+        child: Row(
           children: <Widget>[
-            Row(
-              children: <Widget>[
-                // Hero：与全屏播放页封面联动
-                Hero(
-                  tag: _heroTag(cover),
-                  child: CoverImage(src: cover, size: 40, radius: 20),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Text(
-                    track == null ? '未在播放' : '${track.title} - ${track.artist}',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 6),
-                const _MiniPlayButton(),
-                const _MiniQueueButton(),
-              ],
+            // Hero：与全屏播放页封面联动
+            Hero(
+              tag: _heroTag(cover),
+              child: CoverImage(src: cover, size: 40, radius: 20),
             ),
-            const SizedBox(height: 5),
-            const _MiniProgressLine(),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                track == null ? '未在播放' : '${track.title} - ${track.artist}',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ),
+            const SizedBox(width: 6),
+            const _MiniPlayButton(),
+            const _MiniQueueButton(),
           ],
         ),
       ),
@@ -74,10 +71,10 @@ class MiniPlayer extends ConsumerWidget {
 /// 封面 Hero 标签（Mini 与全屏页共用；无封面时用固定 tag）
 String _heroTag(String? cover) => cover ?? 'cover-placeholder';
 
-/// 底部细进度线：RepaintBoundary 隔离，只订阅 position/duration 两个流
-/// （约 200ms 重建一次，影响范围仅这 2px 高的线条）
-class _MiniProgressLine extends ConsumerWidget {
-  const _MiniProgressLine();
+/// 播放按钮四周的圆环进度：顶部中心为起点，顺时针（需求指定样式）。
+/// RepaintBoundary 隔离，只订阅 position/duration 两个流。
+class _MiniRingProgress extends ConsumerWidget {
+  const _MiniRingProgress();
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -88,18 +85,46 @@ class _MiniProgressLine extends ConsumerWidget {
     final double progress =
         duration > 0 ? (position / duration).clamp(0.0, 1.0) : 0.0;
     return RepaintBoundary(
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(2),
-        child: LinearProgressIndicator(
-          value: progress,
-          minHeight: 2,
-          backgroundColor: Colors.white.withValues(alpha: 0.12),
-          valueColor:
-              const AlwaysStoppedAnimation<Color>(AppConstants.brandColor),
-        ),
+      child: CustomPaint(
+        painter: _RingPainter(progress),
+        size: const Size(48, 48),
       ),
     );
   }
+}
+
+class _RingPainter extends CustomPainter {
+  const _RingPainter(this.progress);
+
+  final double progress;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    const double stroke = 2.4;
+    final Offset center = Offset(size.width / 2, size.height / 2);
+    final double radius = (size.shortestSide - stroke) / 2;
+
+    final Rect rect = Rect.fromCircle(center: center, radius: radius);
+
+    // 底环
+    final Paint bg = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = stroke
+      ..color = Colors.white.withValues(alpha: 0.16);
+    canvas.drawArc(rect, 0, math.pi * 2, false, bg);
+
+    // 进度弧：顶部中心（-90°）起始，顺时针
+    final Paint fg = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = stroke
+      ..strokeCap = StrokeCap.round
+      ..color = AppConstants.brandColor;
+    canvas.drawArc(rect, -math.pi / 2, math.pi * 2 * progress, false, fg);
+  }
+
+  @override
+  bool shouldRepaint(_RingPainter oldDelegate) =>
+      oldDelegate.progress != progress;
 }
 
 // ---------------------------------------------------------------- buttons
@@ -115,28 +140,36 @@ class _MiniPlayButton extends ConsumerWidget {
         s.processing == AppProcessingState.loading ||
         s.processing == AppProcessingState.buffering));
 
+    // 圆环进度包裹播放按钮（顶部中心为起点），环层在按钮之下
     return SizedBox(
-      width: 40,
-      height: 40,
-      child: IconButton(
-        style: IconButton.styleFrom(
-          side: BorderSide(color: Colors.white.withValues(alpha: 0.35)),
-        ),
-        onPressed: () => ref.read(playerProvider.notifier).playPause(),
-        icon: busy
-            ? const SizedBox(
-                width: 16,
-                height: 16,
-                child: CircularProgressIndicator(strokeWidth: 2.2),
-              )
-            : AnimatedSwitcher(
-                duration: const Duration(milliseconds: 220),
-                child: Icon(
-                  playing ? Icons.pause_rounded : Icons.play_arrow_rounded,
-                  key: ValueKey<bool>(playing),
-                  size: 24,
-                ),
-              ),
+      width: 48,
+      height: 48,
+      child: Stack(
+        alignment: Alignment.center,
+        children: <Widget>[
+          const Positioned.fill(child: _MiniRingProgress()),
+          SizedBox(
+            width: 40,
+            height: 40,
+            child: IconButton(
+              onPressed: () => ref.read(playerProvider.notifier).playPause(),
+              icon: busy
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2.2),
+                    )
+                  : AnimatedSwitcher(
+                      duration: const Duration(milliseconds: 220),
+                      child: Icon(
+                        playing ? Icons.pause_rounded : Icons.play_arrow_rounded,
+                        key: ValueKey<bool>(playing),
+                        size: 24,
+                      ),
+                    ),
+            ),
+          ),
+        ],
       ),
     );
   }
