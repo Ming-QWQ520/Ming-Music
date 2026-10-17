@@ -54,15 +54,24 @@ jobs:
       # 回归闸门：2026-10 黑屏事故——AGP 9 默认开启 R8 minify，会裁掉
       # shared_preferences 2.5.x JNI 直连路径的 suspend 方法
       # （签名含 Continuation，运行时经 JNI GetMethodID 查找，R8 不可见）。
-      # 此处校验 dex 中该签名仍然存在，缺失即判定构建被裁剪，直接失败。
+      # 校验：Registrar 所在的 dex 中必须同时存在 getAll 的 suspend 签名。
+      # 注意全量扫描 classes*.dex（multidex 会把插件类挪到 classes2 及之后）。
       - name: Verify plugin JNI methods survive in dex
         run: |
           APK=build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
-          if unzip -p "$APK" classes.dex | strings -a | \
-             grep -F "Ljava/util/List;" | grep -qF "Lkotlin/coroutines/Continuation;)Ljava/lang/Object;"; then
-            echo "OK: suspend JNI signatures present in dex"
+          SIG="(Ljava/lang/String;Ljava/util/List;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;"
+          FOUND=""
+          for d in $(unzip -l "$APK" | grep -oE "classes[0-9]*\.dex"); do
+            S=$(unzip -p "$APK" "$d" | strings -a)
+            if echo "$S" | grep -qF "SharedPreferencesApiRegistrar" && \
+               echo "$S" | grep -qF "$SIG"; then
+              FOUND="$d"; break
+            fi
+          done
+          if [ -n "$FOUND" ]; then
+            echo "OK: registrar + getAll suspend signature present in $FOUND"
           else
-            echo "::error::R8 stripped JNI-invoked suspend methods (shared_preferencesRegistrar.getAll...). Ensure release build has isMinifyEnabled=false."
+            echo "::error::R8 stripped JNI-invoked suspend methods of SharedPreferencesApiRegistrar. Ensure release build has isMinifyEnabled=false."
             exit 1
           fi
 
