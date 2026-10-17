@@ -26,6 +26,7 @@ class PlayerState {
     this.loaded = false,
     this.processing = AppProcessingState.idle,
     this.error,
+    this.queueTitle,
   });
 
   final List<Track> queue;
@@ -39,6 +40,9 @@ class PlayerState {
 
   /// 最近一次播放错误（null 表示正常），UI 监听后以 SnackBar 提示
   final String? error;
+
+  /// 当前队列的来源名（歌单名/榜单名/搜索结果），播放页顶部展示
+  final String? queueTitle;
 
   bool get hasQueue => queue.isNotEmpty;
 
@@ -57,7 +61,9 @@ class PlayerState {
     bool? loaded,
     AppProcessingState? processing,
     String? error,
+    String? queueTitle,
     bool clearError = false,
+    bool clearQueueTitle = false,
   }) {
     return PlayerState(
       queue: queue ?? this.queue,
@@ -69,6 +75,7 @@ class PlayerState {
       loaded: loaded ?? this.loaded,
       processing: processing ?? this.processing,
       error: clearError ? null : (error ?? this.error),
+      queueTitle: clearQueueTitle ? null : (queueTitle ?? this.queueTitle),
     );
   }
 }

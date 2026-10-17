@@ -1,4 +1,4 @@
-/// 设置域模型：背景系统配置 / 播放页模块布局 / 液态玻璃偏好。
+/// 设置域模型：背景系统配置 / 液态玻璃偏好 / 网易云音质等级。
 library;
 
 /// 背景系统类型
@@ -61,70 +61,6 @@ class BackgroundConfig {
   }
 }
 
-/// 播放页模块（DIY 拖拽重排的最小单元）
-enum PlayerModule { cover, lyrics, progress, controls }
-
-extension PlayerModuleX on PlayerModule {
-  String get label => switch (this) {
-        PlayerModule.cover => '旋转封面',
-        PlayerModule.lyrics => '滚动歌词',
-        PlayerModule.progress => '进度条',
-        PlayerModule.controls => '控制栏',
-      };
-
-  /// 手机端单列布局中的弹性权重
-  int get flex => switch (this) {
-        PlayerModule.cover => 44,
-        PlayerModule.lyrics => 36,
-        PlayerModule.progress => 7,
-        PlayerModule.controls => 13,
-      };
-}
-
-/// 播放页模块布局配置（序列化保存到本地）
-class LayoutConfig {
-  const LayoutConfig(this.modules);
-
-  static const LayoutConfig defaults = LayoutConfig(<PlayerModule>[
-    PlayerModule.cover,
-    PlayerModule.lyrics,
-    PlayerModule.progress,
-    PlayerModule.controls,
-  ]);
-
-  final List<PlayerModule> modules;
-
-  /// 归一化：去重 + 补全四个模块，避免脏数据破坏 UI
-  List<PlayerModule> get normalized {
-    final List<PlayerModule> seen = <PlayerModule>[];
-    for (final PlayerModule m in modules) {
-      if (!seen.contains(m)) seen.add(m);
-    }
-    for (final PlayerModule m in PlayerModule.values) {
-      if (!seen.contains(m)) seen.add(m);
-    }
-    return seen;
-  }
-
-  LayoutConfig copyWith(List<PlayerModule> modules) => LayoutConfig(modules);
-
-  Map<String, Object?> toMap() => <String, Object?>{
-        'modules': modules.map((PlayerModule m) => m.name).toList(),
-      };
-
-  factory LayoutConfig.fromMap(Map<Object?, Object?> map) {
-    final List<dynamic> raw = map['modules'] as List<dynamic>? ?? <dynamic>[];
-    return LayoutConfig(
-      raw
-          .map((dynamic e) => PlayerModule.values.firstWhere(
-                (PlayerModule m) => m.name == e,
-                orElse: () => PlayerModule.cover,
-              ))
-          .toList(),
-    );
-  }
-}
-
 /// 液态玻璃偏好：auto 跟随设备能力（Android 12+ 启用）
 enum GlassPref { auto, on, off }
 
@@ -139,3 +75,22 @@ extension GlassPrefX on GlassPref {
 /// 液态玻璃的自动降级判定阈值：Android 12 (SDK 31) 起
 /// BackdropFilter 的 blur 有 RenderEffect 硬件加速，代价显著更低。
 const int kGlassAutoMinSdk = 31;
+
+/// 网易云播放音质等级（对应 /song/url/v1 的 level 参数）
+enum AudioQuality { standard, higher, exhigh, lossless }
+
+extension AudioQualityX on AudioQuality {
+  String get label => switch (this) {
+        AudioQuality.standard => '标准 (128K)',
+        AudioQuality.higher => '较高 (192K)',
+        AudioQuality.exhigh => '极高 (320K)',
+        AudioQuality.lossless => '无损 FLAC',
+      };
+
+  String get apiValue => name;
+
+  static AudioQuality fromName(String? name) => AudioQuality.values.firstWhere(
+        (AudioQuality q) => q.name == name,
+        orElse: () => AudioQuality.standard,
+      );
+}

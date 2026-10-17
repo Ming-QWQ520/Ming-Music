@@ -10,4 +10,6 @@ class PrefsKeys {
   static const String themeMode = 'settings.themeMode';
   static const String favorites = 'library.favorites';
   static const String customTracks = 'library.customTracks';
+  static const String anonCookie = 'netease.anonCookie';
+  static const String audioQuality = 'netease.audioQuality';
 }

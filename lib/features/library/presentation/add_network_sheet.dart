@@ -1,18 +1,20 @@
-/// 添加网络直链曲目（底部弹层表单）。
+/// 添加网络直链曲目弹窗（我的音乐页）。
 library;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/constants/app_constants.dart';
 import '../providers/library_providers.dart';
 
-Future<void> showAddNetworkSheet(BuildContext context) {
-  return showModalBottomSheet<void>(
+/// 打开添加直链弹窗；成功返回 true
+Future<bool> showAddNetworkSheet(BuildContext context) async {
+  final bool? ok = await showModalBottomSheet<bool>(
     context: context,
     isScrollControlled: true,
-    useSafeArea: true,
     builder: (BuildContext context) => const _AddNetworkSheet(),
   );
+  return ok ?? false;
 }
 
 class _AddNetworkSheet extends ConsumerStatefulWidget {
@@ -26,6 +28,7 @@ class _AddNetworkSheetState extends ConsumerState<_AddNetworkSheet> {
   final TextEditingController _title = TextEditingController();
   final TextEditingController _artist = TextEditingController();
   final TextEditingController _url = TextEditingController();
+  String? _error;
   bool _submitting = false;
 
   @override
@@ -37,8 +40,10 @@ class _AddNetworkSheetState extends ConsumerState<_AddNetworkSheet> {
   }
 
   Future<void> _submit() async {
-    if (_submitting) return;
-    setState(() => _submitting = true);
+    setState(() {
+      _error = null;
+      _submitting = true;
+    });
     final bool ok = await ref.read(libraryProvider.notifier).addNetworkTrack(
           title: _title.text,
           artist: _artist.text,
@@ -46,91 +51,79 @@ class _AddNetworkSheetState extends ConsumerState<_AddNetworkSheet> {
         );
     if (!mounted) return;
     if (ok) {
-      Navigator.of(context).pop();
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('已添加到音乐库')),
-      );
+      Navigator.of(context).pop(true);
     } else {
-      setState(() => _submitting = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('请输入有效的 http(s) 直链')),
-      );
+      setState(() {
+        _error = '请检查直链格式（需为 http/https 地址）';
+        _submitting = false;
+      });
     }
   }
 
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: EdgeInsets.only(
-        left: 20,
-        right: 20,
-        top: 20,
-        bottom: MediaQuery.viewInsetsOf(context).bottom + 20,
+      padding: EdgeInsets.fromLTRB(
+        20,
+        20,
+        20,
+        20 + MediaQuery.viewInsetsOf(context).bottom,
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
-          Text('添加网络曲目',
-              style: Theme.of(context)
-                  .textTheme
-                  .titleLarge
-                  ?.copyWith(fontWeight: FontWeight.w700)),
-          const SizedBox(height: 4),
-          Text('支持 mp3 / m4a / flac / aac 等浏览器可播直链',
-              style: TextStyle(
-                fontSize: 12.5,
-                color: Theme.of(context)
-                    .colorScheme
-                    .onSurface
-                    .withValues(alpha: 0.5),
-              )),
-          const SizedBox(height: 16),
+          const Text(
+            '添加网络直链',
+            style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700),
+          ),
+          const SizedBox(height: 14),
           TextField(
             controller: _title,
-            textInputAction: TextInputAction.next,
             decoration: const InputDecoration(
               labelText: '标题',
-              prefixIcon: Icon(Icons.music_note_outlined),
               border: OutlineInputBorder(),
+              isDense: true,
             ),
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 10),
           TextField(
             controller: _artist,
-            textInputAction: TextInputAction.next,
             decoration: const InputDecoration(
               labelText: '歌手（可选）',
-              prefixIcon: Icon(Icons.person_outline_rounded),
               border: OutlineInputBorder(),
+              isDense: true,
             ),
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 10),
           TextField(
             controller: _url,
             keyboardType: TextInputType.url,
-            textInputAction: TextInputAction.done,
-            onSubmitted: (_) => _submit(),
             decoration: const InputDecoration(
-              labelText: '音频直链 URL',
-              prefixIcon: Icon(Icons.link_rounded),
+              labelText: '音频直链 https://...',
               border: OutlineInputBorder(),
-              hintText: 'https://example.com/song.mp3',
+              isDense: true,
             ),
           ),
-          const SizedBox(height: 18),
-          FilledButton.icon(
-            onPressed: _submitting ? null : _submit,
-            icon: _submitting
-                ? const SizedBox(
-                    width: 16,
-                    height: 16,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Icon(Icons.add_rounded),
-            label: const Text('添加'),
-            style: FilledButton.styleFrom(
-              padding: const EdgeInsets.symmetric(vertical: 14),
+          if (_error != null) ...<Widget>[
+            const SizedBox(height: 8),
+            Text(
+              _error!,
+              style: const TextStyle(
+                color: Colors.redAccent,
+                fontSize: 12.5,
+              ),
+            ),
+          ],
+          const SizedBox(height: 16),
+          SizedBox(
+            width: double.infinity,
+            child: FilledButton(
+              style: FilledButton.styleFrom(
+                backgroundColor: AppConstants.brandColor,
+              ),
+              onPressed: _submitting ? null : _submit,
+              child: Text(_submitting ? '添加中…' : '添加'),
             ),
           ),
         ],

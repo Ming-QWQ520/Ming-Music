@@ -28,7 +28,7 @@ class AppTheme {
       useMaterial3: true,
       colorScheme: scheme,
       scaffoldBackgroundColor:
-          isDark ? const Color(0xFF0B0A14) : const Color(0xFFF6F5FB),
+          isDark ? const Color(0xFF121212) : const Color(0xFFF6F5FB),
       appBarTheme: AppBarTheme(
         backgroundColor: Colors.transparent,
         surfaceTintColor: Colors.transparent,

@@ -1,7 +1,7 @@
 name: ming_music
-description: "MingMusic - 一个高颜值、高可玩性的液态玻璃风格音乐播放器 (Flutter + MD3)."
+description: "MingMusic - 基于网易云 API 的在线音乐播放器 (Flutter + Riverpod + MD3)."
 publish_to: "none"
-version: 1.0.0+1
+version: 1.1.0+2
 
 environment:
   sdk: ^3.6.0
@@ -28,6 +28,9 @@ dependencies:
   shared_preferences_platform_interface: ^2.4.2
   path_provider: ^2.1.5      # 通知栏封面缓存 / 背景图片持久化
 
+  # --- 网络与缓存 ---
+  crypto: ^3.0.6              # 封面磁盘缓存文件名 md5（纯 Dart）
+
   # --- 设备能力 ---
   image_picker: ^1.1.2       # 自定义背景选图
   device_info_plus: ^11.3.0  # 低端机自动降级液态玻璃 (Android SDK 版本判定)
@@ -42,8 +45,3 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
-
-  assets:
-    - assets/audio/
-    - assets/covers/
-    - assets/lyrics/

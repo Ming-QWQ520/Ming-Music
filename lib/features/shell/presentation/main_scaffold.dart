@@ -1,11 +1,10 @@
 /// 主页面架构：手机/平板双端自适应导航 + 悬浮 Mini 播放条。
 ///
+/// 三个 Tab：发现（网易云首页风格）/ 我的（收藏与自定义曲目）/ 设置。
+///
 /// 布局规范：
-///  - 手机（宽度 < 600dp）：底部 MD3 NavigationBar，
-///    Mini 播放条悬浮于导航栏上方；
-///  - 平板（宽度 >= 600dp）：左侧 MD3 NavigationRail，
-///    右侧 Expanded 内容区；Mini 播放条**限制在右侧内容区底部**，
-///    不覆盖左侧导航栏；
+///  - 手机（宽度 < 600dp）：底部 NavigationBar，Mini 播放条悬浮于其上方；
+///  - 平板（宽度 >= 600dp）：左侧 NavigationRail，右侧内容区底部 MiniPlayer；
 ///  - IndexedStack 保持各 Tab 状态（列表滚动位置等）。
 library;
 
@@ -13,8 +12,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/constants/app_constants.dart';
-import '../../library/presentation/favorites_page.dart';
-import '../../library/presentation/library_page.dart';
+import '../../discover/presentation/discover_page.dart';
+import '../../library/presentation/my_music_page.dart';
 import '../../player/presentation/widgets/mini_player.dart';
 import '../../settings/presentation/settings_page.dart';
 
@@ -33,8 +32,8 @@ class MainScaffold extends ConsumerWidget {
   const MainScaffold({super.key});
 
   static const List<Widget> _pages = <Widget>[
-    LibraryPage(),
-    FavoritesPage(),
+    DiscoverPage(),
+    MyMusicPage(),
     SettingsPage(),
   ];
 
@@ -61,14 +60,12 @@ class MainScaffold extends ConsumerWidget {
       body: SafeArea(
         child: Row(
           children: <Widget>[
-            // 左侧 NavigationRail
             _RailNav(
               selectedIndex: tab,
               onSelect: (int i) =>
                   ref.read(selectedTabProvider.notifier).select(i),
             ),
             const VerticalDivider(width: 1),
-            // 右侧内容区：内容 + 底部 Mini 播放条（不覆盖 Rail）
             Expanded(
               child: Column(
                 children: <Widget>[
@@ -95,21 +92,22 @@ class MainScaffold extends ConsumerWidget {
         children: <Widget>[
           const MiniPlayer(),
           NavigationBar(
+            height: 64,
             selectedIndex: tab,
             onDestinationSelected: (int i) =>
                 ref.read(selectedTabProvider.notifier).select(i),
             destinations: const <Widget>[
-              _LibraryDestination(
-                icon: Icon(Icons.library_music_outlined),
-                selectedIcon: Icon(Icons.library_music_rounded),
-                label: '音乐库',
+              NavigationDestination(
+                icon: Icon(Icons.explore_outlined),
+                selectedIcon: Icon(Icons.explore_rounded),
+                label: '发现',
               ),
-              _LibraryDestination(
-                icon: Icon(Icons.favorite_outline_rounded),
-                selectedIcon: Icon(Icons.favorite_rounded),
-                label: '收藏',
+              NavigationDestination(
+                icon: Icon(Icons.person_outline_rounded),
+                selectedIcon: Icon(Icons.person_rounded),
+                label: '我的',
               ),
-              _LibraryDestination(
+              NavigationDestination(
                 icon: Icon(Icons.settings_outlined),
                 selectedIcon: Icon(Icons.settings_rounded),
                 label: '设置',
@@ -143,14 +141,14 @@ class _RailNav extends StatelessWidget {
       ),
       destinations: const <NavigationRailDestination>[
         NavigationRailDestination(
-          icon: Icon(Icons.library_music_outlined),
-          selectedIcon: Icon(Icons.library_music_rounded),
-          label: Text('音乐库'),
+          icon: Icon(Icons.explore_outlined),
+          selectedIcon: Icon(Icons.explore_rounded),
+          label: Text('发现'),
         ),
         NavigationRailDestination(
-          icon: Icon(Icons.favorite_outline_rounded),
-          selectedIcon: Icon(Icons.favorite_rounded),
-          label: Text('收藏'),
+          icon: Icon(Icons.person_outline_rounded),
+          selectedIcon: Icon(Icons.person_rounded),
+          label: Text('我的'),
         ),
         NavigationRailDestination(
           icon: Icon(Icons.settings_outlined),
@@ -172,10 +170,13 @@ class _BrandBadge extends StatelessWidget {
       height: 40,
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(14),
-        gradient: const LinearGradient(
+        gradient: LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
-          colors: <Color>[Color(0xFF8B7CF6), Color(0xFF5B2FD1)],
+          colors: <Color>[
+            AppConstants.brandColor,
+            const Color(0xFFB31F1F),
+          ],
         ),
       ),
       child:
@@ -183,6 +184,3 @@ class _BrandBadge extends StatelessWidget {
     );
   }
 }
-
-/// 类型别名，简化 NavigationBar destinations 声明
-typedef _LibraryDestination = NavigationDestination;

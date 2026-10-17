@@ -1,7 +1,8 @@
-/// Mini 播放条：
-///  - 局部液态玻璃材质（LiquidGlassContainer，全 App 仅两处玻璃场景之一）；
-///  - 点击通过 Hero 动画进入全屏播放页；
-///  - 通过 `select` 只订阅 playing / currentTrack / hasQueue，
+/// Mini 播放条（参考图1/2 底部胶囊样式）：
+///  - 圆角胶囊 + 局部液态玻璃材质（LiquidGlassContainer）；
+///  - 单行：圆角封面 + 「歌名 - 歌手」 + 播放按钮 + 播放列表按钮；
+///  - 点击主体进入全屏播放页（上滑转场）；
+///  - `select` 只订阅 playing / currentTrack / hasQueue，
 ///    进度线独立成 RepaintBoundary 隔离的子组件（避坑指南 3）。
 library;
 
@@ -14,6 +15,7 @@ import '../../../../core/widgets/liquid_glass_container.dart';
 import '../../../library/domain/track.dart';
 import '../../providers/player_providers.dart';
 import '../full_player_page.dart';
+import 'queue_sheet.dart';
 
 class MiniPlayer extends ConsumerWidget {
   const MiniPlayer({super.key});
@@ -30,8 +32,8 @@ class MiniPlayer extends ConsumerWidget {
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
       child: LiquidGlassContainer(
-        borderRadius: 22,
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        borderRadius: 24,
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
         onTap: () => openFullPlayer(context),
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -41,45 +43,26 @@ class MiniPlayer extends ConsumerWidget {
                 // Hero：与全屏播放页封面联动
                 Hero(
                   tag: _heroTag(cover),
-                  child: CoverImage(src: cover, size: 46, radius: 14),
+                  child: CoverImage(src: cover, size: 40, radius: 20),
                 ),
-                const SizedBox(width: 12),
+                const SizedBox(width: 10),
                 Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: <Widget>[
-                      Text(
-                        track?.title ?? '未在播放',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          fontSize: 14.5,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        track?.artist ?? '',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: Theme.of(context)
-                              .colorScheme
-                              .onSurface
-                              .withValues(alpha: 0.55),
-                        ),
-                      ),
-                    ],
+                  child: Text(
+                    track == null ? '未在播放' : '${track.title} - ${track.artist}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w500,
+                    ),
                   ),
                 ),
-                const SizedBox(width: 8),
+                const SizedBox(width: 6),
                 const _MiniPlayButton(),
-                const _MiniNextButton(),
+                const _MiniQueueButton(),
               ],
             ),
-            const SizedBox(height: 6),
+            const SizedBox(height: 5),
             const _MiniProgressLine(),
           ],
         ),
@@ -105,12 +88,15 @@ class _MiniProgressLine extends ConsumerWidget {
     final double progress =
         duration > 0 ? (position / duration).clamp(0.0, 1.0) : 0.0;
     return RepaintBoundary(
-      child: LinearProgressIndicator(
-        value: progress,
-        minHeight: 2,
-        backgroundColor: Colors.white.withValues(alpha: 0.12),
-        valueColor:
-            const AlwaysStoppedAnimation<Color>(AppConstants.brandColor),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(2),
+        child: LinearProgressIndicator(
+          value: progress,
+          minHeight: 2,
+          backgroundColor: Colors.white.withValues(alpha: 0.12),
+          valueColor:
+              const AlwaysStoppedAnimation<Color>(AppConstants.brandColor),
+        ),
       ),
     );
   }
@@ -130,14 +116,17 @@ class _MiniPlayButton extends ConsumerWidget {
         s.processing == AppProcessingState.buffering));
 
     return SizedBox(
-      width: 42,
-      height: 42,
-      child: IconButton.filledTonal(
+      width: 40,
+      height: 40,
+      child: IconButton(
+        style: IconButton.styleFrom(
+          side: BorderSide(color: Colors.white.withValues(alpha: 0.35)),
+        ),
         onPressed: () => ref.read(playerProvider.notifier).playPause(),
         icon: busy
             ? const SizedBox(
-                width: 18,
-                height: 18,
+                width: 16,
+                height: 16,
                 child: CircularProgressIndicator(strokeWidth: 2.2),
               )
             : AnimatedSwitcher(
@@ -145,7 +134,7 @@ class _MiniPlayButton extends ConsumerWidget {
                 child: Icon(
                   playing ? Icons.pause_rounded : Icons.play_arrow_rounded,
                   key: ValueKey<bool>(playing),
-                  size: 26,
+                  size: 24,
                 ),
               ),
       ),
@@ -153,8 +142,8 @@ class _MiniPlayButton extends ConsumerWidget {
   }
 }
 
-class _MiniNextButton extends ConsumerWidget {
-  const _MiniNextButton();
+class _MiniQueueButton extends ConsumerWidget {
+  const _MiniQueueButton();
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -162,8 +151,8 @@ class _MiniNextButton extends ConsumerWidget {
       width: 40,
       height: 40,
       child: IconButton(
-        onPressed: () => ref.read(playerProvider.notifier).next(),
-        icon: const Icon(Icons.skip_next_rounded, size: 24),
+        onPressed: () => showQueueSheet(context),
+        icon: const Icon(Icons.queue_music_rounded, size: 24),
       ),
     );
   }

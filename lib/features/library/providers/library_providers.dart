@@ -1,4 +1,4 @@
-/// 音乐库状态：曲目列表 + 收藏。
+/// 我的音乐状态：收藏曲目 + 自定义网络直链曲目。
 library;
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -8,7 +8,7 @@ import '../../settings/providers/settings_providers.dart'
 import '../data/track_repository.dart';
 import '../domain/track.dart';
 
-/// 曲目列表（内置 + 自定义网络曲目）
+/// 用户自定义网络直链曲目
 final NotifierProvider<LibraryNotifier, List<Track>> libraryProvider =
     NotifierProvider<LibraryNotifier, List<Track>>(LibraryNotifier.new);
 
@@ -18,7 +18,7 @@ class LibraryNotifier extends Notifier<List<Track>> {
   @override
   List<Track> build() {
     _repo = TrackRepository(ref.watch(sharedPreferencesProvider));
-    return _repo.loadTracks();
+    return _repo.loadCustomTracks();
   }
 
   /// 添加网络直链曲目
@@ -42,55 +42,59 @@ class LibraryNotifier extends Notifier<List<Track>> {
       isNetwork: true,
       isCustom: true,
     );
-    final List<Track> custom = state.where((Track t) => t.isCustom).toList()
-      ..add(track);
+    final List<Track> custom = List<Track>.of(state)..add(track);
     await _repo.saveCustomTracks(custom);
-    state = <Track>[...state, track];
+    state = custom;
     return true;
   }
 
-  /// 移除自定义曲目（内置曲目不可移除；id 不存在时静默忽略）
+  /// 移除自定义曲目（id 不存在时静默忽略）
   Future<void> removeCustomTrack(String id) async {
-    // 先确认存在且为自定义曲目（避免空列表 first / orElse 误取）
     final bool exists = state.any((Track t) => t.id == id);
     if (!exists || state.isEmpty) return;
-    final Track target = state.firstWhere((Track t) => t.id == id);
-    if (!target.isCustom) return;
-    final List<Track> custom =
-        state.where((Track t) => t.isCustom && t.id != id).toList();
+    final List<Track> custom = state.where((Track t) => t.id != id).toList();
     await _repo.saveCustomTracks(custom);
-    state = state.where((Track t) => t.id != id).toList();
+    state = custom;
     // 同步取消收藏
-    ref.read(favoriteIdsProvider.notifier).remove(id);
+    ref.read(favoriteTracksProvider.notifier).removeById(id);
   }
 }
 
-/// 收藏集合
-final NotifierProvider<FavoriteNotifier, Set<String>> favoriteIdsProvider =
-    NotifierProvider<FavoriteNotifier, Set<String>>(FavoriteNotifier.new);
+/// 收藏曲目列表（完整 Track 序列化，网易云在线歌曲可离线保留元信息）
+final NotifierProvider<FavoriteNotifier, List<Track>> favoriteTracksProvider =
+    NotifierProvider<FavoriteNotifier, List<Track>>(FavoriteNotifier.new);
 
-class FavoriteNotifier extends Notifier<Set<String>> {
+class FavoriteNotifier extends Notifier<List<Track>> {
   late TrackRepository _repo;
 
   @override
-  Set<String> build() {
+  List<Track> build() {
     _repo = TrackRepository(ref.watch(sharedPreferencesProvider));
-    return _repo.loadFavorites();
+    return _repo.loadFavoriteTracks();
   }
 
-  void toggle(String id) {
-    final Set<String> next = Set<String>.of(state);
-    if (!next.remove(id)) next.add(id);
+  bool contains(String id) => state.any((Track t) => t.id == id);
+
+  /// 切换收藏（网易云歌曲入队时携带解析好的直链，恢复时按 neteaseId 重新解析）
+  Future<void> toggle(Track track) async {
+    final List<Track> next = List<Track>.of(state);
+    final int index = next.indexWhere((Track t) => t.id == track.id);
+    if (index >= 0) {
+      next.removeAt(index);
+    } else {
+      // 收藏时丢弃易过期的直链，仅保留元信息（播放时重新解析）
+      next.insert(0, track.copyWith(source: ''));
+      if (next.length > 500) next.removeRange(500, next.length);
+    }
     state = next;
-    _repo.saveFavorites(next);
+    await _repo.saveFavoriteTracks(next);
   }
 
-  void remove(String id) {
-    if (!state.contains(id)) return;
-    final Set<String> next = Set<String>.of(state)..remove(id);
+  Future<void> removeById(String id) async {
+    final bool exists = state.any((Track t) => t.id == id);
+    if (!exists) return;
+    final List<Track> next = state.where((Track t) => t.id != id).toList();
     state = next;
-    _repo.saveFavorites(next);
+    await _repo.saveFavoriteTracks(next);
   }
-
-  bool contains(String id) => state.contains(id);
 }

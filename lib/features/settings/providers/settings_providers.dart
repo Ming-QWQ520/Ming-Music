@@ -1,8 +1,8 @@
 /// 设置域状态管理：
 ///  - BackgroundProvider：背景系统（模糊封面 / 纯色渐变 / 本地图片）
-///  - LayoutProvider：播放页模块 DIY 排序（序列化到本地）
 ///  - GlassPref：液态玻璃偏好 + 低端机自动降级（避坑指南 2）
 ///  - ThemeMode：亮暗主题
+///  - AudioQuality：网易云播放音质等级
 library;
 
 import 'dart:convert';
@@ -102,47 +102,6 @@ class BackgroundNotifier extends Notifier<BackgroundConfig> {
   }
 }
 
-// ---------------------------------------------------------------- layout
-
-final NotifierProvider<LayoutNotifier, LayoutConfig> layoutProvider =
-    NotifierProvider<LayoutNotifier, LayoutConfig>(LayoutNotifier.new);
-
-class LayoutNotifier extends Notifier<LayoutConfig> {
-  late SharedPreferences _prefs;
-
-  @override
-  LayoutConfig build() {
-    _prefs = ref.watch(sharedPreferencesProvider);
-    final String? raw = _prefs.getString(PrefsKeys.layout);
-    if (raw != null) {
-      try {
-        final Object? decoded = jsonDecode(raw);
-        if (decoded is Map<String, Object?>) {
-          final LayoutConfig cfg = LayoutConfig.fromMap(decoded);
-          return LayoutConfig(cfg.normalized);
-        }
-      } catch (_) {}
-    }
-    return LayoutConfig.defaults;
-  }
-
-  /// 拖拽重排（ReorderableListView.onReorderItem 回调，newIndex 已自动修正），
-  /// 序列化保存
-  void reorder(int oldIndex, int newIndex) {
-    final List<PlayerModule> list = List<PlayerModule>.of(state.modules);
-    final PlayerModule item = list.removeAt(oldIndex);
-    list.insert(newIndex, item);
-    final LayoutConfig next = LayoutConfig(list);
-    state = next;
-    _prefs.setString(PrefsKeys.layout, jsonEncode(next.toMap()));
-  }
-
-  void reset() {
-    state = LayoutConfig.defaults;
-    _prefs.setString(PrefsKeys.layout, jsonEncode(state.toMap()));
-  }
-}
-
 // ---------------------------------------------------------------- liquid glass
 
 /// 液态玻璃偏好
@@ -221,5 +180,26 @@ class ThemeModeNotifier extends Notifier<ThemeMode> {
   void set(ThemeMode mode) {
     state = mode;
     _prefs.setString(PrefsKeys.themeMode, mode.name);
+  }
+}
+
+// ---------------------------------------------------------------- audio quality
+
+final NotifierProvider<AudioQualityNotifier, AudioQuality>
+    audioQualityProvider = NotifierProvider<AudioQualityNotifier, AudioQuality>(
+        AudioQualityNotifier.new);
+
+class AudioQualityNotifier extends Notifier<AudioQuality> {
+  late SharedPreferences _prefs;
+
+  @override
+  AudioQuality build() {
+    _prefs = ref.watch(sharedPreferencesProvider);
+    return AudioQualityX.fromName(_prefs.getString(PrefsKeys.audioQuality));
+  }
+
+  void set(AudioQuality quality) {
+    state = quality;
+    _prefs.setString(PrefsKeys.audioQuality, quality.name);
   }
 }

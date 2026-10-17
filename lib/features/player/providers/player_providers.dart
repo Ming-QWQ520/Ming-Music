@@ -6,6 +6,9 @@
 ///  - 进度等高频数据走独立的 StreamProvider（positionProvider），
 ///    且组件外层包裹 RepaintBoundary，把重绘隔离到最小范围。
 ///  - 严禁监听整个 PlayerState 导致整页 rebuild。
+///
+/// 网易云集成：playSongs() 在入队前批量调用 /song/url/v1 解析播放直链，
+/// 直链约 20 分钟过期（expi:1200），收藏恢复/跨次启动播放时自动重新解析。
 library;
 
 import 'dart:async';
@@ -15,7 +18,13 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:just_audio/just_audio.dart'
     show LoopMode, ProcessingState, SequenceState;
 
+import '../../discover/data/netease_providers.dart';
+import '../../discover/data/netease_repository.dart';
 import '../../library/domain/track.dart';
+import '../../../core/api/netease_models.dart' show SongUrlInfo;
+import '../../settings/domain/settings_models.dart' show AudioQualityX;
+import '../../settings/providers/settings_providers.dart'
+    show audioQualityProvider;
 import '../domain/player_state.dart';
 import '../services/ming_audio_handler.dart';
 
@@ -78,6 +87,9 @@ class PlayerNotifier extends Notifier<PlayerState> {
   /// 最近一次已生效的状态：依赖变化导致重建时恢复现场，避免 UI 跳变
   PlayerState? _lastState;
 
+  /// 播放直链内存缓存（neteaseId → url），队列重播免二次请求
+  final Map<int, SongUrlInfo> _urlCache = <int, SongUrlInfo>{};
+
   @override
   set state(PlayerState value) {
     _lastState = value;
@@ -136,22 +148,159 @@ class PlayerNotifier extends Notifier<PlayerState> {
 
   // ---------------------------------------------------------------- intents
 
-  /// 播放一个队列（点击列表 / 收藏页 / 全部播放）
-  Future<void> playQueue(List<Track> tracks, {int startIndex = 0}) async {
+  /// 播放一批网易云歌曲（发现/搜索/歌单/榜单入口统一走这里）：
+  ///  1. 批量解析播放直链（VIP 灰曲自动剔除并提示）；
+  ///  2. 装载内核队列并从 [startIndex] 开始播放。
+  Future<void> playSongs(
+    List<Track> tracks, {
+    int startIndex = 0,
+    String? queueTitle,
+  }) async {
     if (tracks.isEmpty) return;
-    final int safe = startIndex.clamp(0, tracks.length - 1);
+    final int safeStart = startIndex.clamp(0, tracks.length - 1);
     state = state.copyWith(
-      queue: tracks,
-      index: safe,
-      loaded: true,
+      processing: AppProcessingState.loading,
       clearError: true,
+      queueTitle: queueTitle,
+      clearQueueTitle: queueTitle == null,
     );
     try {
-      await _handler.loadQueue(tracks, initialIndex: safe);
+      final List<Track> resolved = await resolveTracks(tracks);
+      if (resolved.isEmpty) {
+        state = state.copyWith(
+          processing: AppProcessingState.idle,
+          error: '暂时没有可播放的歌曲（VIP 或版权受限）',
+        );
+        return;
+      }
+      // 起点 id 对齐：解析过程可能剔除灰曲，按下标近似定位
+      final Track wanted = tracks[safeStart];
+      int startIdx = resolved.indexWhere((Track t) => t.id == wanted.id);
+      if (startIdx < 0) {
+        startIdx = safeStart.clamp(0, resolved.length - 1);
+      }
+      state = state.copyWith(
+        queue: resolved,
+        index: startIdx,
+        loaded: true,
+        processing: AppProcessingState.buffering,
+      );
+      await _handler.loadQueue(resolved, initialIndex: startIdx);
       await _handler.play();
     } catch (e) {
-      state = state.copyWith(error: '播放失败：$e');
+      state = state.copyWith(
+        processing: AppProcessingState.idle,
+        error: '加载播放列表失败：$e',
+      );
     }
+  }
+
+  /// 批量解析网易云直链：命中内存缓存直接复用，未命中的批量请求。
+  /// 不可播（VIP 拿不到链接）的曲目剔除，试听片段保留（freeTrial）。
+  Future<List<Track>> resolveTracks(List<Track> tracks) async {
+    final List<Track> out = <Track>[];
+    final Map<int, Track> pending = <int, Track>{};
+
+    for (final Track t in tracks) {
+      if (t.neteaseId == null) {
+        out.add(t); // 非网易云（自定义直链）：直接可用
+        continue;
+      }
+      final SongUrlInfo? cached = _urlCache[t.neteaseId!];
+      if (cached != null) {
+        if (cached.playable) out.add(t.copyWith(source: cached.url));
+        continue; // 缓存命中但不可播：剔除（VIP 灰曲）
+      }
+      pending[t.neteaseId!] = t;
+    }
+
+    if (pending.isNotEmpty) {
+      final NeteaseRepository repo = ref.read(neteaseRepositoryProvider);
+      final String level = ref.read(audioQualityProvider).apiValue;
+      final List<SongUrlInfo> urls =
+          await repo.songUrls(pending.keys.toList(), level: level);
+      for (final SongUrlInfo u in urls) {
+        final Track? t = pending[u.id];
+        if (t == null) continue;
+        _urlCache[u.id] = u;
+        if (u.playable) {
+          out.add(t.copyWith(source: u.url));
+        }
+      }
+    }
+    return out;
+  }
+
+  /// 收藏列表/恢复场景：队列里存在未解析直链的曲目时，整体重新解析。
+  Future<void> requeueIfNeeded() async {
+    final bool needsResolve = state.queue.any((Track t) => t.needsUrlResolve);
+    if (!needsResolve) return;
+    final List<Track> resolved = await resolveTracks(state.queue);
+    if (resolved.isEmpty) {
+      state = state.copyWith(error: '播放链接已失效，且重新获取失败');
+      return;
+    }
+    int startIdx = state.index.clamp(0, resolved.length - 1);
+    if (startIdx >= resolved.length) startIdx = resolved.length - 1;
+    state = state.copyWith(queue: resolved, index: startIdx);
+    await _handler.loadQueue(resolved, initialIndex: startIdx);
+  }
+
+  /// 队列内定位播放（播放列表弹窗点击）
+  Future<void> playAt(int index) async {
+    if (!state.hasQueue) return;
+    final int safe = index.clamp(0, state.queue.length - 1);
+    final Track target = state.queue[safe];
+    if (target.needsUrlResolve) {
+      await requeueIfNeeded();
+      final int idx2 = state.queue.indexWhere((Track t) => t.id == target.id);
+      await _jumpTo(idx2 < 0 ? safe : idx2);
+      return;
+    }
+    await _jumpTo(safe);
+  }
+
+  /// 移除队列指定曲目（播放列表弹窗）
+  Future<void> removeFromQueue(int index) async {
+    if (index < 0 || index >= state.queue.length) return;
+    final bool wasCurrent = index == state.index;
+    final List<Track> next = List<Track>.of(state.queue)..removeAt(index);
+    if (next.isEmpty) {
+      await _handler.loadQueue(const <Track>[]);
+      state = state.copyWith(
+        queue: next,
+        index: 0,
+        loaded: false,
+        playing: false,
+        clearQueueTitle: true,
+        processing: AppProcessingState.idle,
+      );
+      return;
+    }
+    int nextIndex = state.index;
+    if (wasCurrent) {
+      nextIndex = index.clamp(0, next.length - 1);
+    } else if (index < state.index) {
+      nextIndex = state.index - 1;
+    }
+    state = state.copyWith(queue: next, index: nextIndex);
+    if (wasCurrent) {
+      await _handler.loadQueue(next, initialIndex: nextIndex);
+      await _handler.play();
+    }
+  }
+
+  /// 清空队列（播放列表弹窗垃圾桶）
+  Future<void> clearQueue() async {
+    await _handler.loadQueue(const <Track>[]);
+    state = state.copyWith(
+      queue: const <Track>[],
+      index: 0,
+      loaded: false,
+      playing: false,
+      clearQueueTitle: true,
+      processing: AppProcessingState.idle,
+    );
   }
 
   Future<void> playPause() async {
@@ -160,6 +309,10 @@ class PlayerNotifier extends Notifier<PlayerState> {
     if (s.playing) {
       await _handler.pause();
     } else {
+      // 队列直链可能已过期（跨次启动/长时间挂起）：先尝试恢复
+      if (s.processing == AppProcessingState.idle) {
+        await requeueIfNeeded();
+      }
       // 播完自然停止后再次点击 → 从头播放
       if (s.processing == AppProcessingState.completed) {
         await _handler.seek(Duration.zero);
