@@ -2,8 +2,10 @@
 ///
 ///  - 显示模式（NpDisplayMode）：自适应（平板双列 / 手机可切换）/ 仅封面 / 仅歌词；
 ///  - 歌词页交互：单击任意区域切换封面/歌词；双击歌词行 seek 到该行；
-///    切换视图时直接显示当前播放行（直显设置，无滑动动画）；
-///  - 顶栏：收起 / 队列名 / 评论入口 / 播放页自定义 / 喜欢（登录走网易云）；
+///    切换视图时直接显示当前播放行（固定直显，无滑动动画）；
+///  - 顶栏：收起 / 歌手名（仿网易云）/ 评论入口 / 播放页自定义 / 喜欢；
+///  - 信息区：标题+VIP / 歌手 / 评论数点赞行（仿网易云）；
+///  - 进度行：当前时间 — 音质标签（居中，仿网易云）— 总时长；
 ///  - hidePlayerControls：隐藏控制栏（仅保留进度条）；
 ///  - 手势：下滑收起播放页；左右滑动切歌（避开边缘 20px，避坑指南 4）。
 library;
@@ -14,6 +16,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/constants/app_constants.dart';
 import '../../auth/providers/auth_providers.dart';
 import '../../comments/presentation/comments_page.dart';
+import '../../comments/providers/comments_providers.dart'
+    show songCommentCountProvider;
 import '../../library/domain/track.dart';
 import '../../library/providers/library_providers.dart';
 import '../../settings/domain/settings_models.dart' show AudioQuality;
@@ -153,14 +157,10 @@ class _FullPlayerPageState extends ConsumerState<FullPlayerPage> {
             const PlayerBackground(),
             SafeArea(
               child: isWide
-                  ? _TabletBody(
-                      mode: cfg.displayMode,
-                      directShow: cfg.directShowLyrics,
-                    )
+                  ? _TabletBody(mode: cfg.displayMode)
                   : _PhoneBody(
                       showLyrics: showLyrics,
                       switchable: switchable,
-                      directShow: cfg.directShowLyrics,
                       onToggleLyrics: switchable
                           ? () => setState(() {
                                 _paneOverride = !showLyrics;
@@ -181,13 +181,11 @@ class _PhoneBody extends ConsumerWidget {
   const _PhoneBody({
     required this.showLyrics,
     required this.switchable,
-    required this.directShow,
     required this.onToggleLyrics,
   });
 
   final bool showLyrics;
   final bool switchable;
-  final bool directShow;
   final VoidCallback? onToggleLyrics;
 
   @override
@@ -213,11 +211,10 @@ class _PhoneBody extends ConsumerWidget {
                 ? SizedBox(
                     key: const ValueKey<String>('lyrics'),
                     width: double.infinity,
-                    // 单击歌词区域切换视图；直显当前播放行
+                    // 单击歌词区域切换视图；直显当前播放行（固定行为）
                     child: KaraokeLyricsView(
                       key: const ValueKey<String>('lyrics-view'),
                       onToggleView: onToggleLyrics,
-                      directShow: directShow,
                       lineExtent: _lyricExtent(cfg),
                     ),
                   )
@@ -272,10 +269,9 @@ class _PhoneBody extends ConsumerWidget {
 // ---------------------------------------------------------------- 平板
 
 class _TabletBody extends ConsumerWidget {
-  const _TabletBody({required this.mode, required this.directShow});
+  const _TabletBody({required this.mode});
 
   final NpDisplayMode mode;
-  final bool directShow;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -321,10 +317,7 @@ class _TabletBody extends ConsumerWidget {
                     flex: 5,
                     child: Container(
                       margin: const EdgeInsets.fromLTRB(8, 12, 8, 24),
-                      child: KaraokeLyricsView(
-                        directShow: directShow,
-                        onToggleView: null,
-                      ),
+                      child: const KaraokeLyricsView(),
                     ),
                   ),
                 ],
@@ -337,10 +330,7 @@ class _TabletBody extends ConsumerWidget {
           children: <Widget>[
             const _TopBar(),
             Expanded(
-              child: KaraokeLyricsView(
-                directShow: directShow,
-                onToggleView: null,
-              ),
+              child: const KaraokeLyricsView(),
             ),
           ],
         );
@@ -362,8 +352,14 @@ class _TopBar extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final Track? track =
+        ref.watch(playerProvider.select((PlayerState s) => s.currentTrack));
     final String? title =
         ref.watch(playerProvider.select((PlayerState s) => s.queueTitle));
+    // 仿网易云：顶栏居中显示歌手名，无曲目时回退队列名
+    final String center = (track?.artist.isNotEmpty ?? false)
+        ? track!.artist
+        : (title ?? 'MingMusic');
 
     return SizedBox(
       height: 52,
@@ -381,7 +377,7 @@ class _TopBar extends ConsumerWidget {
           ),
           Expanded(
             child: Text(
-              title ?? 'MingMusic',
+              center,
               textAlign: TextAlign.center,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
@@ -561,22 +557,94 @@ class _InfoSection extends ConsumerWidget {
               fontSize: 14,
             ),
           ),
+          if (track?.neteaseId != null) ...<Widget>[
+            const SizedBox(height: 6),
+            const _CountsRow(),
+          ],
         ],
       ),
     );
   }
 }
 
+// ---------------------------------------------------------------- 点赞/评论计数行
+
+/// 仿网易云：标题下方右侧 喜欢 + 评论数（点击评论跳转评论页）
+class _CountsRow extends ConsumerWidget {
+  const _CountsRow();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final Track? track =
+        ref.watch(playerProvider.select((PlayerState s) => s.currentTrack));
+    if (track == null) return const SizedBox.shrink();
+    final int? songId = track.neteaseId;
+    final int count = songId == null
+        ? 0
+        : ref.watch(songCommentCountProvider(songId)).value ?? 0;
+    final Color tint = Colors.white.withValues(alpha: 0.78);
+
+    return Row(
+      children: <Widget>[
+        const Spacer(),
+        Icon(Icons.favorite_border_rounded, size: 20, color: tint),
+        const SizedBox(width: 18),
+        InkWell(
+          borderRadius: BorderRadius.circular(14),
+          onTap: () => showCommentsPage(context, track),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 2),
+            child: Row(
+              children: <Widget>[
+                Icon(Icons.mode_comment_outlined, size: 20, color: tint),
+                if (count > 0) ...<Widget>[
+                  const SizedBox(width: 4),
+                  Text(
+                    _formatWan(count),
+                    style: TextStyle(fontSize: 11.5, color: tint),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// 仿网易云计数：千以内原样，万以上「x万+」（999+w+ 风格）
+  static String _formatWan(int n) {
+    if (n >= 100000000) return '${(n / 100000000).toStringAsFixed(0)}亿+';
+    if (n >= 10000) return '${(n / 10000).toStringAsFixed(0)}万+';
+    return '$n';
+  }
+}
+
 // ---------------------------------------------------------------- 进度
 
-class _ProgressSection extends StatelessWidget {
+class _ProgressSection extends ConsumerWidget {
   const _ProgressSection();
 
   @override
-  Widget build(BuildContext context) {
-    return const Padding(
-      padding: EdgeInsets.symmetric(vertical: 2),
-      child: PlayerProgressBar(),
+  Widget build(BuildContext context, WidgetRef ref) {
+    final AudioQuality quality = ref.watch(audioQualityProvider);
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: PlayerProgressBar(
+        // 仿网易云：进度行中央显示音质标签
+        centerLabel: Text(
+          switch (quality) {
+            AudioQuality.standard => '标准音质',
+            AudioQuality.higher => '较高音质',
+            AudioQuality.exhigh => '极高音质',
+            AudioQuality.lossless => '无损音质',
+          },
+          style: TextStyle(
+            color: Colors.white.withValues(alpha: 0.55),
+            fontSize: 11.5,
+          ),
+        ),
+      ),
     );
   }
 }
@@ -711,19 +779,10 @@ class _BottomStrip extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final AudioQuality quality = ref.watch(audioQualityProvider);
-
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 0, 20, 10),
       child: Row(
         children: <Widget>[
-          Text(
-            _qualityLabel(quality),
-            style: TextStyle(
-              color: Colors.white.withValues(alpha: 0.55),
-              fontSize: 12,
-            ),
-          ),
           const Spacer(),
           if (onToggleLyrics != null)
             IconButton(
@@ -740,14 +799,5 @@ class _BottomStrip extends ConsumerWidget {
         ],
       ),
     );
-  }
-
-  String _qualityLabel(AudioQuality q) {
-    return switch (q) {
-      AudioQuality.standard => '标准音质',
-      AudioQuality.higher => '较高音质',
-      AudioQuality.exhigh => '极高音质',
-      AudioQuality.lossless => '无损音质',
-    };
   }
 }

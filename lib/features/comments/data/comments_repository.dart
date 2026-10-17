@@ -18,6 +18,7 @@ class CommentItem {
     required this.nickname,
     required this.avatarUrl,
     this.ipLocation = '',
+    this.isVipUser = false,
   });
 
   final int commentId;
@@ -31,7 +32,8 @@ class CommentItem {
   final String avatarUrl;
   final String ipLocation;
 
-  bool get isVipComment => false;
+  /// 评论者为黑胶 VIP（昵称后金徽章，仿网易云）
+  final bool isVipUser;
 
   static CommentItem fromMap(Map<String, Object?> c) {
     final Object? userRaw = c['user'];
@@ -50,6 +52,16 @@ class CommentItem {
                 : null) as String?) ??
             ''
         : ip;
+    // VIP 判定：vipRights.redVipLevel / associator.vipLevel > 0
+    final Map<String, Object?>? vipRights =
+        user['vipRights'] as Map<String, Object?>?;
+    final int redVipLevel =
+        (vipRights?['redVipLevel'] as num?)?.toInt() ?? 0;
+    final int associatorLevel =
+        ((vipRights?['associator'] as Map<String, Object?>?)?['vipLevel']
+                as num?)
+            ?.toInt() ??
+        0;
     return CommentItem(
       commentId: (c['commentId'] as num?)?.toInt() ?? 0,
       content: (c['content'] as String?) ?? '',
@@ -57,8 +69,9 @@ class CommentItem {
       likedCount: (c['likedCount'] as num?)?.toInt() ?? 0,
       userId: (user['userId'] as num?)?.toInt() ?? 0,
       nickname: (user['nickname'] as String?) ?? '未知用户',
-      avatarUrl: (user['avatarUrl'] as String?) ?? '',
+      avatarUrl: normalizeNeteaseUrl(user['avatarUrl'] as String?),
       ipLocation: ip,
+      isVipUser: redVipLevel > 0 || associatorLevel > 0,
     );
   }
 }

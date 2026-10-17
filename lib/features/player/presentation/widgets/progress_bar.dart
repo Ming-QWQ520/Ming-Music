@@ -11,9 +11,12 @@ import '../../../../core/utils/duration_utils.dart';
 import '../../providers/player_providers.dart';
 
 class PlayerProgressBar extends ConsumerStatefulWidget {
-  const PlayerProgressBar({super.key, this.compact = false});
+  const PlayerProgressBar({super.key, this.compact = false, this.centerLabel});
 
   final bool compact;
+
+  /// 进度行中央标签（仿网易云：音质标识）
+  final Widget? centerLabel;
 
   @override
   ConsumerState<PlayerProgressBar> createState() => _PlayerProgressBarState();
@@ -60,7 +63,6 @@ class _PlayerProgressBarState extends ConsumerState<PlayerProgressBar> {
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 22),
             child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: <Widget>[
                 Text(
                   Duration(milliseconds: value.round()).clock,
@@ -71,6 +73,9 @@ class _PlayerProgressBarState extends ConsumerState<PlayerProgressBar> {
                     ],
                     color: Colors.white.withValues(alpha: 0.62),
                   ),
+                ),
+                Expanded(
+                  child: Center(child: widget.centerLabel ?? const SizedBox.shrink()),
                 ),
                 Text(
                   Duration(milliseconds: safeDuration.round()).clock,

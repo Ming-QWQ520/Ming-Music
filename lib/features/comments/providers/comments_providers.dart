@@ -18,6 +18,19 @@ final Provider<CommentsRepository> commentsRepositoryProvider =
   (Ref ref) => CommentsRepository(ref.watch(neteaseApiProvider)),
 );
 
+/// 歌曲评论总数（轻量请求 pageSize=1）：播放页信息区仿网易云展示「20万+」
+final FutureProviderFamily<int, int> songCommentCountProvider =
+    FutureProvider.family<int, int>((Ref ref, int songId) async {
+  try {
+    final CommentPage page = await ref
+        .read(commentsRepositoryProvider)
+        .fetchComments(songId, pageSize: 1);
+    return page.totalCount;
+  } catch (_) {
+    return 0;
+  }
+});
+
 /// 已点赞评论集合（本地持久化：服务端未提供「我赞过的评论」查询）
 final NotifierProvider<LikedCommentsNotifier, Set<int>> likedCommentsProvider =
     NotifierProvider<LikedCommentsNotifier, Set<int>>(
@@ -172,6 +185,7 @@ class CommentsController extends FamilyAsyncNotifier<CommentPage?, int> {
                   nickname: c.nickname,
                   avatarUrl: c.avatarUrl,
                   ipLocation: c.ipLocation,
+                  isVipUser: c.isVipUser,
                 )
               : c)
           .toList(growable: false);

@@ -3,10 +3,62 @@
 library;
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:ming_music/core/api/netease_api.dart';
 import 'package:ming_music/core/api/netease_models.dart';
 import 'package:ming_music/features/library/domain/track.dart';
 
 void main() {
+  group('normalizeNeteaseUrl（明文直链改写，播放/封面加载根因修复）', () {
+    test('music.126.net http → https', () {
+      expect(
+        normalizeNeteaseUrl('http://m702.music.126.net/a/b.mp3'),
+        'https://m702.music.126.net/a/b.mp3',
+      );
+      expect(
+        normalizeNeteaseUrl('http://p3.music.126.net/x.jpg'),
+        'https://p3.music.126.net/x.jpg',
+      );
+    });
+
+    test('已是 https / 非 CDN 域名 / 空值不变', () {
+      expect(
+        normalizeNeteaseUrl('https://m801.music.126.net/a.mp3'),
+        'https://m801.music.126.net/a.mp3',
+      );
+      expect(
+        normalizeNeteaseUrl('http://example.com/a.mp3'),
+        'http://example.com/a.mp3',
+      );
+      expect(normalizeNeteaseUrl(null), '');
+      expect(normalizeNeteaseUrl(''), '');
+    });
+
+    test('Song 模型封面自动改写 https', () {
+      final Song s = Song.fromCloudJson(<String, Object?>{
+        'id': 1,
+        'name': 'x',
+        'ar': <Object?>[
+          <String, Object?>{'id': 1, 'name': 'a'},
+        ],
+        'al': <String, Object?>{
+          'id': 1,
+          'name': 'al',
+          'picUrl': 'http://p2.music.126.net/c.jpg',
+        },
+      });
+      expect(s.coverUrl, 'https://p2.music.126.net/c.jpg');
+    });
+
+    test('SongUrlInfo 直链自动改写 https', () {
+      final SongUrlInfo u = SongUrlInfo.fromJson(<String, Object?>{
+        'id': 1,
+        'url': 'http://m701.music.126.net/x.mp3',
+      });
+      expect(u.url, 'https://m701.music.126.net/x.mp3');
+      expect(u.playable, isTrue);
+    });
+  });
+
   group('Song.fromCloudJson', () {
     test('cloudsearch 字段（ar/al/dt）', () {
       final Song s = Song.fromCloudJson(<String, Object?>{
@@ -27,7 +79,7 @@ void main() {
       expect(s.name, '光年之外');
       expect(s.artists, 'G.E.M.邓紫棋');
       expect(s.album, '光年之外');
-      expect(s.coverUrl, 'http://p3.music.126.net/xx.jpg');
+      expect(s.coverUrl, 'https://p3.music.126.net/xx.jpg');
       expect(s.durationMs, 227640);
       expect(s.isVipOnly, isFalse);
     });

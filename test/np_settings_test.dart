@@ -25,7 +25,6 @@ void main() {
       expect(restored.lyricBlur, s.lyricBlur);
       expect(restored.yrcPlayed, s.yrcPlayed);
       expect(restored.yrcUnplayed, s.yrcUnplayed);
-      expect(restored.directShowLyrics, s.directShowLyrics);
       expect(restored.animationSpeed, s.animationSpeed);
     });
 
@@ -46,7 +45,6 @@ void main() {
         lyricBlur: 3,
         yrcPlayed: Color(0xFFFA233B),
         yrcUnplayed: Color(0x33FFFFFF),
-        directShowLyrics: false,
         animationSpeed: 1.6,
       );
       final NpPlayerSettings restored = NpPlayerSettings.fromMap(s.toMap());
@@ -67,7 +65,6 @@ void main() {
       expect(restored.lyricBlur, 3);
       expect(restored.yrcPlayed, const Color(0xFFFA233B));
       expect(restored.yrcUnplayed, const Color(0x33FFFFFF));
-      expect(restored.directShowLyrics, isFalse);
       expect(restored.animationSpeed, closeTo(1.6, 1e-9));
     });
 
@@ -97,12 +94,23 @@ void main() {
       const NpPlayerSettings base = NpPlayerSettings();
       final NpPlayerSettings updated = base.copyWith(
         bgBlur: 20,
-        directShowLyrics: false,
+        animationSpeed: 1.4,
       );
       expect(updated.bgBlur, 20);
-      expect(updated.directShowLyrics, isFalse);
+      expect(updated.animationSpeed, closeTo(1.4, 1e-9));
       expect(updated.displayMode, base.displayMode);
       expect(updated.lyricFontSize, base.lyricFontSize);
+    });
+
+    test('旧版本数据（含 directShowLyrics 字段）向前兼容', () {
+      // v1 旧数据含已移除的 directShowLyrics：解析应忽略未知字段不报错
+      final NpPlayerSettings legacy = NpPlayerSettings.fromMap(<Object?, Object?>{
+        '_v': 1,
+        'displayMode': 'both',
+        'directShowLyrics': false, // 已废弃字段
+      });
+      expect(legacy.displayMode, NpDisplayMode.both);
+      expect(legacy.animationSpeed, closeTo(1.0, 1e-9));
     });
   });
 }

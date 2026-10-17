@@ -4,7 +4,7 @@
 ///  - 封面样式（黑胶/圆角方形/圆形）+ 缩放 + 阴影；
 ///  - 背景模糊/变暗强度；
 ///  - 歌词排版（字号/行距/对齐/翻译/淡出/模糊）与逐字着色；
-///  - 视图切换行为（直显当前歌词 vs 滑动动画）。
+///  - 视图切换固定直显当前歌词（不再作为设置项）。
 ///
 /// 持久化为单一 JSON key（PrefsKeys.npSettings），带版本号迁移
 /// （仿 Zephyr rnp-settings + SETTINGS_VERSION）。
@@ -70,7 +70,6 @@ class NpPlayerSettings {
     this.lyricBlur = 0,
     this.yrcPlayed = const Color(0xFFFFFFFF),
     this.yrcUnplayed = const Color(0x66FFFFFF),
-    this.directShowLyrics = true,
     this.animationSpeed = 1.0,
   });
 
@@ -131,10 +130,6 @@ class NpPlayerSettings {
   /// 逐字未唱颜色
   final Color yrcUnplayed;
 
-  /// 切换到歌词页时直接定位当前行（无滑动动画）。
-  /// 关闭时使用平滑滚动动画。
-  final bool directShowLyrics;
-
   /// 自动跟随滚动动画时长倍率（0.5 - 2.0）
   final double animationSpeed;
 
@@ -154,7 +149,6 @@ class NpPlayerSettings {
     double? lyricBlur,
     Color? yrcPlayed,
     Color? yrcUnplayed,
-    bool? directShowLyrics,
     double? animationSpeed,
   }) {
     return NpPlayerSettings(
@@ -173,7 +167,6 @@ class NpPlayerSettings {
       lyricBlur: lyricBlur ?? this.lyricBlur,
       yrcPlayed: yrcPlayed ?? this.yrcPlayed,
       yrcUnplayed: yrcUnplayed ?? this.yrcUnplayed,
-      directShowLyrics: directShowLyrics ?? this.directShowLyrics,
       animationSpeed: animationSpeed ?? this.animationSpeed,
     );
   }
@@ -195,7 +188,6 @@ class NpPlayerSettings {
         'lyricBlur': lyricBlur,
         'yrcPlayed': yrcPlayed.toARGB32(),
         'yrcUnplayed': yrcUnplayed.toARGB32(),
-        'directShowLyrics': directShowLyrics,
         'animationSpeed': animationSpeed,
       };
 
@@ -237,9 +229,6 @@ class NpPlayerSettings {
       lyricBlur: clampD(map['lyricBlur'], 0, 10, defaults.lyricBlur),
       yrcPlayed: colorOf(map['yrcPlayed'], defaults.yrcPlayed),
       yrcUnplayed: colorOf(map['yrcUnplayed'], defaults.yrcUnplayed),
-      directShowLyrics: map['directShowLyrics'] is bool
-          ? map['directShowLyrics']! as bool
-          : defaults.directShowLyrics,
       animationSpeed:
           clampD(map['animationSpeed'], 0.5, 2.0, defaults.animationSpeed),
     );

@@ -27,11 +27,13 @@ class AuthState {
     this.profile,
     this.level,
     this.listenSeconds = 0,
+    this.vip,
     this.qrStatus = QrStatus.idle,
     this.qrImage,
     this.qrMessage = '',
     this.likedIds = const <int>{},
     this.busy = false,
+    this.statusCheckFailed = false,
   });
 
   final AuthStatus status;
@@ -39,6 +41,9 @@ class AuthState {
 
   /// 用户等级（异步加载，可能为 null）
   final NeteaseLevel? level;
+
+  /// VIP 信息（/vip/info/v2，对齐 Zephyr）
+  final NeteaseVipInfo? vip;
 
   /// 累计听歌秒数
   final int listenSeconds;
@@ -54,6 +59,9 @@ class AuthState {
   /// 登录/登出进行中
   final bool busy;
 
+  /// 本地有 cookie 但 /login/status 网络校验失败（cookie 保留，可重试）
+  final bool statusCheckFailed;
+
   bool get loggedIn => status == AuthStatus.loggedIn;
 
   AuthState copyWith({
@@ -62,6 +70,8 @@ class AuthState {
     bool clearProfile = false,
     NeteaseLevel? level,
     bool clearLevel = false,
+    NeteaseVipInfo? vip,
+    bool clearVip = false,
     int? listenSeconds,
     QrStatus? qrStatus,
     String? qrImage,
@@ -69,17 +79,23 @@ class AuthState {
     String? qrMessage,
     Set<int>? likedIds,
     bool? busy,
+    bool? statusCheckFailed,
+    bool clearStatusCheckFailed = false,
   }) {
     return AuthState(
       status: status ?? this.status,
       profile: clearProfile ? null : (profile ?? this.profile),
       level: clearLevel ? null : (level ?? this.level),
+      vip: clearVip ? null : (vip ?? this.vip),
       listenSeconds: listenSeconds ?? this.listenSeconds,
       qrStatus: qrStatus ?? this.qrStatus,
       qrImage: clearQrImage ? null : (qrImage ?? this.qrImage),
       qrMessage: qrMessage ?? this.qrMessage,
       likedIds: likedIds ?? this.likedIds,
       busy: busy ?? this.busy,
+      statusCheckFailed: clearStatusCheckFailed
+          ? false
+          : (statusCheckFailed ?? this.statusCheckFailed),
     );
   }
 }
@@ -120,38 +136,60 @@ class AuthNotifier extends Notifier<AuthState> {
       return;
     }
     _api.restoreUserCookie(saved);
-    final NeteaseProfile? profile = await _safeStatus();
+    NeteaseProfile? profile;
+    bool checkFailed = false;
+    try {
+      profile = await _repo.loginStatus();
+    } catch (e) {
+      debugPrint('login/status 校验失败: $e');
+      checkFailed = true;
+    }
+    if (_disposed) return;
     if (profile != null) {
       state = state.copyWith(
         status: AuthStatus.loggedIn,
         profile: profile,
+        clearStatusCheckFailed: true,
       );
       unawaited(_loadExtras(profile.userId));
+    } else if (checkFailed) {
+      // 对齐 Zephyr：网络校验失败绝不清除 cookie，仅标记待重试
+      // （服务端偶发抖动/超时，重启几次就掉登录的根因）
+      state = state.copyWith(
+        status: AuthStatus.unknown,
+        statusCheckFailed: true,
+      );
     } else {
-      // cookie 失效
+      // 服务端明确返回未登录 → cookie 确已失效
       _api.clearUserCookie();
       state = state.copyWith(status: AuthStatus.guest);
     }
   }
 
-  Future<NeteaseProfile?> _safeStatus() async {
-    try {
-      return await _repo.loginStatus();
-    } catch (e) {
-      debugPrint('login/status 失败: $e');
-      return null;
-    }
+  /// 手动重试登录态校验（我的页「校验失败」卡片点击）
+  Future<void> recheckLogin() async {
+    if (state.busy) return;
+    state = state.copyWith(statusCheckFailed: false);
+    await _restore();
   }
 
-  /// 登录成功后的公共入口
+  /// 登录成功后的公共入口（对齐 Zephyr：完整 cookie 串持久化，
+  /// 保留 __csrf_token 等字段供评论/点赞等写操作使用）
   Future<void> _onLoginSuccess(String cookie) async {
     _api.setUserCookie(cookie);
-    final NeteaseProfile? profile = await _safeStatus();
+    NeteaseProfile? profile;
+    try {
+      profile = await _repo.loginStatus();
+    } catch (e) {
+      debugPrint('login/status 失败: $e');
+    }
+    if (_disposed) return;
     if (profile == null) {
       state = state.copyWith(
-        status: AuthStatus.guest,
+        status: AuthStatus.unknown,
         busy: false,
-        qrMessage: '登录成功但获取账号信息失败',
+        statusCheckFailed: true,
+        qrMessage: '登录成功但获取账号信息失败，请下拉重试',
       );
       return;
     }
@@ -162,24 +200,28 @@ class AuthNotifier extends Notifier<AuthState> {
       qrStatus: QrStatus.success,
       qrMessage: '登录成功',
       clearLevel: true,
+      clearVip: true,
       listenSeconds: 0,
       likedIds: const <int>{},
+      clearStatusCheckFailed: true,
     );
     unawaited(_loadExtras(profile.userId));
   }
 
-  /// 加载等级 / 听歌时长 / 喜欢列表（失败静默，非关键数据）
+  /// 加载等级 / VIP / 听歌时长 / 喜欢列表（失败静默，非关键数据）
   Future<void> _loadExtras(int uid) async {
     final List<dynamic> results = await Future.wait<dynamic>(<Future<dynamic>>[
       _repo.userLevel(),
       _repo.listenDataTotal(),
       _repo.likeList(uid),
+      _repo.vipInfo(),
     ]);
     if (_disposed) return;
     state = state.copyWith(
       level: results[0] as NeteaseLevel?,
       listenSeconds: (results[1] as int?) ?? 0,
       likedIds: Set<int>.of((results[2] as List<int>?) ?? const <int>[]),
+      vip: results[3] as NeteaseVipInfo?,
     );
   }
 
@@ -231,15 +273,8 @@ class AuthNotifier extends Notifier<AuthState> {
           case 803:
             _stopQrPolling();
             if (cookie != null && cookie.isNotEmpty) {
-              final String? musicU = _extractMusicU(cookie);
-              if (musicU != null) {
-                await _onLoginSuccess(musicU);
-              } else {
-                state = state.copyWith(
-                  qrStatus: QrStatus.expired,
-                  qrMessage: '登录凭证解析失败，请重试',
-                );
-              }
+              // 对齐 Zephyr：保留完整 cookie 串（含 __csrf_token 等）
+              await _onLoginSuccess(cookie);
             }
           case 801:
           default:
@@ -286,8 +321,8 @@ class AuthNotifier extends Notifier<AuthState> {
         captcha: captcha,
       );
       if (code == 200 && cookie != null && cookie.isNotEmpty) {
-        final String musicU = _extractMusicU(cookie) ?? cookie;
-        await _onLoginSuccess(musicU);
+        // 完整 cookie 串透传（与二维码登录一致）
+        await _onLoginSuccess(cookie);
         return null;
       }
       return msg.isEmpty ? '登录失败 (code: $code)' : msg;
@@ -319,12 +354,14 @@ class AuthNotifier extends Notifier<AuthState> {
       status: AuthStatus.guest,
       clearProfile: true,
       clearLevel: true,
+      clearVip: true,
       listenSeconds: 0,
       likedIds: const <int>{},
       busy: false,
       qrStatus: QrStatus.idle,
       qrMessage: '',
       clearQrImage: true,
+      clearStatusCheckFailed: true,
     );
   }
 
@@ -376,11 +413,5 @@ class AuthNotifier extends Notifier<AuthState> {
       state = state.copyWith(likedIds: rollback);
       return '网络异常：$e';
     }
-  }
-
-  /// set-cookie 串提取 MUSIC_U
-  static String? _extractMusicU(String raw) {
-    final RegExpMatch? m = RegExp(r'MUSIC_U=([^;]+)').firstMatch(raw);
-    return m == null ? null : 'MUSIC_U=${m.group(1)!}';
   }
 }

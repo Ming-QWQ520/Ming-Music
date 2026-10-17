@@ -96,34 +96,44 @@ class NeteaseRepository {
   /// 榜单详情（同歌单接口）
   Future<PlaylistDetail> toplist(int id) => playlistDetail(id);
 
-  /// 批量解析播放地址（/song/url/v1 支持逗号分隔多 id）
+  /// 批量解析播放地址（/song/url/v1 支持逗号分隔多 id）。
+  /// 大歌单/全专辑入队时按 100 个一批分块请求，避免 URL 过长被网关拒。
   Future<List<SongUrlInfo>> songUrls(List<int> ids,
       {String level = 'standard'}) async {
     if (ids.isEmpty) return const <SongUrlInfo>[];
-    final Map<String, Object?> res =
-        await _api.get('/song/url/v1', <String, String>{
-      'id': ids.join(','),
-      'level': level,
-    });
-    final Object? data = res['data'];
-    if (data is! List<Object?>) return const <SongUrlInfo>[];
-    return data
-        .whereType<Map<String, Object?>>()
-        .map(SongUrlInfo.fromJson)
-        .toList(growable: false);
+    const int chunkSize = 100;
+    final List<SongUrlInfo> out = <SongUrlInfo>[];
+    for (int i = 0; i < ids.length; i += chunkSize) {
+      final List<int> chunk =
+          ids.sublist(i, (i + chunkSize).clamp(0, ids.length));
+      final Map<String, Object?> res =
+          await _api.get('/song/url/v1', <String, String>{
+        'id': chunk.join(','),
+        'level': level,
+      });
+      final Object? data = res['data'];
+      if (data is! List<Object?>) continue;
+      out.addAll(data
+          .whereType<Map<String, Object?>>()
+          .map(SongUrlInfo.fromJson)
+          .toList(growable: false));
+    }
+    return out;
   }
 
-  /// 歌词：一次请求拿 yrc（逐字）+ lrc + 翻译
+  /// 歌词：一次请求拿 yrc（逐字）+ lrc + 翻译 + 音译
   Future<LyricData> lyric(int id) async {
     final Map<String, Object?> res =
         await _api.get('/lyric/new', <String, String>{'id': '$id'});
     final Object? yrc = res['yrc'];
     final Object? lrc = res['lrc'];
     final Object? tlyric = res['tlyric'];
+    final Object? romalrc = res['romalrc'];
     return LyricData(
       yrcText: _lyricText(yrc),
       lrcText: _lyricText(lrc),
       translationText: _lyricText(tlyric),
+      romanizationText: _lyricText(romalrc),
     );
   }
 

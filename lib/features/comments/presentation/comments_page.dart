@@ -436,10 +436,10 @@ class _CommentRow extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: <Widget>[
-                  // 昵称 + IP 属地
+                  // 昵称 + VIP 徽章（仿网易云）+ IP 属地
                   Row(
                     children: <Widget>[
-                      Expanded(
+                      Flexible(
                         child: Text(
                           comment.nickname,
                           maxLines: 1,
@@ -451,7 +451,28 @@ class _CommentRow extends StatelessWidget {
                           ),
                         ),
                       ),
-                      if (comment.ipLocation.isNotEmpty)
+                      if (comment.isVipUser) ...<Widget>[
+                        const SizedBox(width: 4),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 4, vertical: 1),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFE7B15C),
+                            borderRadius: BorderRadius.circular(3),
+                          ),
+                          child: const Text(
+                            'VIP',
+                            style: TextStyle(
+                              fontSize: 9,
+                              height: 1.2,
+                              fontWeight: FontWeight.w800,
+                              color: Color(0xFF4A3115),
+                            ),
+                          ),
+                        ),
+                      ],
+                      if (comment.ipLocation.isNotEmpty) ...<Widget>[
+                        const SizedBox(width: 6),
                         Text(
                           comment.ipLocation,
                           style: TextStyle(
@@ -460,6 +481,7 @@ class _CommentRow extends StatelessWidget {
                                 .withValues(alpha: 0.6),
                           ),
                         ),
+                      ],
                     ],
                   ),
                   const SizedBox(height: 4),

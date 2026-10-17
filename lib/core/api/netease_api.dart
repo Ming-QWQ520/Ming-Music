@@ -137,8 +137,11 @@ class NeteaseApi {
         if (attempt == 1) rethrow;
       } on HttpException {
         if (attempt == 1) rethrow;
+      } on FormatException {
+        // 服务端抖动时会返回空响应/截断 JSON：与网络异常同属瞬态，重试一次
+        if (attempt == 1) rethrow;
       } catch (_) {
-        rethrow; // 解析错误等不可恢复异常直接抛出
+        rethrow; // 其他不可恢复异常直接抛出
       }
     }
 
@@ -205,11 +208,12 @@ class NeteaseApi {
         '${DateTime.now().millisecondsSinceEpoch}',
       );
       if (decoded is Map<String, Object?>) {
-        final String? raw = decoded['cookie'] as String?;
-        final String? musicU = _extractMusicU(raw);
-        if (musicU != null) {
-          _anonCookie = musicU;
-          await _prefs.setString(PrefsKeys.anonCookie, musicU);
+        final Object? raw = decoded['cookie'];
+        if (raw is String && raw.isNotEmpty) {
+          // 完整 cookie 串（含 MUSIC_A/__csrf 等，游客会话标识）：
+          // 实测匿名注册响应不含 MUSIC_U，必须整串透传才有效
+          _anonCookie = raw;
+          await _prefs.setString(PrefsKeys.anonCookie, raw);
         }
       }
     } catch (e) {
@@ -217,13 +221,24 @@ class NeteaseApi {
     }
     return _anonCookie;
   }
+}
 
-  /// 从 set-cookie 串中提取 `MUSIC_U=值`（到第一个分号）
-  static String? _extractMusicU(String? raw) {
-    if (raw == null) return null;
-    final RegExpMatch? m = RegExp(r'MUSIC_U=([^;]+)').firstMatch(raw);
-    return m == null ? null : 'MUSIC_U=${m.group(1)!}';
+/// 网易云资源 URL 规范化：CDN 部分场景返回 http:// 明文直链，
+/// Android 9+ 平台策略默认拦截明文流量（just_audio / dart:io 均受管），
+/// music.126.net 全系 CDN 支持 https（已实测 206），统一改写为 https。
+String normalizeNeteaseUrl(String? url) {
+  if (url == null || url.isEmpty) return '';
+  if (url.startsWith('http://')) {
+    final Uri u = Uri.parse(url);
+    // 仅对已知网易 CDN 域名改写，避免误伤第三方 http 资源
+    const List<String> hosts = <String>[
+      'music.126.net', 'music.163.com', '126.net',
+    ];
+    for (final String h in hosts) {
+      if (u.host.endsWith(h)) return 'https://${url.substring(7)}';
+    }
   }
+  return url;
 }
 
 /// api-enhanced 兼容读取：部分接口返回 {code, data:{...}} 包裹层，

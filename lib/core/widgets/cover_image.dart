@@ -108,9 +108,12 @@ class _CoverImageState extends State<CoverImage> {
     } catch (_) {}
 
     final String param = size.param ?? '';
-    final String sizedUrl = url.contains('?param=')
-        ? url
-        : (param.isEmpty ? url : '$url?param=$param');
+    final String rawUrl = url.startsWith('http://')
+        ? url.replaceFirst('http://', 'https://')
+        : url; // CDN 明文直链统一 https（Android 9+ 拦截 http）
+    final String sizedUrl = rawUrl.contains('?param=')
+        ? rawUrl
+        : (param.isEmpty ? rawUrl : '$rawUrl?param=$param');
 
     return _inflight.putIfAbsent(sizedUrl, () async {
       try {

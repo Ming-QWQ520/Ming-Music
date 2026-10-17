@@ -125,9 +125,11 @@ class _VinylDiscState extends State<VinylDisc>
             ),
           ),
         ),
-        // 唱针（叠在唱片右上，支点略高于唱片顶缘）
+        // 唱针（仿网易云：支点在唱片右上角外侧，斜搭向盘心；
+        // 播放时落下贴盘，暂停时向外抬起）
         Positioned(
-          top: -size * 0.10,
+          top: -size * 0.06,
+          right: size * 0.06,
           child: _Tonearm(size: size, playing: widget.playing),
         ),
       ],
@@ -195,25 +197,32 @@ class _Tonearm extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final double armLength = size * 0.44;
+    final double armLength = size * 0.46;
 
     final Widget arm = SizedBox(
-      width: 34,
+      width: 40,
       child: Column(
         children: <Widget>[
-          // 支点
+          // 支点（仿网易云金属圆钮）
           Container(
-            width: 22,
-            height: 22,
+            width: 26,
+            height: 26,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
               color: const Color(0xFFD8D8DC),
               border: Border.all(color: Colors.black26, width: 2),
+              boxShadow: <BoxShadow>[
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.35),
+                  blurRadius: 6,
+                  offset: const Offset(0, 2),
+                ),
+              ],
             ),
             child: Center(
               child: Container(
-                width: 7,
-                height: 7,
+                width: 8,
+                height: 8,
                 decoration: const BoxDecoration(
                   shape: BoxShape.circle,
                   color: Color(0xFF6E6E73),
@@ -236,8 +245,8 @@ class _Tonearm extends StatelessWidget {
           ),
           // 针头
           Container(
-            width: 13,
-            height: 22,
+            width: 14,
+            height: 24,
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(4),
               color: const Color(0xFF101012),
@@ -251,10 +260,11 @@ class _Tonearm extends StatelessWidget {
       ),
     );
 
-    // 播放：搭下（0°）；暂停：抬起（-26°）；旋转轴心在支点
+    // 仿网易云：播放时唱臂顺时针搭向盘面（+14°），
+    // 暂停时逆时针抬起（-18°）；旋转轴心在支点
     return AnimatedRotation(
-      turns: playing ? 0 : -26 / 360,
-      duration: const Duration(milliseconds: 380),
+      turns: playing ? 14 / 360 : -18 / 360,
+      duration: const Duration(milliseconds: 420),
       curve: Curves.easeInOutCubic,
       alignment: Alignment.topCenter,
       child: arm,

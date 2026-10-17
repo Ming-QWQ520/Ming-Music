@@ -131,6 +131,59 @@ class _UserCard extends ConsumerWidget {
     final AuthState auth = ref.watch(authProvider);
     final ThemeData theme = Theme.of(context);
 
+    if (auth.statusCheckFailed) {
+      // 本地有登录凭证但 /login/status 校验失败（服务端抖动）：
+      // 不清 cookie，展示重试卡（对齐 Zephyr 的容错策略）
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+        child: Material(
+          color: theme.colorScheme.surfaceContainerHighest
+              .withValues(alpha: 0.55),
+          borderRadius: BorderRadius.circular(18),
+          child: InkWell(
+            onTap: () => ref.read(authProvider.notifier).recheckLogin(),
+            borderRadius: BorderRadius.circular(18),
+            child: Padding(
+              padding: const EdgeInsets.all(18),
+              child: Row(
+                children: <Widget>[
+                  CircleAvatar(
+                    radius: 30,
+                    backgroundColor:
+                        theme.colorScheme.surfaceContainerHighest,
+                    child: const Icon(Icons.cloud_off_rounded,
+                        size: 30, color: Colors.white38),
+                  ),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: <Widget>[
+                        const Text('登录状态校验失败',
+                            style: TextStyle(
+                                fontSize: 16, fontWeight: FontWeight.w700)),
+                        const SizedBox(height: 4),
+                        Text(
+                          '网络异常或服务波动，登录信息已保留，点击重试',
+                          style: TextStyle(
+                            fontSize: 12.5,
+                            color: theme.colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Icon(Icons.refresh_rounded,
+                      size: 26,
+                      color: theme.colorScheme.onSurfaceVariant),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
     if (!auth.loggedIn) {
       // 未登录：引导卡
       return Padding(
@@ -217,14 +270,16 @@ class _UserCard extends ConsumerWidget {
                           children: <Widget>[
                             Flexible(
                               child: Text(
-                                profile?.nickname ?? '网易云音乐用户',
+                                profile?.nickname ?? '网易云用户',
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                                 style: const TextStyle(
                                     fontSize: 17, fontWeight: FontWeight.w700),
                               ),
                             ),
-                            if (profile?.isVip == true) ...<Widget>[
+                            // VIP：优先 /vip/info/v2（含黑胶等级），回退 profile.vipType
+                            if ((auth.vip?.isVip ?? false) ||
+                                (profile?.isVip ?? false)) ...<Widget>[
                               const SizedBox(width: 6),
                               Container(
                                 padding: const EdgeInsets.symmetric(
@@ -237,11 +292,15 @@ class _UserCard extends ConsumerWidget {
                                   ]),
                                   borderRadius: BorderRadius.circular(4),
                                 ),
-                                child: const Text('VIP',
-                                    style: TextStyle(
-                                        color: Colors.white,
-                                        fontSize: 10,
-                                        fontWeight: FontWeight.w800)),
+                                child: Text(
+                                  (auth.vip?.redVipLevel ?? 0) > 0
+                                      ? 'VIP·${auth.vip!.redVipLevel}'
+                                      : 'VIP',
+                                  style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.w800),
+                                ),
                               ),
                             ],
                           ],

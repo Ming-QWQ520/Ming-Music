@@ -16,6 +16,7 @@ class ParsedLyrics {
     this.yrcLines = const <YrcLine>[],
     this.lrcLines = const <LyricLine>[],
     this.translations = const <int, String>{},
+    this.romanizations = const <int, String>{},
   });
 
   /// 逐字歌词（空表示该曲无 yrc）
@@ -27,9 +28,15 @@ class ParsedLyrics {
   /// 翻译：毫秒时间戳 → 文本（与 lrcLines 时间轴对应）
   final Map<int, String> translations;
 
+  /// 音译（romalrc，粤语/日语拼音）：毫秒时间戳 → 文本
+  final Map<int, String> romanizations;
+
   bool get hasYrc => yrcLines.isNotEmpty;
   bool get hasLrc => lrcLines.isNotEmpty;
   bool get isEmpty => !hasYrc && !hasLrc;
+
+  /// 副行文案（仿网易云：有翻译用翻译，无翻译用音译拼音）
+  String subLineFor(int ms) => translations[ms] ?? romanizations[ms] ?? '';
 }
 
 /// 歌词原始数据（按网易云歌曲 id 缓存）
@@ -57,11 +64,18 @@ final Provider<ParsedLyrics> currentLyricsProvider =
           return ParsedLyrics(yrcLines: lines);
         }
       }
-      // LRC 回退 + 翻译对齐
+      // LRC 回退 + 翻译/音译对齐
       final Map<int, String> translations = <int, String>{};
       if (data.translationText != null && data.translationText!.isNotEmpty) {
         for (final LyricLine line in parseLrc(data.translationText!)) {
           translations[line.time.inMilliseconds] = line.text;
+        }
+      }
+      final Map<int, String> romanizations = <int, String>{};
+      if (data.romanizationText != null &&
+          data.romanizationText!.isNotEmpty) {
+        for (final LyricLine line in parseLrc(data.romanizationText!)) {
+          romanizations[line.time.inMilliseconds] = line.text;
         }
       }
       final List<LyricLine> lines =
@@ -69,6 +83,7 @@ final Provider<ParsedLyrics> currentLyricsProvider =
       return ParsedLyrics(
         lrcLines: lines,
         translations: translations,
+        romanizations: romanizations,
       );
     },
   );

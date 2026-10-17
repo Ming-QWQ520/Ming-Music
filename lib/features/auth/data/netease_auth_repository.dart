@@ -10,10 +10,48 @@ library;
 
 import '../../../core/api/netease_api.dart';
 
+/// VIP 信息（/vip/info/v2，对齐 Zephyr useNeteaseUser.loadVipAndListenData）
+class NeteaseVipInfo {
+  const NeteaseVipInfo({
+    required this.isVip,
+    this.redVipLevel = 0,
+    this.expireText = '',
+  });
+
+  final bool isVip;
+
+  /// 黑胶 VIP 等级（红心 POV 数）
+  final int redVipLevel;
+  final String expireText;
+
+  static NeteaseVipInfo? fromMap(Object? raw) {
+    if (raw is! Map<String, Object?>) return null;
+    final int associatorLevel =
+        ((raw['associator'] as Map<String, Object?>?)?['vipLevel'] as num?)
+                ?.toInt() ??
+            0;
+    final bool isVip = raw['isVip'] == true || associatorLevel > 0;
+    if (!isVip) return null;
+    final int redVipLevel =
+        (raw['redVipLevel'] as num?)?.toInt() ?? 0;
+    final Object? expire =
+        (raw['associator'] as Map<String, Object?>?)?['expireTime'] ??
+            (raw['musicPackage'] as Map<String, Object?>?)?['expireTime'];
+    String expireText = '';
+    if (expire is num && expire > 0) {
+      final DateTime d = DateTime.fromMillisecondsSinceEpoch(expire.toInt());
+      expireText =
+          '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+    }
+    return NeteaseVipInfo(
+        isVip: isVip, redVipLevel: redVipLevel, expireText: expireText);
+  }
+}
+
 /// 二维码轮询状态
 enum QrStatus { idle, loading, waiting, scanned, expired, success }
 
-/// 用户公开资料（login/status → profile）
+/// 用户公开资料（login/status → profile，对齐 Zephyr getCachedUser）
 class NeteaseProfile {
   const NeteaseProfile({
     required this.userId,
@@ -35,16 +73,23 @@ class NeteaseProfile {
 
   bool get isVip => vipType > 0;
 
-  static NeteaseProfile? fromMap(Object? raw) {
+  static NeteaseProfile? fromMap(Object? raw, {Object? account}) {
     if (raw is! Map<String, Object?>) return null;
-    final int userId = (raw['userId'] as num?)?.toInt() ?? 0;
+    // userId 兜底 account.id（对齐 Zephyr：p.userId || res.account?.id）
+    int userId = (raw['userId'] as num?)?.toInt() ?? 0;
+    if (userId == 0 && account is Map<String, Object?>) {
+      userId = (account['id'] as num?)?.toInt() ?? 0;
+    }
     if (userId == 0) return null;
     return NeteaseProfile(
       userId: userId,
-      nickname: (raw['nickname'] as String?) ?? '未知用户',
-      avatarUrl: (raw['avatarUrl'] as String?) ?? '',
+      nickname: (raw['nickname'] as String?)?.isNotEmpty == true
+          ? raw['nickname']! as String
+          : '网易云用户',
+      avatarUrl: normalizeNeteaseUrl(raw['avatarUrl'] as String?),
       signature: (raw['signature'] as String?) ?? '',
-      backgroundUrl: (raw['backgroundUrl'] as String?) ?? '',
+      backgroundUrl:
+          normalizeNeteaseUrl(raw['backgroundUrl'] as String?),
       vipType: (raw['vipType'] as num?)?.toInt() ?? 0,
     );
   }
@@ -55,16 +100,18 @@ class NeteaseLevel {
   const NeteaseLevel({required this.level, required this.progress});
 
   final int level;
+
+  /// 升级进度百分比 0-100（服务端返回 0-1 小数时自动 ×100）
   final int progress;
 
   static NeteaseLevel? fromMap(Object? raw) {
     if (raw is! Map<String, Object?>) return null;
     final int? level = (raw['level'] as num?)?.toInt();
     if (level == null) return null;
-    return NeteaseLevel(
-      level: level,
-      progress: ((raw['progress'] as num?)?.toDouble() ?? 0).round(),
-    );
+    final double p = (raw['progress'] as num?)?.toDouble() ?? 0;
+    // 对齐 Zephyr：progress 为 0~1 小数需 ×100；部分版本直接返回 0~100
+    final int percent = p > 0 && p <= 1 ? (p * 100).round() : p.round();
+    return NeteaseLevel(level: level, progress: percent.clamp(0, 100));
   }
 }
 
@@ -86,7 +133,9 @@ class NeteaseUserPlaylist {
     return NeteaseUserPlaylist(
       id: (j['id'] as num?)?.toInt() ?? 0,
       name: (j['name'] as String?) ?? '',
-      coverUrl: (j['coverImgUrl'] as String?) ?? (j['picUrl'] as String?) ?? '',
+      coverUrl: normalizeNeteaseUrl(
+        (j['coverImgUrl'] as String?) ?? (j['picUrl'] as String?),
+      ),
       trackCount: (j['trackCount'] as num?)?.toInt() ?? 0,
     );
   }
@@ -188,7 +237,10 @@ class NeteaseAuthRepository {
       throwOnCode: false,
     );
     final Map<String, Object?> payload = apiPayload(res);
-    return NeteaseProfile.fromMap(payload['profile']);
+    return NeteaseProfile.fromMap(
+      payload['profile'],
+      account: payload['account'],
+    );
   }
 
   /// 退出登录（服务端注销 + 清除本地 cookie 由 provider 负责）
@@ -208,6 +260,16 @@ class NeteaseAuthRepository {
       throwOnCode: false,
     );
     return NeteaseLevel.fromMap(apiPayload(res));
+  }
+
+  /// VIP 信息（/vip/info/v2）
+  Future<NeteaseVipInfo?> vipInfo() async {
+    final Map<String, Object?> res = await _api.get(
+      '/vip/info/v2',
+      const <String, String>{},
+      throwOnCode: false,
+    );
+    return NeteaseVipInfo.fromMap(apiPayload(res)['data'] ?? apiPayload(res));
   }
 
   /// 累计听歌时长（秒）

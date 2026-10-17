@@ -81,8 +81,5 @@ class NpSettingsNotifier extends Notifier<NpPlayerSettings> {
   void setYrcColors(Color played, Color unplayed) =>
       _commit(state.copyWith(yrcPlayed: played, yrcUnplayed: unplayed));
 
-  void setDirectShowLyrics(bool direct) =>
-      _commit(state.copyWith(directShowLyrics: direct));
-
   void reset() => _commit(NpPlayerSettings.defaults);
 }

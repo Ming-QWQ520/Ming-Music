@@ -3,11 +3,12 @@
 /// 交互（对齐 Zephyr-Music / 用户需求）：
 ///  - 单击歌词区域 → 切换封面/歌词视图（onToggleView 回调，双击等待延迟内触发）；
 ///  - 双击某行歌词 → seek 到该行起始时间；
-///  - 进入歌词页时若 [directShow] 为 true（设置「直显当前歌词」），首次定位
-///    使用 jumpTo 直接显示当前行，无滑动动画；切歌跟随滚动仍为平滑动画。
+///  - 进入歌词页首次定位使用 jumpTo 直接显示当前行（无滑动动画，固定行为
+///    不再作为设置项）；切歌跟随滚动仍为平滑动画；
+///  - 副行：有翻译显示翻译，无翻译显示音译拼音（romalrc，仿网易云）。
 ///
 /// 自定义（NpPlayerSettings）：
-///  - 字号 / 行距 / 对齐 / 翻译副行 / 非活跃淡出与模糊 / 逐字着色。
+///  - 字号 / 行距 / 对齐 / 副行 / 非活跃淡出与模糊 / 逐字着色。
 library;
 
 import 'package:flutter/material.dart';
@@ -26,7 +27,6 @@ class KaraokeLyricsView extends ConsumerStatefulWidget {
     super.key,
     this.lineExtent,
     this.onToggleView,
-    this.directShow = false,
   });
 
   /// 统一行高（元数据行与歌词行同高，保证 animateTo 偏移精确）
@@ -34,9 +34,6 @@ class KaraokeLyricsView extends ConsumerStatefulWidget {
 
   /// 单击歌词区域 → 切换封面/歌词视图（null 时单击无动作）
   final VoidCallback? onToggleView;
-
-  /// 直显模式：首次定位当前行用 jumpTo（无滑动动画）
-  final bool directShow;
 
   @override
   ConsumerState<KaraokeLyricsView> createState() => _KaraokeLyricsViewState();
@@ -60,7 +57,7 @@ class _KaraokeLyricsViewState extends ConsumerState<KaraokeLyricsView> {
 
   void _maybeAutoScroll(int active) {
     // 无有效行（前奏/position 未就绪）不消费「首次定位」机会，
-    // 保证 directShow 的 jumpTo 落在真正出现当前行的第一刻
+    // 保证 jumpTo 落在真正出现当前行的第一刻
     if (active < 0) return;
     if (active == _lastActive) return;
     final bool firstTime = !_initialJumpDone;
@@ -73,8 +70,8 @@ class _KaraokeLyricsViewState extends ConsumerState<KaraokeLyricsView> {
     final double target = (active * _extent - viewport / 2 + _extent / 2)
         .clamp(0.0, _scroll.position.maxScrollExtent);
 
-    // 直显模式 + 首次定位：jumpTo 无动画（封面⇄歌词切换直接显示当前播放歌词）
-    if (firstTime && widget.directShow) {
+    // 首次定位：jumpTo 无动画（封面⇄歌词切换直接显示当前播放歌词，固定行为）
+    if (firstTime) {
       _scroll.jumpTo(target);
       return;
     }
@@ -126,6 +123,9 @@ class _KaraokeLyricsViewState extends ConsumerState<KaraokeLyricsView> {
             position: position,
             active: index == active,
             cfg: cfg,
+            subLine: lines[index].isMetadata
+                ? ''
+                : lyrics.subLineFor(lines[index].start.inMilliseconds),
             onSeek: _seek,
           ),
         );
@@ -141,10 +141,10 @@ class _KaraokeLyricsViewState extends ConsumerState<KaraokeLyricsView> {
           itemCount: lines.length,
           itemBuilder: (BuildContext context, int index) => _LrcRow(
             line: lines[index],
-            translation:
-                lyrics.translations[lines[index].time.inMilliseconds] ?? '',
+            // 副行：翻译优先，无翻译用音译拼音（仿网易云粤语歌）
+            subLine: lyrics.subLineFor(lines[index].time.inMilliseconds),
             active: index == active,
-            showTranslation: cfg.showTranslation,
+            showSubLine: cfg.showTranslation,
             fontSize: cfg.lyricFontSize,
             align: cfg.lyricAlign,
             fade: cfg.lyricFade,
@@ -181,13 +181,14 @@ class _KaraokeLyricsViewState extends ConsumerState<KaraokeLyricsView> {
 
 // ---------------------------------------------------------------- rows
 
-/// 逐字行：行内每个字按已唱/未唱着色；双击 seek
+/// 逐字行：行内每个字按已唱/未唱着色；双击 seek；可带音译/翻译副行
 class _YrcRow extends StatelessWidget {
   const _YrcRow({
     required this.line,
     required this.position,
     required this.active,
     required this.cfg,
+    required this.subLine,
     required this.onSeek,
   });
 
@@ -195,6 +196,7 @@ class _YrcRow extends StatelessWidget {
   final Duration position;
   final bool active;
   final NpPlayerSettings cfg;
+  final String subLine;
   final ValueChanged<Duration> onSeek;
 
   @override
@@ -236,24 +238,42 @@ class _YrcRow extends StatelessWidget {
       onDoubleTap: metadata ? null : () => onSeek(line.start),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 28),
-        child: Align(
-          alignment: align == NpLyricAlign.center
-              ? Alignment.center
-              : Alignment.centerLeft,
-          child: rich,
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          crossAxisAlignment: align == NpLyricAlign.center
+              ? CrossAxisAlignment.center
+              : CrossAxisAlignment.start,
+          children: <Widget>[
+            Align(
+              alignment: align == NpLyricAlign.center
+                  ? Alignment.center
+                  : Alignment.centerLeft,
+              child: rich,
+            ),
+            if (subLine.isNotEmpty && cfg.showTranslation && active)
+              Text(
+                subLine,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: Colors.white.withValues(alpha: 0.72),
+                  fontSize: 12.5,
+                ),
+              ),
+          ],
         ),
       ),
     );
   }
 }
 
-/// 逐行行（LRC 回退）：当前行高亮 + 翻译副行；双击 seek
+/// 逐行行（LRC 回退）：当前行高亮 + 翻译/音译副行；双击 seek
 class _LrcRow extends StatelessWidget {
   const _LrcRow({
     required this.line,
-    required this.translation,
+    required this.subLine,
     required this.active,
-    required this.showTranslation,
+    required this.showSubLine,
     required this.fontSize,
     required this.align,
     required this.fade,
@@ -261,9 +281,9 @@ class _LrcRow extends StatelessWidget {
   });
 
   final LyricLine line;
-  final String translation;
+  final String subLine;
   final bool active;
-  final bool showTranslation;
+  final bool showSubLine;
   final double fontSize;
   final NpLyricAlign align;
   final double fade;
@@ -295,9 +315,9 @@ class _LrcRow extends StatelessWidget {
                 fontWeight: active ? FontWeight.w700 : FontWeight.w500,
               ),
             ),
-            if (translation.isNotEmpty && showTranslation)
+            if (subLine.isNotEmpty && showSubLine)
               Text(
-                translation,
+                subLine,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(

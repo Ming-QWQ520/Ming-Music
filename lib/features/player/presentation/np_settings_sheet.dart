@@ -2,7 +2,7 @@
 ///  - 显示：显示模式 / 隐藏控制栏；
 ///  - 封面：样式 / 缩放 / 投影；
 ///  - 背景：类型（复用全局背景配置）/ 模糊强度 / 变暗程度；
-///  - 歌词：字号 / 行距 / 对齐 / 翻译 / 非活跃淡出与模糊 / 直显开关 / 逐字颜色。
+///  - 歌词：字号 / 行距 / 对齐 / 翻译 / 非活跃淡出与模糊 / 逐字颜色。
 library;
 
 import 'package:flutter/material.dart';
@@ -128,13 +128,7 @@ class _DisplayPane extends ConsumerWidget {
               ref.read(npSettingsProvider.notifier).setHideControls(v),
         ),
         const _GroupTitle('切换行为'),
-        _SwitchRow(
-          label: '切换到歌词时直接显示当前行',
-          hint: '关闭后切换视图将平滑滚动至当前播放行',
-          value: cfg.directShowLyrics,
-          onChanged: (bool v) =>
-              ref.read(npSettingsProvider.notifier).setDirectShowLyrics(v),
-        ),
+        const _HintText('单击封面/歌词区域切换视图；双击歌词行跳转播放进度'),
         _SliderRow(
           label: '跟随滚动速度',
           value: (cfg.animationSpeed - 0.5) / 1.5,

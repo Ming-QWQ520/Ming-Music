@@ -5,6 +5,7 @@
 ///  - `/search` 旧版：`artists[]`、`album{}`、`duration`
 library;
 
+import 'netease_api.dart' show normalizeNeteaseUrl;
 import '../../features/library/domain/track.dart';
 
 /// 歌曲条目（搜索结果 / 歌单 / 榜单通用）
@@ -84,10 +85,10 @@ class Song {
     final Object? al = j['al'] ?? j['album'];
     if (al is Map<String, Object?>) {
       final String? pic = al['picUrl'] as String?;
-      if (pic != null && pic.isNotEmpty) return pic;
+      if (pic != null && pic.isNotEmpty) return normalizeNeteaseUrl(pic);
     }
     final String? pic = j['picUrl'] as String?;
-    return (pic != null && pic.isNotEmpty) ? pic : null;
+    return (pic != null && pic.isNotEmpty) ? normalizeNeteaseUrl(pic) : null;
   }
 }
 
@@ -124,8 +125,8 @@ class PlaylistMeta {
 
   static String? _pickCover(Map<String, Object?> j) {
     for (final String key in <String>['coverImgUrl', 'picUrl']) {
-      final String? v = j[key] as String?;
-      if (v != null && v.isNotEmpty) return v;
+      final Object? v = j[key];
+      if (v is String && v.isNotEmpty) return normalizeNeteaseUrl(v);
     }
     return null;
   }
@@ -167,7 +168,7 @@ class SongUrlInfo {
 
   static SongUrlInfo fromJson(Map<String, Object?> j) => SongUrlInfo(
         id: (j['id'] as num?)?.toInt() ?? 0,
-        url: (j['url'] as String?) ?? '',
+        url: normalizeNeteaseUrl(j['url'] as String?),
         br: (j['br'] as num?)?.toInt(),
         type: j['type'] as String?,
         fee: (j['fee'] as num?)?.toInt() ?? 0,
@@ -175,12 +176,13 @@ class SongUrlInfo {
       );
 }
 
-/// 歌词数据：优先逐字（yrc），否则逐行 LRC + 可选翻译
+/// 歌词数据：优先逐字（yrc），否则逐行 LRC + 可选翻译/音译
 class LyricData {
   const LyricData({
     this.yrcText,
     this.lrcText,
     this.translationText,
+    this.romanizationText,
   });
 
   /// 逐字歌词原文（yrc 格式）
@@ -191,6 +193,9 @@ class LyricData {
 
   /// 翻译歌词（LRC 格式，与 lrcText 时间轴对应）
   final String? translationText;
+
+  /// 音译歌词（romalrc，粤语/日语拼音，无翻译时展示，仿网易云）
+  final String? romanizationText;
 
   bool get hasYrc => yrcText != null && yrcText!.trim().isNotEmpty;
   bool get hasLrc => lrcText != null && lrcText!.trim().isNotEmpty;
@@ -206,6 +211,6 @@ class HotWord {
 
   static HotWord fromJson(Map<String, Object?> j) => HotWord(
         word: (j['searchWord'] as String?) ?? '',
-        iconUrl: j['iconUrl'] as String?,
+        iconUrl: normalizeNeteaseUrl(j['iconUrl'] as String?),
       );
 }
