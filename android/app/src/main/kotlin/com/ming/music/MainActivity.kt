@@ -146,8 +146,10 @@ class MainActivity : AudioServiceActivity() {
 
     /** 反射定位 just_audio 内部的 ExoPlayer（见 [setPreferredOutput]） */
     private fun findExoPlayer(): Any? {
+        // FlutterActivity.flutterEngine 为平台可空 getter：空则直接放弃路由
+        val engine = flutterEngine ?: return null
         // ① FlutterEngine.getPlugins() → FlutterEngineConnectionRegistry
-        val registry = flutterEngine.javaClass.getMethod("getPlugins").invoke(flutterEngine)
+        val registry = engine.javaClass.getMethod("getPlugins").invoke(engine)
         // ② registry.pluginMap: Map<Class<*>, FlutterPlugin>
         val pluginMapField = registry.javaClass.getDeclaredField("pluginMap").apply {
             isAccessible = true
