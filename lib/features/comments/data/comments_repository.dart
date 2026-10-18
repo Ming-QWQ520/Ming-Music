@@ -55,25 +55,30 @@ class CommentItem {
     // VIP 判定：vipRights.redVipLevel / associator.vipLevel > 0
     final Map<String, Object?>? vipRights =
         user['vipRights'] as Map<String, Object?>?;
-    final int redVipLevel =
-        (vipRights?['redVipLevel'] as num?)?.toInt() ?? 0;
-    final int associatorLevel =
-        ((vipRights?['associator'] as Map<String, Object?>?)?['vipLevel']
-                as num?)
-            ?.toInt() ??
+    final int redVipLevel = safeIntOf(vipRights?['redVipLevel']) ?? 0;
+    final int associatorLevel = safeIntOf(
+        (vipRights?['associator'] as Map<String, Object?>?)?['vipLevel']) ??
         0;
     return CommentItem(
-      commentId: (c['commentId'] as num?)?.toInt() ?? 0,
+      commentId: safeIntOf(c['commentId']) ?? 0,
       content: (c['content'] as String?) ?? '',
-      time: (c['time'] as num?)?.toInt() ?? 0,
-      likedCount: (c['likedCount'] as num?)?.toInt() ?? 0,
-      userId: (user['userId'] as num?)?.toInt() ?? 0,
+      time: safeIntOf(c['time']) ?? 0,
+      likedCount: safeIntOf(c['likedCount']) ?? 0,
+      userId: safeIntOf(user['userId']) ?? 0,
       nickname: (user['nickname'] as String?) ?? '未知用户',
       avatarUrl: normalizeNeteaseUrl(user['avatarUrl'] as String?),
       ipLocation: ip,
       isVipUser: redVipLevel > 0 || associatorLevel > 0,
     );
   }
+}
+
+/// 安全整数解析：网易云部分接口会把数字字段返回为字符串
+/// （如 totalCount: "4682"），直接 as num? 会抛 TypeError。
+int? safeIntOf(Object? v) {
+  if (v is num) return v.toInt();
+  if (v is String) return int.tryParse(v.trim());
+  return null;
 }
 
 /// 评论分页结果
@@ -127,9 +132,10 @@ class CommentsRepository {
         : const <CommentItem>[];
     return CommentPage(
       comments: comments,
-      totalCount: (payload['totalCount'] as num?)?.toInt() ?? 0,
-      hasMore: payload['hasMore'] == true,
-      cursor: (payload['cursor'] as num?)?.toInt(),
+      // totalCount 实测可能为 String（线上崩溃：type 'String' is not a subtype of type 'num?'）
+      totalCount: safeIntOf(payload['totalCount']) ?? 0,
+      hasMore: payload['hasMore'] == true || payload['hasMore'] == 'true',
+      cursor: safeIntOf(payload['cursor']),
     );
   }
 
@@ -153,7 +159,7 @@ class CommentsRepository {
         await _api.post('/comment', params, throwOnCode: false);
     final Map<String, Object?> payload = apiPayload(res);
     return (
-      (payload['code'] as num?)?.toInt() ?? 0,
+      safeIntOf(payload['code']) ?? 0,
       (payload['message'] as String?) ?? (payload['msg'] as String?) ?? ''
     );
   }
@@ -176,7 +182,7 @@ class CommentsRepository {
     );
     final Map<String, Object?> payload = apiPayload(res);
     return (
-      (payload['code'] as num?)?.toInt() ?? 0,
+      safeIntOf(payload['code']) ?? 0,
       (payload['message'] as String?) ?? (payload['msg'] as String?) ?? ''
     );
   }

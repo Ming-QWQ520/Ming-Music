@@ -63,7 +63,8 @@ class _VinylDiscState extends State<VinylDisc>
   @override
   Widget build(BuildContext context) {
     final double size = widget.size;
-    final double coverSize = size * 0.46;
+    // 需求：黑胶黑色范围缩小 —— 封面占比 0.46 → 0.64（黑边：封面 ≈ 0.56:1）
+    final double coverSize = size * 0.64;
 
     return Stack(
       clipBehavior: Clip.none,
@@ -89,8 +90,8 @@ class _VinylDiscState extends State<VinylDisc>
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
                     border: Border.all(
-                      color: Colors.white.withValues(alpha: 0.08),
-                      width: 1,
+                      color: Colors.white.withValues(alpha: 0.10),
+                      width: 1.5,
                     ),
                     boxShadow: <BoxShadow>[
                       BoxShadow(
@@ -157,13 +158,13 @@ class _VinylPainter extends CustomPainter {
       ).createShader(Rect.fromCircle(center: c, radius: r));
     canvas.drawCircle(c, r, disc);
 
-    // 同心纹理环（模拟黑胶刻纹）
+    // 同心纹理环（模拟黑胶刻纹）：从封面外缘开始
     final Paint groove = Paint()
       ..style = PaintingStyle.stroke
       ..strokeWidth = 0.8
       ..color = Colors.white.withValues(alpha: 0.035);
     final math.Random rng = math.Random(7);
-    double radius = r * 0.28;
+    double radius = r * 0.70;
     while (radius < r * 0.94) {
       canvas.drawCircle(c, radius, groove);
       radius += 5 + rng.nextDouble() * 6;

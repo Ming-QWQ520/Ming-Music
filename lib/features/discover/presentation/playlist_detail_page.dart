@@ -123,25 +123,54 @@ class _DetailBody extends ConsumerWidget {
         SliverToBoxAdapter(
           child: Padding(
             padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+            // 仿网易云「播放全部」行：左侧红色圆形播放钮 + 文案，右侧更多操作
             child: Row(
               children: <Widget>[
                 Expanded(
-                  child: FilledButton.icon(
-                    style: FilledButton.styleFrom(
-                      backgroundColor: AppConstants.brandColor,
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(vertical: 13),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(24),
+                  child: Material(
+                    color: AppConstants.brandColor.withValues(alpha: 0.16),
+                    borderRadius: BorderRadius.circular(24),
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(24),
+                      onTap: tracks.isEmpty ? null : () => _playAll(ref, 0),
+                      child: Padding(
+                        padding:
+                            const EdgeInsets.symmetric(horizontal: 6, vertical: 5),
+                        child: Row(
+                          children: <Widget>[
+                            CircleAvatar(
+                              radius: 17,
+                              backgroundColor: AppConstants.brandColor,
+                              child: const Icon(Icons.play_arrow_rounded,
+                                  color: Colors.white, size: 24),
+                            ),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Text(
+                                '播放全部 (${tracks.length})',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                    fontSize: 15,
+                                    fontWeight: FontWeight.w700,
+                                    color: Colors.white),
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
                     ),
-                    onPressed: tracks.isEmpty ? null : () => _playAll(ref, 0),
-                    icon: const Icon(Icons.play_arrow_rounded, size: 24),
-                    label: Text(
-                      '播放全部 (${tracks.length})',
-                      style: const TextStyle(
-                          fontSize: 15.5, fontWeight: FontWeight.w600),
-                    ),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                // 右侧多选占位（网易云同位置为多选键；暂作下载入口的视觉对齐）
+                SizedBox(
+                  width: 44,
+                  height: 44,
+                  child: Icon(
+                    Icons.format_list_bulleted_rounded,
+                    size: 22,
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
                   ),
                 ),
               ],

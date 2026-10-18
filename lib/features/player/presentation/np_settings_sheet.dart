@@ -127,6 +127,20 @@ class _DisplayPane extends ConsumerWidget {
           onChanged: (bool v) =>
               ref.read(npSettingsProvider.notifier).setHideControls(v),
         ),
+        const _GroupTitle('Mini 播放条'),
+        _SegmentedRow<MiniPlayerStyle>(
+          label: '样式',
+          groups: const <(MiniPlayerStyle, String)>[
+            (MiniPlayerStyle.classic, '经典条'),
+            (MiniPlayerStyle.overlay, '封面铺满'),
+            (MiniPlayerStyle.compact, '紧凑极简'),
+            (MiniPlayerStyle.wide, '宽幅双行'),
+          ],
+          value: cfg.miniStyle,
+          onChanged: (MiniPlayerStyle v) =>
+              ref.read(npSettingsProvider.notifier).setMiniStyle(v),
+        ),
+        const _HintText('无边框透明；四种样式的组件布局各不相同'),
         const _GroupTitle('切换行为'),
         const _HintText('单击封面/歌词区域切换视图；双击歌词行跳转播放进度'),
         _SliderRow(
@@ -163,6 +177,13 @@ class _CoverPane extends ConsumerWidget {
           value: cfg.coverStyle,
           onChanged: (NpCoverStyle v) =>
               ref.read(npSettingsProvider.notifier).setCoverStyle(v),
+        ),
+        _SwitchRow(
+          label: '方形封面圆角',
+          hint: '方形样式默认无圆角，开启后显示圆角',
+          value: cfg.squareCoverRadius,
+          onChanged: (bool v) =>
+              ref.read(npSettingsProvider.notifier).setSquareCoverRadius(v),
         ),
         _SliderRow(
           label: '封面大小',

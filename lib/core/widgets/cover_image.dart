@@ -38,6 +38,13 @@ class CoverImage extends StatefulWidget {
   final double radius;
   final CoverSize coverSize;
 
+  /// 拉取原图字节（供全屏查看/保存至本地使用，走同一套缓存与重试）
+  static Future<Uint8List?> loadOriginalBytes(String? src) =>
+      _CoverImageState.loadOriginalBytes(src);
+
+  /// 按字节嗅探图片 MIME（保存至相册需要）
+  static String sniffMime(Uint8List bytes) => _CoverImageState.sniffMime(bytes);
+
   @override
   State<CoverImage> createState() => _CoverImageState();
 }
@@ -96,7 +103,10 @@ class _CoverImageState extends State<CoverImage> {
     return crypto.md5.convert(key.codeUnits).toString();
   }
 
-  /// 下载 + 并发去重 + 磁盘命中短路
+  /// 下载 + 并发去重 + 磁盘命中短路 + 多级重试。
+  ///
+  /// 网易云 CDN 部分节点对 ?param 缩略参数会返回 403/404（部分歌曲封面无法
+  /// 加载的根因），按 缩略图 → 原图 → 小缩略图 三级重试。
   static Future<Uint8List?> _fetchBytes(String url, CoverSize size) async {
     try {
       final Directory dir = await _cacheDir();
@@ -107,18 +117,39 @@ class _CoverImageState extends State<CoverImage> {
       }
     } catch (_) {}
 
-    final String param = size.param ?? '';
     final String rawUrl = url.startsWith('http://')
         ? url.replaceFirst('http://', 'https://')
         : url; // CDN 明文直链统一 https（Android 9+ 拦截 http）
-    final String sizedUrl = rawUrl.contains('?param=')
-        ? rawUrl
-        : (param.isEmpty ? rawUrl : '$rawUrl?param=$param');
 
+    // 重试阶梯：指定尺寸 → 原图 → 120 小图（部分特殊尺寸仅小图可访问）
+    final List<String> candidates = <String>[
+      if (size.param != null && !rawUrl.contains('?param=')) '$rawUrl?param=${size.param}',
+      rawUrl,
+      if (!rawUrl.contains('?param=')) '$rawUrl?param=120y120',
+    ];
+
+    for (final String candidate in candidates) {
+      final Uint8List? bytes = await _download(candidate);
+      if (bytes != null) {
+        // 任一档成功均落到原始 key 的缓存位，下次直接命中
+        try {
+          final Directory dir = await _cacheDir();
+          final File file = File('${dir.path}/${_fileName(url, size)}');
+          if (!file.existsSync()) {
+            await file.writeAsBytes(bytes, flush: true);
+          }
+        } catch (_) {}
+        return bytes;
+      }
+    }
+    return null;
+  }
+
+  static Future<Uint8List?> _download(String sizedUrl) {
     return _inflight.putIfAbsent(sizedUrl, () async {
       try {
         final HttpClient client = HttpClient()
-          ..connectionTimeout = const Duration(seconds: 10);
+          ..connectionTimeout = const Duration(seconds: 12);
         final HttpClientRequest req = await client.getUrl(Uri.parse(sizedUrl));
         final HttpClientResponse resp = await req.close();
         if (resp.statusCode != 200) {
@@ -139,6 +170,30 @@ class _CoverImageState extends State<CoverImage> {
         scheduleMicrotask(() => _inflight.remove(sizedUrl));
       }
     });
+  }
+
+  /// 拉取原图字节（供全屏查看/保存至本地使用，走同一套缓存与重试）
+  static Future<Uint8List?> loadOriginalBytes(String? src) async {
+    if (src == null || src.isEmpty || !src.startsWith('http')) return null;
+    return _fetchBytes(src, CoverSize.original);
+  }
+
+  /// 按字节嗅探图片 MIME（保存至相册需要）
+  static String sniffMime(Uint8List bytes) {
+    if (bytes.length >= 3 && bytes[0] == 0xFF && bytes[1] == 0xD8) {
+      return 'image/jpeg';
+    }
+    if (bytes.length >= 4 &&
+        bytes[0] == 0x89 &&
+        bytes[1] == 0x50 &&
+        bytes[2] == 0x4E &&
+        bytes[3] == 0x47) {
+      return 'image/png';
+    }
+    if (bytes.length >= 3 && bytes[0] == 0x47 && bytes[1] == 0x49 && bytes[2] == 0x46) {
+      return 'image/gif';
+    }
+    return 'image/webp';
   }
 
   @override

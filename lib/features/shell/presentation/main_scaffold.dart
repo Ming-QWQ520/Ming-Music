@@ -6,15 +6,24 @@
 ///  - 手机（宽度 < 600dp）：底部 NavigationBar，Mini 播放条悬浮于其上方；
 ///  - 平板（宽度 >= 600dp）：左侧 NavigationRail，右侧内容区底部 MiniPlayer；
 ///  - IndexedStack 保持各 Tab 状态（列表滚动位置等）。
+///
+/// 通知栏点击（需求）：点击媒体通知的封面区域 → 跳转音乐播放界面（封面视图）。
+/// audio_service 会在通知点击时向 Dart 发出 notificationClicked 事件，
+/// 于此监听并 push 全屏播放页（有队列时）。
 library;
 
+import 'dart:async';
+
+import 'package:audio_service/audio_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/constants/app_constants.dart';
 import '../../discover/presentation/discover_page.dart';
 import '../../library/presentation/my_music_page.dart';
+import '../../player/presentation/full_player_page.dart';
 import '../../player/presentation/widgets/mini_player.dart';
+import '../../player/providers/player_providers.dart';
 
 /// 当前 Tab
 final NotifierProvider<TabNotifier, int> selectedTabProvider =
@@ -27,7 +36,7 @@ class TabNotifier extends Notifier<int> {
   void select(int index) => state = index;
 }
 
-class MainScaffold extends ConsumerWidget {
+class MainScaffold extends ConsumerStatefulWidget {
   const MainScaffold({super.key});
 
   static const List<Widget> _pages = <Widget>[
@@ -36,7 +45,40 @@ class MainScaffold extends ConsumerWidget {
   ];
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<MainScaffold> createState() => _MainScaffoldState();
+}
+
+class _MainScaffoldState extends ConsumerState<MainScaffold> {
+  StreamSubscription<bool>? _notifClickSub;
+
+  /// 播放页是否已由本监听打开（防止重复 push）
+  bool _playerOpen = false;
+
+  @override
+  void initState() {
+    super.initState();
+    // 通知栏点击 → 打开播放界面（封面视图）。
+    // ValueStream 是 BehaviorSubject：冷启动若由通知点击拉起，会重放 true，
+    // 同样落入本逻辑 —— 行为正确（点通知进来就该看到播放页）。
+    _notifClickSub = AudioService.notificationClicked.listen((bool clicked) {
+      if (!clicked || !mounted) return;
+      if (_playerOpen) return;
+      if (!ref.read(hasQueueProvider)) return;
+      _playerOpen = true;
+      Navigator.of(context)
+          .push<void>(FullPlayerRoute<void>())
+          .whenComplete(() => _playerOpen = false);
+    });
+  }
+
+  @override
+  void dispose() {
+    _notifClickSub?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final int tab = ref.watch(selectedTabProvider);
 
     return LayoutBuilder(
@@ -68,7 +110,8 @@ class MainScaffold extends ConsumerWidget {
               child: Column(
                 children: <Widget>[
                   Expanded(
-                    child: IndexedStack(index: tab, children: _pages),
+                    child: IndexedStack(
+                        index: tab, children: MainScaffold._pages),
                   ),
                   const MiniPlayer(),
                 ],
@@ -84,7 +127,7 @@ class MainScaffold extends ConsumerWidget {
 
   Widget _phoneScaffold(BuildContext context, WidgetRef ref, int tab) {
     return Scaffold(
-      body: IndexedStack(index: tab, children: _pages),
+      body: IndexedStack(index: tab, children: MainScaffold._pages),
       bottomNavigationBar: Column(
         mainAxisSize: MainAxisSize.min,
         children: <Widget>[

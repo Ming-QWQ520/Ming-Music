@@ -12,6 +12,11 @@
     <!-- Android 13+ 通知栏媒体控制需要运行时申请 -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
+    <!-- 封面保存至相册（仅 Android 9- 公共目录写入需要；10+ 走 MediaStore 免权限） -->
+    <uses-permission
+        android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+        android:maxSdkVersion="28" />
+
     <!-- ============ 媒体输出（发现附近设备，仿网易云投屏） ============ -->
     <!-- Android 12+：蓝牙扫描/连接 -->
     <uses-permission android:name="android.permission.BLUETOOTH_SCAN"

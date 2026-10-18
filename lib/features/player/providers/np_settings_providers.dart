@@ -55,6 +55,12 @@ class NpSettingsNotifier extends Notifier<NpPlayerSettings> {
   void setCoverShadow(bool shadow) =>
       _commit(state.copyWith(coverShadow: shadow));
 
+  void setSquareCoverRadius(bool on) =>
+      _commit(state.copyWith(squareCoverRadius: on));
+
+  void setMiniStyle(MiniPlayerStyle style) =>
+      _commit(state.copyWith(miniStyle: style));
+
   void setBgBlur(double px) => _commit(state.copyWith(bgBlur: px.clamp(0, 40)));
 
   void setBgDim(double pct) =>

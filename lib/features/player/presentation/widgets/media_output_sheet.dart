@@ -1,17 +1,20 @@
-/// 媒体输出底部弹窗（仿网易云投屏/设备连接页）：
-///  - 当前播放设备「本机」+ 音量滑杆（just_audio setVolume 直连）；
-///  - 「正在寻找设备...」发现态 + 官方应用权益标签 + 三步连接提示；
-///  - 「连接蓝牙设备」入口：申请发现附近设备权限
-///    （Android 12+ BLUETOOTH_SCAN/CONNECT，13+ NEARBY_WIFI_DEVICES，
-///    旧版 ACCESS_FINE_LOCATION），被拒时展示系统设置引导。
+/// 媒体输出底部弹窗（需求改造）：
+///  - 仅保留「本机」（音量直连）与蓝牙设备显示 /「管理蓝牙设备」；
+///  - 连接蓝牙后自动显示蓝牙设备名称（Android AudioManager.getDevices 轮询，
+///    弹窗打开期间每 2.5s 刷新，连接/断开自动切换显示）；
+///  - 移除「正在寻找设备」扫描态、三步连接提示与附近设备权限申请。
 library;
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:permission_handler/permission_handler.dart';
 
 import '../../../../core/constants/app_constants.dart';
 import '../../providers/player_providers.dart';
+
+const MethodChannel _mediaChannel = MethodChannel('com.ming.music/media');
 
 /// 打开媒体输出弹窗
 Future<void> showMediaOutputSheet(BuildContext context) {
@@ -32,32 +35,65 @@ class _MediaOutputSheet extends ConsumerStatefulWidget {
 
 class _MediaOutputSheetState extends ConsumerState<_MediaOutputSheet> {
   double _volume = 1.0;
-  bool _permissionDenied = false;
+  List<String> _btDevices = const <String>[];
+  Timer? _poll;
 
   @override
   void initState() {
     super.initState();
     _volume = ref.read(audioHandlerProvider).player.volume;
+    _refreshDevices();
+    // 打开期间轮询：连接蓝牙后自动显示名称，断开自动移除
+    _poll = Timer.periodic(const Duration(milliseconds: 2500), (_) {
+      if (!mounted) return;
+      _refreshDevices(silent: true);
+    });
   }
 
-  Future<void> _onBluetoothTap() async {
-    // 「发现附近设备」权限组：按系统版本申请对应权限
-    final List<Permission> permissions = <Permission>[
-      Permission.bluetoothScan,
-      Permission.bluetoothConnect,
-      Permission.nearbyWifiDevices,
-      Permission.location,
-    ];
-    final Map<Permission, PermissionStatus> statuses =
-        await permissions.request();
-    final bool allDenied = statuses.values
-        .every((PermissionStatus s) => s.isDenied || s.isPermanentlyDenied);
-    if (!mounted) return;
-    setState(() => _permissionDenied = allDenied);
-    if (allDenied) return;
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-      content: Text('正在扫描附近设备…请确保电视/音箱与手机在同一 WLAN 下'),
-    ));
+  @override
+  void dispose() {
+    _poll?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _refreshDevices({bool silent = false}) async {
+    try {
+      final Object? raw =
+          await _mediaChannel.invokeMethod<Object?>('getMediaDevices');
+      final List<String> names = <String>[];
+      if (raw is List<Object?>) {
+        for (final Object? item in raw) {
+          if (item is Map<Object?, Object?>) {
+            final String name = '${item['name'] ?? ''}'.trim();
+            if (name.isNotEmpty) names.add(name);
+          } else if (item is Map<String, Object?>) {
+            final String name = '${item['name'] ?? ''}'.trim();
+            if (name.isNotEmpty) names.add(name);
+          }
+        }
+      }
+      if (!mounted) return;
+      if (silent &&
+          names.length == _btDevices.length &&
+          ListEquality().equals(names, _btDevices)) {
+        return;
+      }
+      setState(() => _btDevices = names);
+    } catch (_) {
+      // 平台通道不可用（非 Android 等）：静默，保持空列表
+    }
+  }
+
+  Future<void> _openBtSettings() async {
+    try {
+      await _mediaChannel.invokeMethod<bool>('openBluetoothSettings');
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('无法打开系统蓝牙设置')),
+        );
+      }
+    }
   }
 
   @override
@@ -68,7 +104,7 @@ class _MediaOutputSheetState extends ConsumerState<_MediaOutputSheet> {
 
     return Container(
       constraints: BoxConstraints(
-          maxHeight: MediaQuery.sizeOf(context).height * 0.82),
+          maxHeight: MediaQuery.sizeOf(context).height * 0.72),
       decoration: const BoxDecoration(
         color: AppConstants.darkSurface,
         borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
@@ -140,93 +176,63 @@ class _MediaOutputSheetState extends ConsumerState<_MediaOutputSheet> {
                   },
                 ),
               ),
-              const SizedBox(height: 8),
-              // 官方应用权益标签
-              Row(
-                children: <Widget>[
-                  _BenefitChip('曲库免费'),
-                  const SizedBox(width: 8),
-                  _BenefitChip('无损音质'),
-                  const SizedBox(width: 8),
-                  _BenefitChip('无缝续播'),
-                ],
-              ),
-              const SizedBox(height: 16),
-              // 搜索设备状态
-              Row(
-                children: <Widget>[
-                  SizedBox(
-                    width: 14,
-                    height: 14,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      color: theme.colorScheme.onSurfaceVariant,
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Text('正在寻找设备...',
-                      style: TextStyle(
-                          fontSize: 13.5,
-                          color: theme.colorScheme.onSurfaceVariant)),
-                ],
-              ),
-              const SizedBox(height: 14),
-              // 三步连接提示
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(14),
-                decoration: BoxDecoration(
-                  color: theme.colorScheme.surfaceContainerHighest
-                      .withValues(alpha: 0.4),
-                  borderRadius: BorderRadius.circular(14),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: <Widget>[
-                    _TipRow('1', '在电视应用市场搜索安装「网易云音乐」并启动'),
-                    const SizedBox(height: 6),
-                    _TipRow('2', '确保电视和手机在同一 WLAN 下'),
-                    const SizedBox(height: 6),
-                    _TipRow('3', '推荐使用车载/电视/手表/音箱版 App，无需连接手机即可享受沉浸视听'),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 16),
-              // 设备选择入口
-              Text('选择设备',
+              const SizedBox(height: 12),
+              // 蓝牙输出设备（连接后自动显示名称；多设备逐一列出）
+              Text('蓝牙设备',
                   style: TextStyle(
                       fontSize: 13,
                       color: theme.colorScheme.onSurfaceVariant)),
               const SizedBox(height: 4),
+              if (_btDevices.isEmpty)
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 10),
+                  child: Row(
+                    children: <Widget>[
+                      Icon(Icons.bluetooth_disabled_rounded,
+                          size: 18,
+                          color: theme.colorScheme.onSurfaceVariant
+                              .withValues(alpha: 0.6)),
+                      const SizedBox(width: 8),
+                      Text(
+                        '未连接蓝牙音频设备',
+                        style: TextStyle(
+                            fontSize: 13.5,
+                            color: theme.colorScheme.onSurfaceVariant),
+                      ),
+                    ],
+                  ),
+                )
+              else
+                for (final String name in _btDevices)
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    dense: true,
+                    leading: Icon(Icons.bluetooth_audio_rounded,
+                        size: 22,
+                        color: theme.colorScheme.onSurface),
+                    title: Text(name, style: const TextStyle(fontSize: 15)),
+                    subtitle: Text('已连接 · 系统自动输出',
+                        style: TextStyle(
+                            fontSize: 11.5,
+                            color: theme.colorScheme.onSurfaceVariant)),
+                    trailing: Icon(Icons.check_rounded,
+                        color: AppConstants.brandColor, size: 20),
+                  ),
+              const Divider(height: 22, color: Colors.white10),
+              // 管理蓝牙设备 → 系统蓝牙设置
               ListTile(
                 contentPadding: EdgeInsets.zero,
-                leading: Icon(Icons.phone_android_rounded,
+                leading: Icon(Icons.settings_bluetooth_rounded,
                     size: 22, color: theme.colorScheme.onSurface),
-                title: const Text('本机', style: TextStyle(fontSize: 15)),
-                trailing: Icon(Icons.check_rounded,
-                    color: AppConstants.brandColor, size: 20),
-              ),
-              ListTile(
-                contentPadding: EdgeInsets.zero,
-                leading: Icon(Icons.bluetooth_audio_rounded,
-                    size: 22, color: theme.colorScheme.onSurface),
-                title: const Text('连接蓝牙设备',
-                    style: TextStyle(fontSize: 15)),
+                title: const Text('管理蓝牙设备', style: TextStyle(fontSize: 15)),
+                subtitle: Text('前往系统设置配对/连接设备',
+                    style: TextStyle(
+                        fontSize: 11.5,
+                        color: theme.colorScheme.onSurfaceVariant)),
                 trailing: Icon(Icons.chevron_right_rounded,
                     size: 20, color: theme.colorScheme.onSurfaceVariant),
-                onTap: _onBluetoothTap,
+                onTap: _openBtSettings,
               ),
-              if (_permissionDenied)
-                Padding(
-                  padding: const EdgeInsets.only(top: 4),
-                  child: Text(
-                    '附近设备权限被拒绝，无法扫描蓝牙/局域网设备；'
-                    '可到系统设置中为 MingMusic 开启「附近的设备」权限。',
-                    style: TextStyle(
-                        fontSize: 12,
-                        color: theme.colorScheme.onSurfaceVariant),
-                  ),
-                ),
             ],
           ),
         ),
@@ -235,66 +241,13 @@ class _MediaOutputSheetState extends ConsumerState<_MediaOutputSheet> {
   }
 }
 
-class _BenefitChip extends StatelessWidget {
-  const _BenefitChip(this.text);
-
-  final String text;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-      decoration: BoxDecoration(
-        color: AppConstants.brandColor.withValues(alpha: 0.14),
-        borderRadius: BorderRadius.circular(10),
-      ),
-      child: Text(
-        text,
-        style: const TextStyle(
-          color: AppConstants.brandColor,
-          fontSize: 11,
-          fontWeight: FontWeight.w600,
-        ),
-      ),
-    );
-  }
-}
-
-class _TipRow extends StatelessWidget {
-  const _TipRow(this.index, this.text);
-
-  final String index;
-  final String text;
-
-  @override
-  Widget build(BuildContext context) {
-    final ThemeData theme = Theme.of(context);
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: <Widget>[
-        Container(
-          width: 15,
-          height: 15,
-          alignment: Alignment.center,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.25),
-          ),
-          child: Text(index,
-              style: const TextStyle(fontSize: 9.5, color: Colors.white)),
-        ),
-        const SizedBox(width: 8),
-        Expanded(
-          child: Text(
-            text,
-            style: TextStyle(
-              fontSize: 12,
-              height: 1.45,
-              color: theme.colorScheme.onSurfaceVariant,
-            ),
-          ),
-        ),
-      ],
-    );
+/// 简易列表相等判断（避免为一个小弹窗引入 collection 包）
+class ListEquality {
+  bool equals(List<String> a, List<String> b) {
+    if (a.length != b.length) return false;
+    for (int i = 0; i < a.length; i++) {
+      if (a[i] != b[i]) return false;
+    }
+    return true;
   }
 }

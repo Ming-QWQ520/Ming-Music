@@ -32,6 +32,30 @@ extension NpDisplayModeX on NpDisplayMode {
       };
 }
 
+/// Mini 播放条样式（不止变配色 —— 各样式的组件布局完全不同）
+enum MiniPlayerStyle {
+  /// 经典条：封面左 + 「歌名 - 歌手」 + 圆环播放键 + 播放列表
+  classic,
+
+  /// 封面铺满：封面作背景 + 渐变遮罩 + 文字压在封面上 + 右侧圆钮
+  overlay,
+
+  /// 紧凑极简：仅封面（圆环进度绕封面）+ 小号播放键，无文字
+  compact,
+
+  /// 宽幅双行：大封面 + 歌名/歌手双行 + 底部细进度线
+  wide,
+}
+
+extension MiniPlayerStyleX on MiniPlayerStyle {
+  String get label => switch (this) {
+        MiniPlayerStyle.classic => '经典条',
+        MiniPlayerStyle.overlay => '封面铺满',
+        MiniPlayerStyle.compact => '紧凑极简',
+        MiniPlayerStyle.wide => '宽幅双行',
+      };
+}
+
 /// 封面样式
 enum NpCoverStyle { vinyl, square, circle }
 
@@ -60,6 +84,7 @@ class NpPlayerSettings {
     this.coverStyle = NpCoverStyle.vinyl,
     this.coverScale = 1.0,
     this.coverShadow = true,
+    this.squareCoverRadius = false,
     this.bgBlur = 22,
     this.bgDim = 55,
     this.lyricFontSize = 17,
@@ -71,6 +96,7 @@ class NpPlayerSettings {
     this.yrcPlayed = const Color(0xFFFFFFFF),
     this.yrcUnplayed = const Color(0x66FFFFFF),
     this.animationSpeed = 1.0,
+    this.miniStyle = MiniPlayerStyle.classic,
   });
 
   static const int version = 1;
@@ -95,6 +121,12 @@ class NpPlayerSettings {
 
   /// 封面投影
   final bool coverShadow;
+
+  /// 方形封面圆角开关（需求：默认无圆角，可自定义开启）
+  final bool squareCoverRadius;
+
+  /// Mini 播放条样式
+  final MiniPlayerStyle miniStyle;
 
   // ---- 背景 ----
 
@@ -139,6 +171,7 @@ class NpPlayerSettings {
     NpCoverStyle? coverStyle,
     double? coverScale,
     bool? coverShadow,
+    bool? squareCoverRadius,
     double? bgBlur,
     double? bgDim,
     double? lyricFontSize,
@@ -150,6 +183,7 @@ class NpPlayerSettings {
     Color? yrcPlayed,
     Color? yrcUnplayed,
     double? animationSpeed,
+    MiniPlayerStyle? miniStyle,
   }) {
     return NpPlayerSettings(
       displayMode: displayMode ?? this.displayMode,
@@ -157,6 +191,7 @@ class NpPlayerSettings {
       coverStyle: coverStyle ?? this.coverStyle,
       coverScale: coverScale ?? this.coverScale,
       coverShadow: coverShadow ?? this.coverShadow,
+      squareCoverRadius: squareCoverRadius ?? this.squareCoverRadius,
       bgBlur: bgBlur ?? this.bgBlur,
       bgDim: bgDim ?? this.bgDim,
       lyricFontSize: lyricFontSize ?? this.lyricFontSize,
@@ -168,6 +203,7 @@ class NpPlayerSettings {
       yrcPlayed: yrcPlayed ?? this.yrcPlayed,
       yrcUnplayed: yrcUnplayed ?? this.yrcUnplayed,
       animationSpeed: animationSpeed ?? this.animationSpeed,
+      miniStyle: miniStyle ?? this.miniStyle,
     );
   }
 
@@ -178,6 +214,7 @@ class NpPlayerSettings {
         'coverStyle': coverStyle.name,
         'coverScale': coverScale,
         'coverShadow': coverShadow,
+        'squareCoverRadius': squareCoverRadius,
         'bgBlur': bgBlur,
         'bgDim': bgDim,
         'lyricFontSize': lyricFontSize,
@@ -189,6 +226,7 @@ class NpPlayerSettings {
         'yrcPlayed': yrcPlayed.toARGB32(),
         'yrcUnplayed': yrcUnplayed.toARGB32(),
         'animationSpeed': animationSpeed,
+        'miniStyle': miniStyle.name,
       };
 
   factory NpPlayerSettings.fromMap(Map<Object?, Object?> map) {
@@ -213,6 +251,13 @@ class NpPlayerSettings {
       coverShadow: map['coverShadow'] is bool
           ? map['coverShadow']! as bool
           : defaults.coverShadow,
+      squareCoverRadius: map['squareCoverRadius'] is bool
+          ? map['squareCoverRadius']! as bool
+          : defaults.squareCoverRadius,
+      miniStyle: MiniPlayerStyle.values.firstWhere(
+        (MiniPlayerStyle s) => s.name == map['miniStyle'],
+        orElse: () => defaults.miniStyle,
+      ),
       bgBlur: clampD(map['bgBlur'], 0, 40, defaults.bgBlur),
       bgDim: clampD(map['bgDim'], 0, 100, defaults.bgDim),
       lyricFontSize:

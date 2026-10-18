@@ -550,10 +550,14 @@ class _WipePainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
+    if (size.width <= 0 || size.height <= 0) return;
+    // ⚠️ _ensure 必须在判空前调用：首次绘制时 _dim/_bright 尚未创建，
+    // 旧实现先判空再初始化导致首帧直接 return、后续帧也永远无初始化，
+    // 活动行完全透明不可见（用户反馈「擦除动画未成功播放」根因）。
+    _ensure(size.width);
     final TextPainter? dim = _dim;
     final TextPainter? bright = _bright;
     if (dim == null || bright == null) return;
-    _ensure(size.width);
 
     dim.paint(canvas, Offset.zero);
 

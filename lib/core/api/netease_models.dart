@@ -331,26 +331,98 @@ class ArtistDetailInfo {
   }
 }
 
-/// 歌曲百科（/song/wiki/summary → data.blocks）。
-/// 实测可用数据块：曲风 / 推荐标签 / 获奖成就 / 影视节目 / 乐评，
-/// 以及相似歌曲、相关歌单两个扩展块（相似歌曲/歌单由专用接口另行拉取）。
+/// 歌曲百科（/song/wiki/summary → data.blocks，对齐 Zephyr NpWikiSummary.vue）：
+///  - 回忆坐标块 MUSIC_MEMORY_MULTI_TWO_GRID：服务端首次聆听日期 + 累计播放次数；
+///  - 音乐百科块 SONG_PLAY_ABOUT_TAB_SONG_BASIC（旧版兼容 SONG_PLAY_ABOUT_SONG_BASIC）：
+///    曲风 / 推荐标签 / 语种 / BPM / 乐谱（textLinks + resources 双源提取）；
+///  - 相似歌曲 / 相关歌单由专用接口另行拉取（保持原实现）。
 class SongWikiSummary {
-  const SongWikiSummary({this.groups = const <WikiGroup>[]});
+  const SongWikiSummary({
+    this.groups = const <WikiGroup>[],
+    this.firstListenDate = '',
+    this.firstListenExtra = '',
+    this.totalPlayCount = 0,
+    this.totalPlayText = '',
+  });
 
-  /// 按主标题聚合的条目组（曲风、推荐标签、获奖成就…）
+  /// 按主标题聚合的条目组（曲风、推荐标签、语种、BPM…）
   final List<WikiGroup> groups;
 
-  bool get isEmpty => groups.isEmpty;
+  /// 回忆坐标：首次聆听日期（musicFirstListenDto.date）
+  final String firstListenDate;
+
+  /// 回忆坐标：季节 · 时段（musicFirstListenDto.season / period）
+  final String firstListenExtra;
+
+  /// 回忆坐标：累计播放次数（musicTotalPlayDto.playCount，服务端真实统计）
+  final int totalPlayCount;
+
+  /// 回忆坐标：累计播放附加描述（musicTotalPlayDto.text）
+  final String totalPlayText;
+
+  bool get isEmpty => groups.isEmpty && totalPlayCount == 0 && firstListenDate.isEmpty;
 
   static SongWikiSummary fromJson(Map<String, Object?> data) {
-    final Object? blocks = data['blocks'];
+    final Object? blocks = data['blocks'] ?? data['data'];
     if (blocks is! List<Object?>) return const SongWikiSummary();
+
     final List<WikiGroup> groups = <WikiGroup>[];
-    for (final Object? block in blocks) {
-      if (block is! Map<String, Object?>) continue;
-      if (block['code'] != 'SONG_PLAY_ABOUT_SONG_BASIC') continue;
+    String firstDate = '';
+    String firstExtra = '';
+    int totalPlay = 0;
+    String totalText = '';
+
+    // 按服务端 position 升序（对齐 Zephyr 的 sort）
+    final List<Map<String, Object?>> sorted = blocks
+        .whereType<Map<String, Object?>>()
+        .toList()
+      ..sort((Map<String, Object?> a, Map<String, Object?> b) {
+        final int pa = int.tryParse('${a['position'] ?? 0}') ?? 0;
+        final int pb = int.tryParse('${b['position'] ?? 0}') ?? 0;
+        return pa.compareTo(pb);
+      });
+
+    for (final Map<String, Object?> block in sorted) {
+      final String code = '${block['showType'] ?? block['code'] ?? ''}';
       final Object? creatives = block['creatives'];
       if (creatives is! List<Object?>) continue;
+
+      // ---- 回忆坐标：首次聆听 + 累计播放（服务端数据）
+      if (code == 'MUSIC_MEMORY_MULTI_TWO_GRID') {
+        for (final Object? c in creatives) {
+          if (c is! Map<String, Object?>) continue;
+          final Object? resources = c['resources'];
+          if (resources is! List<Object?>) continue;
+          for (final Object? r in resources) {
+            if (r is! Map<String, Object?>) continue;
+            final Object? ext = r['resourceExt'];
+            if (ext is! Map<String, Object?>) continue;
+            final Object? fl = ext['musicFirstListenDto'];
+            if (fl is Map<String, Object?>) {
+              firstDate = (fl['date'] as String?) ?? firstDate;
+              final String season = (fl['season'] as String?) ?? '';
+              final String period = (fl['period'] as String?) ?? '';
+              firstExtra = <String>[
+                if (season.isNotEmpty) season,
+                if (period.isNotEmpty) period,
+              ].join(' · ');
+            }
+            final Object? tp = ext['musicTotalPlayDto'];
+            if (tp is Map<String, Object?>) {
+              totalPlay =
+                  (tp['playCount'] is num ? (tp['playCount'] as num).toInt() : int.tryParse('${tp['playCount'] ?? ''}')) ?? totalPlay;
+              totalText = (tp['text'] as String?) ?? totalText;
+            }
+          }
+        }
+        continue;
+      }
+
+      // ---- 音乐百科：新版 TAB 块 + 旧版块双兼容
+      if (code != 'SONG_PLAY_ABOUT_TAB_SONG_BASIC' &&
+          code != 'SONG_PLAY_ABOUT_SONG_BASIC') {
+        continue;
+      }
       for (final Object? c in creatives) {
         if (c is! Map<String, Object?>) continue;
         final Map<String, Object?> ue =
@@ -360,6 +432,16 @@ class SongWikiSummary {
         final String title = (mt['title'] as String?) ?? '';
         if (title.isEmpty) continue;
         final List<String> items = <String>[];
+        // ① textLinks（语种 / BPM / 乐谱等纯文本项，旧实现遗漏导致信息不全）
+        final Object? textLinks = ue['textLinks'];
+        if (textLinks is List<Object?>) {
+          for (final Object? tl in textLinks) {
+            if (tl is! Map<String, Object?>) continue;
+            final String? t = tl['text'] as String?;
+            if (t != null && t.isNotEmpty) items.add(t);
+          }
+        }
+        // ② resources（曲风 / 推荐标签等资源项）
         final Object? resources = c['resources'];
         if (resources is List<Object?>) {
           for (final Object? r in resources) {
@@ -375,7 +457,13 @@ class SongWikiSummary {
         if (items.isNotEmpty) groups.add(WikiGroup(title: title, items: items));
       }
     }
-    return SongWikiSummary(groups: groups);
+    return SongWikiSummary(
+      groups: groups,
+      firstListenDate: firstDate,
+      firstListenExtra: firstExtra,
+      totalPlayCount: totalPlay,
+      totalPlayText: totalText,
+    );
   }
 }
 

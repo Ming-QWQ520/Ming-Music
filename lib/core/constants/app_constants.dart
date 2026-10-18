@@ -29,6 +29,9 @@ class AppConstants {
   /// 播放页左右翻页（唱片/歌词）动画时长
   static const Duration playerPageFlip = Duration(milliseconds: 320);
 
+  /// 左右滑动切歌：拖动跟手视差最大偏移 px
+  static const double swipeParallaxMax = 48;
+
   /// 逐字歌词行高
   static const double yrcLineExtent = 58;
 

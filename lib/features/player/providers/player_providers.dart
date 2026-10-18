@@ -513,6 +513,37 @@ class PlayerNotifier extends Notifier<PlayerState> {
     _schedulePersist();
   }
 
+  /// 队列拖动排序（播放列表弹窗拖动按键）。
+  /// 使用 ReorderableListView.onReorderItem：newIndex 已按「移除旧项」
+  /// 语义校正过，无需再做 -1 修正；
+  /// 当前曲目位置变化时重建内核队列并保留进度续播。
+  Future<void> reorderQueue(int oldIndex, int newIndex) async {
+    if (!state.hasQueue) return;
+    if (oldIndex < 0 || oldIndex >= state.queue.length) return;
+    final List<Track> q = List<Track>.of(state.queue);
+    final Track moved = q.removeAt(oldIndex);
+    final int target = newIndex.clamp(0, q.length);
+    q.insert(target, moved);
+
+    int idx = state.index;
+    if (oldIndex == idx) {
+      idx = target;
+    } else if (oldIndex < idx && target >= idx) {
+      idx -= 1;
+    } else if (oldIndex > idx && target <= idx) {
+      idx += 1;
+    }
+    state = state.copyWith(queue: q, index: idx);
+
+    // 内核队列顺序必须与 UI 一致：重建队列，保留当前进度与播放状态
+    final Duration pos = _handler.player.position;
+    final bool wasPlaying = state.playing;
+    await _handler.loadQueue(q, initialIndex: idx.clamp(0, q.length - 1));
+    if (pos > Duration.zero) await _handler.seek(pos);
+    if (wasPlaying) await _handler.play();
+    _schedulePersist();
+  }
+
   /// 清空队列（播放列表弹窗垃圾桶）
   Future<void> clearQueue() async {
     await _handler.loadQueue(const <Track>[]);

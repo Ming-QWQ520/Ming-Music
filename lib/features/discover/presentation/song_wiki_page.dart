@@ -39,6 +39,13 @@ class SongWikiPage extends ConsumerWidget {
   final String artist;
   final int? mvId;
 
+  /// 万/亿格式化（对齐 Zephyr formatCount）
+  static String formatCount(int n) {
+    if (n >= 100000000) return '${(n / 100000000).toStringAsFixed(1)}亿';
+    if (n >= 10000) return '${(n / 10000).toStringAsFixed(1)}万';
+    return '$n';
+  }
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final ThemeData theme = Theme.of(context);
@@ -110,6 +117,44 @@ class SongWikiPage extends ConsumerWidget {
           ),
           const SizedBox(height: 16),
 
+          // 回忆坐标（服务端数据：首次聆听日期 + 累计播放次数，对齐 Zephyr）
+          _WikiSection(
+            songId: songId,
+            builder: (SongWikiSummary wiki) {
+              if (wiki.firstListenDate.isEmpty && wiki.totalPlayCount == 0) {
+                return const SizedBox.shrink();
+              }
+              return _SectionCard(
+                title: '回忆坐标',
+                child: Row(
+                  children: <Widget>[
+                    if (wiki.firstListenDate.isNotEmpty)
+                      Expanded(
+                        child: _MemoryCell(
+                          label: '首次聆听',
+                          main: wiki.firstListenDate,
+                          sub: wiki.firstListenExtra,
+                        ),
+                      ),
+                    if (wiki.totalPlayCount > 0) ...<Widget>[
+                      if (wiki.firstListenDate.isNotEmpty)
+                        const SizedBox(width: 12),
+                      Expanded(
+                        child: _MemoryCell(
+                          label: '累计播放',
+                          main:
+                              '${formatCount(wiki.totalPlayCount)} 次',
+                          sub: wiki.totalPlayText,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              );
+            },
+          ),
+          const SizedBox(height: 12),
+
           // MV 卡（有 MV 才显示；闭环：详情 + 直链 + 播放页）
           if (mvId != null) ...<Widget>[
             _MvCard(mvId: mvId!, fallbackTitle: title),
@@ -151,6 +196,60 @@ class SongWikiPage extends ConsumerWidget {
 
           // 相关歌单
           _SimiPlaylistsCard(songId: songId),
+        ],
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------- 回忆坐标单元
+
+/// 回忆坐标卡片内的单元格（首次聆听 / 累计播放）
+class _MemoryCell extends StatelessWidget {
+  const _MemoryCell({
+    required this.label,
+    required this.main,
+    required this.sub,
+  });
+
+  final String label;
+  final String main;
+  final String sub;
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surface.withValues(alpha: 0.55),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Text(label,
+              style: TextStyle(
+                  fontSize: 11,
+                  color: theme.colorScheme.onSurfaceVariant)),
+          const SizedBox(height: 4),
+          Text(main,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                  fontSize: 16.5,
+                  fontWeight: FontWeight.w800,
+                  color: AppConstants.brandColor)),
+          if (sub.isNotEmpty) ...<Widget>[
+            const SizedBox(height: 2),
+            Text(sub,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                    fontSize: 10.5,
+                    color: theme.colorScheme.onSurfaceVariant)),
+          ],
         ],
       ),
     );

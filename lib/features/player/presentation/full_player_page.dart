@@ -3,11 +3,14 @@
 ///  - 显示模式（NpDisplayMode）：自适应（平板双列 / 手机可切换）/ 仅封面 / 仅歌词；
 ///  - 歌词页交互：单击任意区域切换封面/歌词；双击歌词行 seek 到该行；
 ///    切换视图时直接显示当前播放行（固定直显，无滑动动画）；
-///  - 顶栏：收起 / 歌手名（仿网易云）/ 评论入口 / 播放页自定义 / 喜欢；
+///  - 顶栏：收起 / 歌手名（仿网易云；评论与播放页自定义入口已移除，
+///    评论走标题下计数行，自定义走底部条「设置」）；
 ///  - 信息区：标题+VIP / 歌手 / 评论数点赞行（仿网易云）；
 ///  - 进度行：当前时间 — 音质标签（居中，仿网易云）— 总时长；
 ///  - hidePlayerControls：隐藏控制栏（仅保留进度条）；
-///  - 手势：下滑收起播放页；左右滑动切歌（避开边缘 20px，避坑指南 4）。
+///  - 手势：下滑收起播放页；左右滑动切歌（避开边缘 20px），
+///    切歌带方向感知的滑动动画，拖动时内容跟手视差；
+///  - 封面：长按全屏查看 + 保存至本地。
 library;
 
 import 'package:flutter/material.dart' hide RepeatMode;
@@ -29,6 +32,7 @@ import '../providers/np_settings_providers.dart';
 import '../providers/player_providers.dart';
 import 'np_settings_sheet.dart';
 import 'widgets/cover_art_view.dart';
+import 'widgets/cover_viewer.dart';
 import 'widgets/karaoke_lyrics_view.dart';
 import 'widgets/media_output_sheet.dart';
 import 'widgets/player_background.dart';
@@ -78,6 +82,9 @@ class _FullPlayerPageState extends ConsumerState<FullPlayerPage> {
   bool _edgeBlocked = false;
   double _dragDy = 0;
 
+  /// 左右滑动切歌的跟手视差偏移（0.25 系数，最大 ±48px）
+  double _swipeDx = 0;
+
   // ---------------------------------------------------------------- gestures
 
   void _onHorizontalDragStart(DragStartDetails details) {
@@ -88,7 +95,16 @@ class _FullPlayerPageState extends ConsumerState<FullPlayerPage> {
         dx > width - AppConstants.gestureEdgeExclusion;
   }
 
+  void _onHorizontalDragUpdate(DragUpdateDetails details) {
+    if (_edgeBlocked) return;
+    setState(() {
+      _swipeDx = (_swipeDx + details.delta.dx)
+          .clamp(-AppConstants.swipeParallaxMax, AppConstants.swipeParallaxMax);
+    });
+  }
+
   void _onHorizontalDragEnd(DragEndDetails details) {
+    if (mounted) setState(() => _swipeDx = 0);
     if (_edgeBlocked) return;
     final double vx = details.velocity.pixelsPerSecond.dx;
     if (vx < -AppConstants.dismissVelocityThreshold * 0.7) {
@@ -151,6 +167,7 @@ class _FullPlayerPageState extends ConsumerState<FullPlayerPage> {
       body: GestureDetector(
         behavior: HitTestBehavior.translucent,
         onHorizontalDragStart: _onHorizontalDragStart,
+        onHorizontalDragUpdate: _onHorizontalDragUpdate,
         onHorizontalDragEnd: _onHorizontalDragEnd,
         onVerticalDragUpdate: _onVerticalDragUpdate,
         onVerticalDragEnd: _onVerticalDragEnd,
@@ -169,6 +186,7 @@ class _FullPlayerPageState extends ConsumerState<FullPlayerPage> {
                                 _paneOverride = !showLyrics;
                               })
                           : null,
+                      swipeDx: _swipeDx,
                     ),
             ),
           ],
@@ -180,28 +198,51 @@ class _FullPlayerPageState extends ConsumerState<FullPlayerPage> {
 
 // ---------------------------------------------------------------- 手机
 
-class _PhoneBody extends ConsumerWidget {
+class _PhoneBody extends ConsumerStatefulWidget {
   const _PhoneBody({
     required this.showLyrics,
     required this.switchable,
     required this.onToggleLyrics,
+    required this.swipeDx,
   });
 
   final bool showLyrics;
   final bool switchable;
   final VoidCallback? onToggleLyrics;
 
+  /// 拖动视差偏移（父层手势驱动）
+  final double swipeDx;
+
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<_PhoneBody> createState() => _PhoneBodyState();
+}
+
+class _PhoneBodyState extends ConsumerState<_PhoneBody> {
+  /// 上一曲下标，用于判定切歌方向（下一首从右滑入 / 上一首从左滑入）
+  int _lastIndex = 0;
+
+  @override
+  Widget build(BuildContext context) {
     final NpPlayerSettings cfg = ref.watch(npSettingsProvider);
     final Track? track =
         ref.watch(playerProvider.select((PlayerState s) => s.currentTrack));
     final bool playing =
         ref.watch(playerProvider.select((PlayerState s) => s.playing));
+    final int index =
+        ref.watch(playerProvider.select((PlayerState s) => s.index));
 
-    return Column(
+    // 方向感知：index 变化时记录方向，驱动 TweenAnimationBuilder 重播
+    ref.listen<int>(playerProvider.select((PlayerState s) => s.index),
+        (int? prev, int next) {
+      if (prev != null && prev != next) {
+        setState(() => _lastIndex = prev);
+      }
+    });
+    final int dir = index >= _lastIndex ? 1 : -1;
+    final Object trackKey = Object.hash(track?.id, index);
+
+    final Widget trackContent = Column(
       children: <Widget>[
-        const _TopBar(),
         // 上半区：封面 ⇄ 歌词
         Expanded(
           child: AnimatedSwitcher(
@@ -210,21 +251,21 @@ class _PhoneBody extends ConsumerWidget {
             switchOutCurve: Curves.easeInCubic,
             transitionBuilder: (Widget child, Animation<double> anim) =>
                 FadeTransition(opacity: anim, child: child),
-            child: showLyrics
+            child: widget.showLyrics
                 ? SizedBox(
                     key: const ValueKey<String>('lyrics'),
                     width: double.infinity,
                     // 单击歌词区域切换视图；直显当前播放行（固定行为）
                     child: KaraokeLyricsView(
                       key: const ValueKey<String>('lyrics-view'),
-                      onToggleView: onToggleLyrics,
+                      onToggleView: widget.onToggleLyrics,
                     ),
                   )
                 : SizedBox(
                     key: const ValueKey<String>('cover'),
                     width: double.infinity,
                     child: GestureDetector(
-                      onTap: onToggleLyrics,
+                      onTap: widget.onToggleLyrics,
                       child: Center(
                         child: CoverArtView(
                           style: cfg.coverStyle,
@@ -233,6 +274,15 @@ class _PhoneBody extends ConsumerWidget {
                           size: _coverSize(context),
                           scale: cfg.coverScale,
                           shadow: cfg.coverShadow,
+                          squareRadius: cfg.squareCoverRadius,
+                          onLongPress: track?.cover == null
+                              ? null
+                              : () => showCoverViewer(
+                                    context,
+                                    cover: track!.cover,
+                                    title:
+                                        '${track.title} - ${track.artist}',
+                                  ),
                         ),
                       ),
                     ),
@@ -248,12 +298,45 @@ class _PhoneBody extends ConsumerWidget {
           const _ProgressSection(),
       ],
     );
+
+    return Column(
+      children: <Widget>[
+        const _TopBar(),
+        // 切歌滑动动画：新曲目内容按方向从左/右滑入 + 淡入；
+        // 拖动跟手视差与切歌动画互不影响（FractionalTranslation 不参与布局）
+        Expanded(
+          child: TweenAnimationBuilder<Offset>(
+            key: ValueKey<Object>(trackKey),
+            tween: Tween<Offset>(
+              begin: Offset(dir * 0.10, 0),
+              end: Offset.zero,
+            ),
+            duration: const Duration(milliseconds: 380),
+            curve: Curves.easeOutCubic,
+            builder: (BuildContext context, Offset off, Widget? child) {
+              final double parallax =
+                  widget.swipeDx * 0.25 + off.dx * MediaQuery.sizeOf(context).width;
+              return FractionalTranslation(
+                translation: Offset(parallax / MediaQuery.sizeOf(context).width, off.dy),
+                child: Opacity(
+                  opacity: (1 - widget.swipeDx.abs() /
+                          (AppConstants.swipeParallaxMax * 6))
+                      .clamp(0.55, 1.0),
+                  child: child,
+                ),
+              );
+            },
+            child: trackContent,
+          ),
+        ),
+      ],
+    );
   }
 
   double _coverSize(BuildContext context) {
     final double h = MediaQuery.sizeOf(context).height;
     final double w = MediaQuery.sizeOf(context).width;
-    return (h * (showLyrics ? 0.36 : 0.42)).clamp(200.0, w * 0.88);
+    return (h * (widget.showLyrics ? 0.36 : 0.42)).clamp(200.0, w * 0.88);
   }
 }
 
@@ -283,6 +366,14 @@ class _TabletBody extends ConsumerWidget {
               size: 300,
               scale: cfg.coverScale,
               shadow: cfg.coverShadow,
+              squareRadius: cfg.squareCoverRadius,
+              onLongPress: track?.cover == null
+                  ? null
+                  : () => showCoverViewer(
+                        context,
+                        cover: track!.cover,
+                        title: '${track.title} - ${track.artist}',
+                      ),
             ),
           ),
         ),
@@ -338,6 +429,7 @@ class _TabletBody extends ConsumerWidget {
 
 // ---------------------------------------------------------------- 顶部栏
 
+/// 仿网易云顶栏：仅 收起 + 居中歌手名（评论/自定义入口已按要求移除）
 class _TopBar extends ConsumerWidget {
   const _TopBar();
 
@@ -379,40 +471,10 @@ class _TopBar extends ConsumerWidget {
               ),
             ),
           ),
-          const _CommentButton(),
-          IconButton(
-            tooltip: '播放页自定义',
-            icon: Icon(
-              Icons.tune_rounded,
-              size: 22,
-              color: Colors.white.withValues(alpha: 0.85),
-            ),
-            onPressed: () => showNpSettingsSheet(context),
-          ),
-          const SizedBox(width: 10),
+          // 右侧占位：与左侧收起键等宽，保证歌手名绝对居中
+          const SizedBox(width: 56),
         ],
       ),
-    );
-  }
-}
-
-// ---------------------------------------------------------------- 评论入口
-
-class _CommentButton extends ConsumerWidget {
-  const _CommentButton();
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final Track? track =
-        ref.watch(playerProvider.select((PlayerState s) => s.currentTrack));
-    return IconButton(
-      tooltip: '评论',
-      icon: Icon(
-        Icons.mode_comment_outlined,
-        size: 21,
-        color: Colors.white.withValues(alpha: 0.85),
-      ),
-      onPressed: track == null ? null : () => showCommentsPage(context, track),
     );
   }
 }
@@ -430,7 +492,8 @@ class _InfoSection extends ConsumerWidget {
     final TextTheme theme = Theme.of(context).textTheme;
 
     return Padding(
-      padding: const EdgeInsets.fromLTRB(24, 6, 24, 0),
+      // 需求：歌曲名称和歌手名称往下移动一点（上边距 6 → 16）
+      padding: const EdgeInsets.fromLTRB(24, 16, 24, 0),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
@@ -474,7 +537,7 @@ class _InfoSection extends ConsumerWidget {
               ],
             ],
           ),
-          const SizedBox(height: 4),
+          const SizedBox(height: 5),
           Text(
             track?.artist ?? '',
             maxLines: 1,
@@ -850,7 +913,8 @@ class _RepeatButton extends ConsumerWidget {
 // ---------------------------------------------------------------- 底部条
 
 /// 仿网易云播放页底部功能条（左→右）：
-/// 媒体输出（附近设备投音）/ 相似歌曲（插播下一首）/ 歌词百科 / 设置
+/// 媒体输出 / 相似歌曲 / 歌词百科 / 设置。
+/// 需求：不显示文字名称，长按显示气泡提示（Tooltip 默认长按触发）。
 class _BottomStrip extends ConsumerWidget {
   const _BottomStrip();
 
@@ -861,7 +925,7 @@ class _BottomStrip extends ConsumerWidget {
     final Color tint = Colors.white.withValues(alpha: 0.75);
 
     return Padding(
-      padding: const EdgeInsets.fromLTRB(28, 2, 28, 10),
+      padding: const EdgeInsets.fromLTRB(34, 4, 34, 12),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: <Widget>[
@@ -869,9 +933,7 @@ class _BottomStrip extends ConsumerWidget {
             icon: Icons.sensors_rounded,
             label: '媒体输出',
             color: tint,
-            onTap: track == null
-                ? null
-                : () => showMediaOutputSheet(context),
+            onTap: track == null ? null : () => showMediaOutputSheet(context),
           ),
           _StripButton(
             icon: Icons.graphic_eq_rounded,
@@ -927,21 +989,23 @@ class _StripButton extends StatelessWidget {
   Widget build(BuildContext context) {
     final bool disabled = onTap == null;
     final Color c = disabled ? color.withValues(alpha: 0.3) : color;
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(10),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: <Widget>[
-            Icon(icon, size: 22, color: c),
-            const SizedBox(height: 3),
-            Text(
-              label,
-              style: TextStyle(fontSize: 10.5, color: c),
-            ),
-          ],
+    // 需求：仅图标，长按显示气泡提示
+    return Tooltip(
+      message: label,
+      triggerMode: TooltipTriggerMode.longPress,
+      preferBelow: false,
+      verticalOffset: 26,
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.14),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      textStyle: const TextStyle(fontSize: 11.5, color: Colors.white),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(12),
+        child: Padding(
+          padding: const EdgeInsets.all(8),
+          child: Icon(icon, size: 23, color: c),
         ),
       ),
     );
