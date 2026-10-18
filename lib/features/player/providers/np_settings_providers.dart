@@ -10,6 +10,7 @@ import '../../settings/providers/settings_providers.dart';
 import '../domain/np_settings.dart'
     show
         MiniPlayerStyle,
+        NpCoverLyricsMode,
         NpCoverStyle,
         NpDisplayMode,
         NpLyricAlign,
@@ -94,6 +95,12 @@ class NpSettingsNotifier extends Notifier<NpPlayerSettings> {
 
   void setHighlightPlayed(bool on) =>
       _commit(state.copyWith(highlightPlayed: on));
+
+  void setLyricAlwaysCenter(bool on) =>
+      _commit(state.copyWith(lyricAlwaysCenter: on));
+
+  void setCoverLyrics(NpCoverLyricsMode mode) =>
+      _commit(state.copyWith(coverLyrics: mode));
 
   void setHeartEffect(bool on) => _commit(state.copyWith(heartEffect: on));
 

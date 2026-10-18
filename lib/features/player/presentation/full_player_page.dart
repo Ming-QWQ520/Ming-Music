@@ -23,6 +23,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../core/constants/app_constants.dart';
+import '../../../core/utils/lyrics.dart' show activeLyricIndex;
+import '../../../core/utils/yrc_lyrics.dart' show activeYrcIndex;
 import '../../../core/widgets/marquee_text.dart';
 import '../../auth/providers/auth_providers.dart';
 import '../../comments/providers/comments_providers.dart'
@@ -34,6 +36,8 @@ import '../../settings/domain/settings_models.dart'
 import '../../settings/providers/settings_providers.dart'
     show audioQualityProvider;
 import '../domain/np_settings.dart';
+import '../providers/lyrics_providers.dart'
+    show ParsedLyrics, currentLyricsProvider;
 import '../providers/np_settings_providers.dart';
 import '../providers/player_providers.dart';
 import 'player_more_sheet.dart';
@@ -186,37 +190,13 @@ class _PhoneBodyState extends ConsumerState<_PhoneBody> {
   Widget build(BuildContext context) {
     final NpPlayerSettings cfg = ref.watch(npSettingsProvider);
 
-    final Widget trackContent = Column(
+    // 需求「歌曲名称整块区域应透明可见歌词」：
+    //  歌词视图铺满整个可视区，歌名/进度/控制区以透明浮层压在其上，
+    //  歌词滚动时从歌名区域背后穿过；封面模式保持原有上下排布，
+    //  仅把封面区向上避让浮层高度。
+    final Widget bottomOverlay = Column(
+      mainAxisSize: MainAxisSize.min,
       children: <Widget>[
-        // 上半区：封面 ⇄ 歌词（AnimatedSwitcher 平滑切换）
-        Expanded(
-          child: AnimatedSwitcher(
-            duration: AppConstants.playerPageFlip,
-            switchInCurve: Curves.easeOutCubic,
-            switchOutCurve: Curves.easeInCubic,
-            transitionBuilder: (Widget child, Animation<double> anim) =>
-                FadeTransition(opacity: anim, child: child),
-            child: widget.showLyrics
-                ? SizedBox(
-                    key: const ValueKey<String>('lyrics'),
-                    width: double.infinity,
-                    // 单击歌词区域切换视图；歌词区左右滑切歌由页面级手势接管
-                    child: KaraokeLyricsView(
-                      key: const ValueKey<String>('lyrics-view'),
-                      onToggleView: widget.onToggleLyrics,
-                    ),
-                  )
-                : SizedBox(
-                    key: const ValueKey<String>('cover'),
-                    width: double.infinity,
-                    child: _CoverSwipeArea(
-                      cfg: cfg,
-                      size: _coverSize(context),
-                      onToggleLyrics: widget.onToggleLyrics,
-                    ),
-                  ),
-          ),
-        ),
         _InfoSection(),
         const _ProgressSection(),
         const _ControlBar(),
@@ -227,7 +207,119 @@ class _PhoneBodyState extends ConsumerState<_PhoneBody> {
     return Column(
       children: <Widget>[
         const _TopBar(),
-        Expanded(child: trackContent),
+        Expanded(
+          child: _PlayerStackLayout(
+            showLyrics: widget.showLyrics,
+            cfg: cfg,
+            coverSize: _coverSize(context),
+            onToggleLyrics: widget.onToggleLyrics,
+            bottomOverlay: bottomOverlay,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// 手机端主布局：歌词/封面铺满 + 底部透明浮层（信息区/进度/控制/功能条）。
+/// 浮层高度实时测量后回填给歌词（滚动居中避让）与封面（向上避让）。
+class _PlayerStackLayout extends ConsumerStatefulWidget {
+  const _PlayerStackLayout({
+    required this.showLyrics,
+    required this.cfg,
+    required this.coverSize,
+    required this.onToggleLyrics,
+    required this.bottomOverlay,
+  });
+
+  final bool showLyrics;
+  final NpPlayerSettings cfg;
+  final double coverSize;
+  final VoidCallback? onToggleLyrics;
+  final Widget bottomOverlay;
+
+  @override
+  ConsumerState<_PlayerStackLayout> createState() => _PlayerStackLayoutState();
+}
+
+class _PlayerStackLayoutState extends ConsumerState<_PlayerStackLayout> {
+  /// 底部浮层实测高度（初值给常见机型的估算值，首帧后校正）
+  double _overlayHeight = 252;
+
+  final GlobalKey _overlayKey = GlobalKey();
+
+  void _measureOverlay() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final BuildContext? ctx = _overlayKey.currentContext;
+      final double? h = ctx?.size?.height;
+      if (h != null && h > 0 && (h - _overlayHeight).abs() > 0.5) {
+        setState(() => _overlayHeight = h);
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    _measureOverlay();
+
+    return Stack(
+      fit: StackFit.expand,
+      children: <Widget>[
+        // 中层：封面 ⇄ 歌词（AnimatedSwitcher 平滑切换）
+        Positioned.fill(
+          child: AnimatedSwitcher(
+            duration: AppConstants.playerPageFlip,
+            switchInCurve: Curves.easeOutCubic,
+            switchOutCurve: Curves.easeInCubic,
+            transitionBuilder: (Widget child, Animation<double> anim) =>
+                FadeTransition(opacity: anim, child: child),
+            child: widget.showLyrics
+                ? Padding(
+                    key: const ValueKey<String>('lyrics'),
+                    // 歌词铺满全高（含浮层背后），滚动居中由 bottomInset 避让
+                    padding: EdgeInsets.zero,
+                    child: KaraokeLyricsView(
+                      key: const ValueKey<String>('lyrics-view'),
+                      onToggleView: widget.onToggleLyrics,
+                      bottomInset: _overlayHeight,
+                    ),
+                  )
+                : Padding(
+                    key: const ValueKey<String>('cover'),
+                    // 封面模式：向上避让浮层，封面仍在剩余空间内居中
+                    padding: EdgeInsets.only(bottom: _overlayHeight),
+                    child: LayoutBuilder(
+                      builder: (BuildContext ctx, BoxConstraints cons) {
+                        // 封面页歌词预览占位预留，避免溢出
+                        final double reserve = switch (widget.cfg.coverLyrics) {
+                          NpCoverLyricsMode.none => 0.0,
+                          NpCoverLyricsMode.one => 52.0,
+                          NpCoverLyricsMode.two => 82.0,
+                        };
+                        final double maxCover =
+                            (cons.maxHeight - reserve).clamp(0.0, cons.maxHeight);
+                        final double size =
+                            widget.coverSize.clamp(0.0, maxCover).toDouble();
+                        return _CoverSwipeArea(
+                          cfg: widget.cfg,
+                          size: size,
+                          onToggleLyrics: widget.onToggleLyrics,
+                        );
+                      },
+                    ),
+                  ),
+          ),
+        ),
+        // 顶层：透明底部浮层（歌词从其背后穿过）
+        Align(
+          alignment: Alignment.bottomCenter,
+          child: Column(
+            key: _overlayKey,
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[widget.bottomOverlay],
+          ),
+        ),
       ],
     );
   }
@@ -293,18 +385,25 @@ class _CoverSwipeAreaState extends ConsumerState<_CoverSwipeArea> {
     final Track? track = ps.currentTrack;
     final double p = (_dragDx.abs() / _triggerDistance).clamp(0.0, 1.0);
 
+    // 需求：封面页歌词预览（借鉴 kgka_Music_hl）—— 封面下方显示当前行，
+    // 可选一行/两行，默认一行；占位高度在封面尺寸计算时预留，避免溢出。
+    final bool showPreview = widget.cfg.coverLyrics != NpCoverLyricsMode.none;
+
     return Center(
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
         onTap: widget.onToggleLyrics,
         onHorizontalDragUpdate: _onDragUpdate,
         onHorizontalDragEnd: _onDragEnd,
-        child: SizedBox(
-          width: widget.size,
-          height: widget.size,
-          child: Stack(
-            alignment: Alignment.center,
-            children: <Widget>[
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            SizedBox(
+              width: widget.size,
+              height: widget.size,
+              child: Stack(
+                alignment: Alignment.center,
+                children: <Widget>[
               // 封面：拖动视差 + 轻微缩小
               Transform.translate(
                 offset: Offset(_dragDx * 0.22, 0),
@@ -387,8 +486,18 @@ class _CoverSwipeAreaState extends ConsumerState<_CoverSwipeArea> {
                     ),
                   ),
                 ),
+              ],
+            ),
+            ),
+            // 需求：封面页歌词预览（kgka 风格：当前行大字 + 副行，可选一行/两行）
+            if (showPreview) ...<Widget>[
+              const SizedBox(height: 12),
+              _CoverLyricsPreview(
+                mode: widget.cfg.coverLyrics,
+                width: widget.size,
+              ),
             ],
-          ),
+          ],
         ),
       ),
     );
@@ -625,9 +734,12 @@ class _InfoSectionState extends ConsumerState<_InfoSection> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: <Widget>[
                 // 歌名（跑马灯）+ VIP 标识
+                // 需求：VIP 徽标应紧靠歌名右侧，而非紧贴红心左侧 ——
+                // Flexible 让跑马灯收缩到文本实际宽度，短歌名时 VIP
+                // 直接跟在文字后面；长歌名跑马灯滚动，VIP 靠右定位。
                 Row(
                   children: <Widget>[
-                    Expanded(
+                    Flexible(
                       child: MarqueeText(
                         track?.title ?? '未在播放',
                         style: theme.titleLarge?.copyWith(
@@ -638,7 +750,7 @@ class _InfoSectionState extends ConsumerState<_InfoSection> {
                       ),
                     ),
                     if (vip) ...<Widget>[
-                      const SizedBox(width: 8),
+                      const SizedBox(width: 7),
                       Container(
                         padding: const EdgeInsets.symmetric(
                             horizontal: 5, vertical: 1.5),
@@ -709,22 +821,39 @@ class _InfoSectionState extends ConsumerState<_InfoSection> {
           ),
           const SizedBox(width: 10),
           // 评论（hover/按压反馈）
+          // 需求：评论数字改为覆盖在评论图标上方（角标），不再显示在右侧
           _PlayerIconButton(
             tooltip: '评论',
             onTap: track == null
                 ? null
                 : () => context.push('/comments', extra: track),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
+            child: Stack(
+              clipBehavior: Clip.none,
+              alignment: Alignment.center,
               children: <Widget>[
                 Icon(Icons.mode_comment_outlined, size: 21, color: tint),
-                if (commentCount > 0) ...<Widget>[
-                  const SizedBox(width: 4),
-                  Text(
-                    _formatWan(commentCount),
-                    style: TextStyle(fontSize: 11.5, color: tint),
+                if (commentCount > 0)
+                  Positioned(
+                    top: -5,
+                    right: -10,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 3.5, vertical: 0.5),
+                      decoration: BoxDecoration(
+                        color: Colors.black.withValues(alpha: 0.30),
+                        borderRadius: BorderRadius.circular(7),
+                      ),
+                      child: Text(
+                        _formatWan(commentCount),
+                        style: const TextStyle(
+                          fontSize: 9.5,
+                          height: 1.25,
+                          fontWeight: FontWeight.w600,
+                          color: Colors.white,
+                        ),
+                      ),
+                    ),
                   ),
-                ],
               ],
             ),
           ),
@@ -931,6 +1060,127 @@ class _MvPill extends StatelessWidget {
             fontWeight: FontWeight.w800,
             letterSpacing: 0.5,
           ),
+        ),
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------- 封面页歌词预览
+
+/// 封面页歌词预览（需求：借鉴 kgka_Music_hl 封面页）：
+///  - 当前播放行大字白色（跑马灯防溢出），副行淡色；
+///  - 副行优先翻译（跟随「显示翻译副行」开关），无翻译显示下一行；
+///  - 一行/两行两种模式，默认一行；无歌词时显示占位避免布局跳动；
+///  - 换行时 AnimatedSwitcher 平滑过渡（对齐 kgka 260ms）。
+class _CoverLyricsPreview extends ConsumerWidget {
+  const _CoverLyricsPreview({required this.mode, required this.width});
+
+  final NpCoverLyricsMode mode;
+  final double width;
+
+  ({String main, String sub}) _resolve(ParsedLyrics lyrics, Duration position,
+      bool preferTranslation) {
+    if (lyrics.hasYrc) {
+      final int idx = activeYrcIndex(lyrics.yrcLines, position);
+      if (idx < 0) return (main: '', sub: '');
+      final cur = lyrics.yrcLines[idx];
+      final String main = cur.text;
+      String sub = '';
+      if (!cur.isMetadata) {
+        final String t = lyrics.subLineFor(cur.start.inMilliseconds);
+        if (preferTranslation && t.isNotEmpty) {
+          sub = t;
+        } else if (idx + 1 < lyrics.yrcLines.length) {
+          sub = lyrics.yrcLines[idx + 1].text;
+        }
+      }
+      return (main: main, sub: sub);
+    }
+    final int idx = activeLyricIndex(lyrics.lrcLines, position);
+    if (idx < 0) return (main: '', sub: '');
+    final String main = lyrics.lrcLines[idx].text;
+    String sub = '';
+    final String t =
+        lyrics.subLineFor(lyrics.lrcLines[idx].time.inMilliseconds);
+    if (preferTranslation && t.isNotEmpty) {
+      sub = t;
+    } else if (idx + 1 < lyrics.lrcLines.length) {
+      sub = lyrics.lrcLines[idx + 1].text;
+    }
+    return (main: main, sub: sub);
+  }
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final ParsedLyrics lyrics = ref.watch(currentLyricsProvider);
+    final NpPlayerSettings cfg = ref.watch(npSettingsProvider);
+    final Duration position =
+        ref.watch(positionProvider).value ?? Duration.zero;
+
+    final bool two = mode == NpCoverLyricsMode.two;
+    final double height = two ? 62 : 34;
+
+    if (lyrics.isEmpty) {
+      return SizedBox(
+        width: width,
+        height: height,
+        child: Center(
+          child: Text(
+            '暂无歌词',
+            style: TextStyle(
+              color: Colors.white.withValues(alpha: 0.45),
+              fontSize: 14.5,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
+      );
+    }
+
+    final ({String main, String sub}) line =
+        _resolve(lyrics, position, cfg.showTranslation);
+    final String main = line.main.isEmpty ? '···' : line.main;
+    final String sub = two ? line.sub : '';
+
+    return SizedBox(
+      width: width,
+      height: height,
+      child: AnimatedSwitcher(
+        duration: const Duration(milliseconds: 260),
+        switchInCurve: Curves.easeOutCubic,
+        switchOutCurve: Curves.easeOutCubic,
+        child: Column(
+          key: ValueKey<String>('$main|$sub'),
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: <Widget>[
+            MarqueeText(
+              main,
+              textAlign: TextAlign.center,
+              velocity: 32,
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 16.5,
+                height: 1.25,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            if (two && sub.isNotEmpty) ...<Widget>[
+              const SizedBox(height: 4),
+              Text(
+                sub,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: Colors.white.withValues(alpha: 0.46),
+                  fontSize: 12.5,
+                  height: 1.2,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ],
         ),
       ),
     );

@@ -25,6 +25,8 @@ void main() {
       expect(restored.yrcPlayed, s.yrcPlayed);
       expect(restored.yrcUnplayed, s.yrcUnplayed);
       expect(restored.highlightPlayed, s.highlightPlayed);
+      expect(restored.lyricAlwaysCenter, s.lyricAlwaysCenter);
+      expect(restored.coverLyrics, s.coverLyrics);
       expect(restored.heartEffect, s.heartEffect);
       expect(restored.miniStyle, s.miniStyle);
       expect(restored.stripButtons, s.stripButtons);
@@ -47,6 +49,8 @@ void main() {
         yrcPlayed: Color(0xFFFA233B),
         yrcUnplayed: Color(0x33FFFFFF),
         highlightPlayed: true,
+        lyricAlwaysCenter: true,
+        coverLyrics: NpCoverLyricsMode.two,
         heartEffect: false,
         miniStyle: MiniPlayerStyle.wide,
         stripButtons: <String>['wiki', 'output'],
@@ -69,6 +73,8 @@ void main() {
       expect(restored.yrcPlayed, const Color(0xFFFA233B));
       expect(restored.yrcUnplayed, const Color(0x33FFFFFF));
       expect(restored.highlightPlayed, isTrue);
+      expect(restored.lyricAlwaysCenter, isTrue);
+      expect(restored.coverLyrics, NpCoverLyricsMode.two);
       expect(restored.heartEffect, isFalse);
       expect(restored.miniStyle, MiniPlayerStyle.wide);
       expect(restored.stripButtons, <String>['wiki', 'output']);
@@ -128,6 +134,9 @@ void main() {
       });
       expect(legacy.displayMode, NpDisplayMode.both);
       expect(legacy.highlightPlayed, isFalse);
+      // 需求：封面页歌词默认一行
+      expect(legacy.coverLyrics, NpCoverLyricsMode.one);
+      expect(legacy.lyricAlwaysCenter, isFalse);
       expect(legacy.heartEffect, isTrue);
     });
 

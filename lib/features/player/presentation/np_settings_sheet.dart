@@ -168,6 +168,18 @@ class _CoverPane extends ConsumerWidget {
           onChanged: (bool v) =>
               ref.read(npSettingsProvider.notifier).setShowMvBadge(v),
         ),
+        _SegmentedRow<NpCoverLyricsMode>(
+          label: '封面歌词',
+          hint: '借鉴 kgka_Music_hl：封面下方显示当前行歌词预览',
+          groups: const <(NpCoverLyricsMode, String)>[
+            (NpCoverLyricsMode.none, '关闭'),
+            (NpCoverLyricsMode.one, '一行'),
+            (NpCoverLyricsMode.two, '两行'),
+          ],
+          value: cfg.coverLyrics,
+          onChanged: (NpCoverLyricsMode v) =>
+              ref.read(npSettingsProvider.notifier).setCoverLyrics(v),
+        ),
         _SwitchRow(
           label: '方形封面圆角',
           hint: '方形样式默认无圆角，开启后显示圆角',
@@ -318,6 +330,13 @@ class _LyricsPane extends ConsumerWidget {
               ref.read(npSettingsProvider.notifier).setHighlightPlayed(v),
         ),
         _SwitchRow(
+          label: '时刻保持居中',
+          hint: '当前行始终位于可视区中部，歌曲开头/结尾不贴边；拖动浏览不受影响，松手后恢复跟随',
+          value: cfg.lyricAlwaysCenter,
+          onChanged: (bool v) =>
+              ref.read(npSettingsProvider.notifier).setLyricAlwaysCenter(v),
+        ),
+        _SwitchRow(
           label: '红心动效',
           hint: '点击喜欢时播放心形迸发动画',
           value: cfg.heartEffect,
@@ -423,12 +442,14 @@ class _SegmentedRow<T> extends StatelessWidget {
     required this.groups,
     required this.value,
     required this.onChanged,
+    this.hint,
   });
 
   final String label;
   final List<(T, String)> groups;
   final T value;
   final ValueChanged<T> onChanged;
+  final String? hint;
 
   @override
   Widget build(BuildContext context) {
@@ -436,15 +457,28 @@ class _SegmentedRow<T> extends StatelessWidget {
       padding: const EdgeInsets.only(bottom: 12),
       child: Row(
         children: <Widget>[
-          SizedBox(
-            width: 84,
-            child: Text(
-              label,
-              style: TextStyle(
-                  color: Colors.white.withValues(alpha: 0.86), fontSize: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Text(
+                  label,
+                  style: TextStyle(
+                      color: Colors.white.withValues(alpha: 0.86),
+                      fontSize: 14),
+                ),
+                if (hint != null)
+                  Text(
+                    hint!,
+                    style: TextStyle(
+                        color: Colors.white.withValues(alpha: 0.30),
+                        fontSize: 11.5),
+                  ),
+              ],
             ),
           ),
-          Expanded(
+          const SizedBox(width: 10),
+          Flexible(
             child: Wrap(
               alignment: WrapAlignment.end,
               spacing: 8,

@@ -203,3 +203,43 @@ class AudioQualityNotifier extends Notifier<AudioQuality> {
     _prefs.setString(PrefsKeys.audioQuality, quality.name);
   }
 }
+
+// ---------------------------------------------------------------- 边听边缓存 / 预加载
+
+/// 边听边缓存（需求：默认开启，并非下载；缓存文件仅可在设置中清理）
+final NotifierProvider<ListenCacheNotifier, bool> listenCacheProvider =
+    NotifierProvider<ListenCacheNotifier, bool>(ListenCacheNotifier.new);
+
+class ListenCacheNotifier extends Notifier<bool> {
+  late SharedPreferences _prefs;
+
+  @override
+  bool build() {
+    _prefs = ref.watch(sharedPreferencesProvider);
+    return _prefs.getBool(PrefsKeys.listenCache) ?? true;
+  }
+
+  void set(bool on) {
+    state = on;
+    _prefs.setBool(PrefsKeys.listenCache, on);
+  }
+}
+
+/// 预加载下一首（需求：默认开启；开启缓存时预下载，否则预热连接）
+final NotifierProvider<PreloadNextNotifier, bool> preloadNextProvider =
+    NotifierProvider<PreloadNextNotifier, bool>(PreloadNextNotifier.new);
+
+class PreloadNextNotifier extends Notifier<bool> {
+  late SharedPreferences _prefs;
+
+  @override
+  bool build() {
+    _prefs = ref.watch(sharedPreferencesProvider);
+    return _prefs.getBool(PrefsKeys.preloadNext) ?? true;
+  }
+
+  void set(bool on) {
+    state = on;
+    _prefs.setBool(PrefsKeys.preloadNext, on);
+  }
+}

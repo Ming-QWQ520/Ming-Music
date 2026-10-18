@@ -20,6 +20,7 @@ class MarqueeText extends StatefulWidget {
     this.overflowIndent = 24,
     this.velocity = 40,
     this.endPause = const Duration(seconds: 3),
+    this.textAlign = TextAlign.start,
   });
 
   final String text;
@@ -34,6 +35,9 @@ class MarqueeText extends StatefulWidget {
 
   /// 滚到尽头后的停留时长
   final Duration endPause;
+
+  /// 文本对齐（未溢出时生效；溢出滚动时恒为左滚）
+  final TextAlign textAlign;
 
   @override
   State<MarqueeText> createState() => _MarqueeTextState();
@@ -113,6 +117,7 @@ class _MarqueeTextState extends State<MarqueeText>
     final Widget content = Text(
       widget.text,
       maxLines: widget.maxLines,
+      textAlign: widget.textAlign,
       overflow: scrollable ? TextOverflow.visible : TextOverflow.ellipsis,
       softWrap: false,
       style: style,

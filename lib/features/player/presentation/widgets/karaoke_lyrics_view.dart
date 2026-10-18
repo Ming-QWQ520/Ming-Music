@@ -71,10 +71,14 @@ double _measureTextHeight(
 }
 
 class KaraokeLyricsView extends ConsumerStatefulWidget {
-  const KaraokeLyricsView({super.key, this.onToggleView});
+  const KaraokeLyricsView({super.key, this.onToggleView, this.bottomInset = 0});
 
   /// 单击歌词区域 → 切换封面/歌词视图（null 时单击无动作）
   final VoidCallback? onToggleView;
+
+  /// 底部被信息区/控制栏覆盖的高度：自动滚动定位在「可视区中部」
+  /// （需求：歌名整块区域透明可见歌词 —— 歌词延伸到信息区背后）
+  final double bottomInset;
 
   @override
   ConsumerState<KaraokeLyricsView> createState() => _KaraokeLyricsViewState();
@@ -109,10 +113,15 @@ class _KaraokeLyricsViewState extends ConsumerState<KaraokeLyricsView> {
     if (DateTime.now().isBefore(_suppressUntil)) return;
     if (!_scroll.hasClients) return;
 
+    // 需求（歌名区透明可见歌词）：自动滚动以「可视区」为中心 ——
+    // 底部被信息区/控制栏覆盖的部分不参与居中计算
     final double viewport = _scroll.position.viewportDimension;
+    final double effVp = (viewport - widget.bottomInset)
+        .clamp(viewport * 0.35, viewport);
     final double top = heights.sublist(0, active).fold<double>(0, (double a, double h) => a + h);
     final double target =
-        (top - viewport / 2 + heights[active] / 2).clamp(0.0, _scroll.position.maxScrollExtent);
+        (_edgeTopPadding + top - effVp / 2 + heights[active] / 2)
+            .clamp(0.0, _scroll.position.maxScrollExtent);
 
     // 首次定位：jumpTo 无动画（封面⇄歌词切换直接显示当前播放歌词，固定行为）
     if (firstTime) {
@@ -125,6 +134,9 @@ class _KaraokeLyricsViewState extends ConsumerState<KaraokeLyricsView> {
       curve: Curves.easeOutCubic,
     );
   }
+
+  /// 「时刻保持居中」模式的边缘填充量（build 内按可视区计算后暂存）
+  double _edgeTopPadding = 0;
 
   void _onUserScroll() {
     _suppressUntil = DateTime.now().add(AppConstants.lyricScrollSuppression);
@@ -155,13 +167,15 @@ class _KaraokeLyricsViewState extends ConsumerState<KaraokeLyricsView> {
           final double width = constraints.maxWidth;
           final double innerWidth = width - 56; // 行内左右 padding 28
 
-          // 行高缓存（内容/字号/行距/翻译开关/宽度任一变化即重算）
+          // 行高缓存（内容/字号/行距/翻译开关/宽度/居中模式/底部避让任一变化即重算）
           final Object key = Object.hash(
             identityHashCode(lyrics),
             cfg.lyricFontSize,
             cfg.lyricLineGap,
             cfg.lyricAlign,
             cfg.showTranslation,
+            cfg.lyricAlwaysCenter,
+            widget.bottomInset.round(),
             innerWidth.toStringAsFixed(1),
           );
           if (_heights == null || _heightsKey != key) {
@@ -169,6 +183,29 @@ class _KaraokeLyricsViewState extends ConsumerState<KaraokeLyricsView> {
             _heights = _measureAll(lyrics, cfg, innerWidth);
           }
           final List<double> heights = _heights!;
+
+          // 需求「时刻保持居中」：并非锁定拖动，而是让当前行始终位于可视区
+          // 中部 —— 开头/结尾行不贴边。实现：给内容加首尾边缘填充，使第一行
+          // /最后一行也能滚动到可视区中心；拖动仍自由，松手后恢复跟随。
+          // 可视区 = 列表高度 - 底部覆盖（歌名/控制区透明背景下歌词从其后穿过）。
+          final double viewportH = constraints.maxHeight;
+          final double effVp =
+              (viewportH - widget.bottomInset).clamp(viewportH * 0.35, viewportH);
+          EdgeInsets listPadding;
+          if (cfg.lyricAlwaysCenter && heights.isNotEmpty) {
+            final double pTop =
+                (effVp / 2 - heights.first / 2).clamp(0.0, double.infinity);
+            // 底部填充使最后一行也可居中：vp+inset)/2 - hLast/2
+            final double pBottom = ((viewportH + widget.bottomInset) / 2 -
+                    heights.last / 2)
+                .clamp(0.0, double.infinity);
+            _edgeTopPadding = pTop;
+            listPadding = EdgeInsets.only(top: pTop, bottom: pBottom);
+          } else {
+            _edgeTopPadding = 0;
+            // 非居中模式：仅需保证尾部内容不被底部覆盖区遮死
+            listPadding = EdgeInsets.only(bottom: widget.bottomInset + 24);
+          }
 
           if (lyrics.hasYrc) {
             final List<YrcLine> lines = lyrics.yrcLines;
@@ -178,6 +215,7 @@ class _KaraokeLyricsViewState extends ConsumerState<KaraokeLyricsView> {
             });
             return ListView.builder(
               controller: _scroll,
+              padding: listPadding,
               itemCount: lines.length,
               itemBuilder: (BuildContext context, int index) {
                 final YrcLine line = lines[index];
@@ -203,12 +241,18 @@ class _KaraokeLyricsViewState extends ConsumerState<KaraokeLyricsView> {
           });
           return ListView.builder(
             controller: _scroll,
+            padding: listPadding,
             itemCount: lines.length,
             itemBuilder: (BuildContext context, int index) => _LrcRow(
               line: lines[index],
               // 副行：翻译优先，无翻译用音译拼音（仿网易云粤语歌）
               subLine: lyrics.subLineFor(lines[index].time.inMilliseconds),
               active: index == active,
+              // 需求：修复「高亮已播放歌词」在逐行模式下无效果 ——
+              // 已唱行（时间已过且非当前行）以已唱色弱高亮
+              played: cfg.highlightPlayed &&
+                  index != active &&
+                  lines[index].time <= position,
               showSubLine: cfg.showTranslation,
               fontSize: cfg.lyricFontSize,
               align: cfg.lyricAlign,
@@ -590,12 +634,14 @@ class _WipePainter extends CustomPainter {
 
 // ---------------------------------------------------------------- 逐行行
 
-/// 逐行行（LRC 回退）：当前行高亮 + 翻译/音译副行（所有行显示）；双击 seek
+/// 逐行行（LRC 回退）：当前行高亮 + 已唱行弱高亮（需求修复）+ 翻译/音译副行；
+/// 双击 seek
 class _LrcRow extends StatelessWidget {
   const _LrcRow({
     required this.line,
     required this.subLine,
     required this.active,
+    this.played = false,
     required this.showSubLine,
     required this.fontSize,
     required this.align,
@@ -607,6 +653,10 @@ class _LrcRow extends StatelessWidget {
   final LyricLine line;
   final String subLine;
   final bool active;
+
+  /// 需求（修复「高亮已播放歌词无实际效果」）：逐行模式下已唱行
+  /// 以接近当前行的亮度弱高亮，与未唱灰行区分
+  final bool played;
   final bool showSubLine;
   final double fontSize;
   final NpLyricAlign align;
@@ -624,6 +674,12 @@ class _LrcRow extends StatelessWidget {
     final String sub = showSubLine ? subLine : '';
     final bool showSub = sub.isNotEmpty;
 
+    final Color mainColor = active
+        ? Colors.white
+        : played
+            ? Colors.white.withValues(alpha: 0.72)
+            : Colors.white.withValues(alpha: 0.05 + (1 - fade) * 0.40);
+
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onDoubleTap: () => onSeek(line.time),
@@ -638,11 +694,9 @@ class _LrcRow extends StatelessWidget {
               textAlign: textAlign,
               softWrap: true,
               style: TextStyle(
-                color: active
-                    ? Colors.white
-                    : Colors.white.withValues(alpha: 0.05 + (1 - fade) * 0.40),
+                color: mainColor,
                 fontSize: fontSize,
-                fontWeight: active ? FontWeight.w700 : FontWeight.w500,
+                fontWeight: active || played ? FontWeight.w700 : FontWeight.w500,
                 height: 1.35,
               ),
             ),
@@ -653,8 +707,8 @@ class _LrcRow extends StatelessWidget {
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(
-                  color: active
-                      ? Colors.white.withValues(alpha: 0.72)
+                  color: active || played
+                      ? Colors.white.withValues(alpha: 0.68)
                       : Colors.white.withValues(alpha: 0.45),
                   fontSize: 12.5,
                   height: 1.3,

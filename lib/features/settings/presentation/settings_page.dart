@@ -20,6 +20,8 @@ import '../../auth/providers/auth_providers.dart';
 import '../../player/domain/np_settings.dart';
 import '../../player/presentation/np_settings_sheet.dart';
 import '../../player/providers/np_settings_providers.dart';
+import '../../player/providers/player_providers.dart' show songCacheProvider;
+import '../../player/services/song_cache.dart';
 import '../domain/settings_models.dart';
 import '../providers/settings_providers.dart';
 
@@ -36,6 +38,8 @@ class SettingsPage extends ConsumerWidget {
     final AudioQuality quality = ref.watch(audioQualityProvider);
     final AuthState auth = ref.watch(authProvider);
     final NpPlayerSettings np = ref.watch(npSettingsProvider);
+    final bool listenCache = ref.watch(listenCacheProvider);
+    final bool preloadNext = ref.watch(preloadNextProvider);
 
     return Scaffold(
       appBar: AppBar(
@@ -217,6 +221,36 @@ class SettingsPage extends ConsumerWidget {
                 onChanged: (bool v) =>
                     ref.read(npSettingsProvider.notifier).setShowMvBadge(v),
               ),
+              SwitchListTile(
+                contentPadding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
+                secondary: const Icon(Icons.save_alt_rounded, size: 22),
+                title: const Text('边听边缓存', style: TextStyle(fontSize: 15)),
+                subtitle: Text(
+                    '播放时自动缓存歌曲，再次播放秒开且不耗流量；并非下载，'
+                    '缓存仅在下方「缓存」分组清理（默认开启）',
+                    style: TextStyle(
+                        fontSize: 12,
+                        color: theme.colorScheme.onSurfaceVariant)),
+                value: listenCache,
+                activeThumbColor: AppConstants.brandColor,
+                onChanged: (bool v) =>
+                    ref.read(listenCacheProvider.notifier).set(v),
+              ),
+              SwitchListTile(
+                contentPadding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
+                secondary: const Icon(Icons.skip_next_rounded, size: 22),
+                title: const Text('预加载下一首', style: TextStyle(fontSize: 15)),
+                subtitle: Text('提前加载队列下一首，切歌零等待（默认开启）',
+                    style: TextStyle(
+                        fontSize: 12,
+                        color: theme.colorScheme.onSurfaceVariant)),
+                value: preloadNext,
+                activeThumbColor: AppConstants.brandColor,
+                onChanged: (bool v) =>
+                    ref.read(preloadNextProvider.notifier).set(v),
+              ),
             ],
           ),
 
@@ -245,7 +279,7 @@ class SettingsPage extends ConsumerWidget {
           const SizedBox(height: 16),
 
           // ---------------- 缓存 ----------------
-          const _CacheGroup(),
+          _CacheGroup(songCache: ref.watch(songCacheProvider)),
 
           const SizedBox(height: 16),
 
@@ -338,7 +372,9 @@ class SettingsPage extends ConsumerWidget {
 // ---------------------------------------------------------------- 缓存组
 
 class _CacheGroup extends ConsumerStatefulWidget {
-  const _CacheGroup();
+  const _CacheGroup({required this.songCache});
+
+  final SongCacheService songCache;
 
   @override
   ConsumerState<_CacheGroup> createState() => _CacheGroupState();
@@ -346,6 +382,7 @@ class _CacheGroup extends ConsumerStatefulWidget {
 
 class _CacheGroupState extends ConsumerState<_CacheGroup> {
   String _sizeText = '计算中…';
+  String _songSizeText = '计算中…';
 
   @override
   void initState() {
@@ -355,14 +392,49 @@ class _CacheGroupState extends ConsumerState<_CacheGroup> {
 
   Future<void> _refreshSize() async {
     final int bytes = await CoverImage.cacheSizeBytes();
+    final int songBytes = await widget.songCache.totalSizeBytes();
     if (!mounted) return;
-    setState(() => _sizeText = _fmt(bytes));
+    setState(() {
+      _sizeText = _fmt(bytes);
+      _songSizeText = _fmt(songBytes);
+    });
   }
 
   static String _fmt(int b) {
     if (b <= 0) return '0 B';
     if (b < 1024 * 1024) return '${(b / 1024).toStringAsFixed(0)} KB';
-    return '${(b / 1024 / 1024).toStringAsFixed(1)} MB';
+    if (b < 1024 * 1024 * 1024) {
+      return '${(b / 1024 / 1024).toStringAsFixed(1)} MB';
+    }
+    return '${(b / 1024 / 1024 / 1024).toStringAsFixed(2)} GB';
+  }
+
+  Future<void> _clearSongCache() async {
+    final bool? ok = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext ctx) => AlertDialog(
+        title: const Text('清理歌曲缓存'),
+        content: Text(
+            '将删除已缓存的歌曲音频（当前占用 $_songSizeText）。'
+            '清理后再次播放需重新联网加载，确定继续吗？'),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('清理'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    await widget.songCache.clearAll();
+    _refreshSize();
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+        .showSnackBar(const SnackBar(content: Text('歌曲缓存已清理')));
   }
 
   @override
@@ -370,6 +442,19 @@ class _CacheGroupState extends ConsumerState<_CacheGroup> {
     return _GroupCard(
       title: '缓存',
       children: <Widget>[
+        ListTile(
+          contentPadding:
+              const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
+          leading: const Icon(Icons.library_music_rounded, size: 22),
+          title: const Text('歌曲缓存', style: TextStyle(fontSize: 15)),
+          subtitle: Text(
+              '边听边缓存占用：$_songSizeText（仅可在此清理，系统「清除缓存」不影响）',
+              style: TextStyle(
+                  fontSize: 12,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant)),
+          trailing: const Icon(Icons.delete_outline_rounded, size: 20),
+          onTap: _clearSongCache,
+        ),
         ListTile(
           contentPadding:
               const EdgeInsets.symmetric(horizontal: 16, vertical: 2),

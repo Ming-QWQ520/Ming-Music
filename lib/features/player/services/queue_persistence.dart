@@ -69,7 +69,12 @@ class QueuePersistence {
 
   // ------------------------------------------------------------ 当前队列
 
-  /// 保存当前队列状态（节流由调用方控制）
+  /// 保存当前队列状态（需求：歌单数据只保存歌曲 ID —— 网易云曲目仅存 id，
+  /// 不再持久化播放直链（有效期短，重启后由 restore 阶段统一重新获取）。
+  /// 本地/自定义曲目无法通过 id 重建，仍保存完整 Track。
+  ///
+  /// 格式 v2：{v:2, items:[<int id 或 track map>...], index, queueTitle}
+  /// 兼容旧格式：{queue:[track map...], index, queueTitle}
   Future<void> saveQueueState(
     List<Track> queue,
     int index,
@@ -77,7 +82,11 @@ class QueuePersistence {
   ) async {
     try {
       final String json = jsonEncode(<String, Object?>{
-        'queue': queue.map((Track t) => t.toMap()).toList(),
+        'v': 2,
+        'items': <Object?>[
+          for (final Track t in queue)
+            t.neteaseId != null && t.neteaseId! > 0 ? t.neteaseId : t.toMap(),
+        ],
         'index': index,
         'queueTitle': queueTitle,
       });
@@ -87,20 +96,65 @@ class QueuePersistence {
     }
   }
 
-  /// 恢复队列状态；无存档返回 null
-  ({List<Track> queue, int index, String? queueTitle})? loadQueueState() {
+  /// 恢复队列状态的原始数据：网易云曲目仅返回 id（占位 Track，需上层
+  /// 经 /song/detail 补全元数据后重新解析直链）；本地/自定义曲目直接还原。
+  /// 无存档返回 null。
+  ({List<Track> queue, int index, String? queueTitle, bool hasNeteaseIds})?
+      loadQueueState() {
     final String? json = _prefs.getString(PrefsKeys.queueState);
     if (json == null || json.isEmpty) return null;
     try {
       final Object? decoded = jsonDecode(json);
       if (decoded is! Map<String, Object?>) return null;
-      final Object? raw = decoded['queue'];
-      final List<Track> tracks = raw is List<Object?>
-          ? raw
-              .whereType<Map<String, Object?>>()
-              .map(Track.fromMap)
-              .toList(growable: false)
-          : const <Track>[];
+
+      final bool isV2 = decoded['v'] == 2;
+      final Object? raw = isV2 ? decoded['items'] : decoded['queue'];
+      if (raw is! List<Object?>) return null;
+
+      final List<Track> tracks = <Track>[];
+      bool hasNeteaseIds = false;
+      for (final Object? item in raw) {
+        if (isV2 && item is num) {
+          // v2：网易云歌曲 id 占位（元数据由 restore 阶段批量补全）
+          final int id = item.toInt();
+          if (id <= 0) continue;
+          hasNeteaseIds = true;
+          tracks.add(Track(
+            id: 'netease_$id',
+            neteaseId: id,
+            title: '加载中…',
+            artist: '网易云',
+            album: '',
+            source: '',
+            isNetwork: true,
+          ));
+        } else if (item is Map) {
+          final Track t = Track.fromMap(item.cast<String, Object?>());
+          // 旧格式（v1）：网易云曲目持久化了完整 Track（含已过期直链）——
+          // 清空 source 强制重新解析（需求：退出重进自动刷新播放 URL）
+          if (t.neteaseId != null && (t.neteaseId ?? 0) > 0) {
+            hasNeteaseIds = true;
+            if (!t.needsUrlResolve) {
+              tracks.add(Track(
+                id: t.id,
+                neteaseId: t.neteaseId,
+                mvId: t.mvId,
+                title: t.title,
+                artist: t.artist,
+                album: t.album,
+                source: '',
+                cover: t.cover,
+                durationMs: t.durationMs,
+                isNetwork: t.isNetwork,
+                isCustom: t.isCustom,
+                fee: t.fee,
+              ));
+              continue;
+            }
+          }
+          tracks.add(t);
+        }
+      }
       if (tracks.isEmpty) return null;
       final int index =
           ((decoded['index'] as num?)?.toInt() ?? 0).clamp(0, tracks.length - 1);
@@ -108,6 +162,7 @@ class QueuePersistence {
         queue: tracks,
         index: index,
         queueTitle: decoded['queueTitle'] as String?,
+        hasNeteaseIds: hasNeteaseIds,
       );
     } catch (e) {
       debugPrint('loadQueueState failed: $e');

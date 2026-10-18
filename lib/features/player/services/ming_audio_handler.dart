@@ -48,6 +48,11 @@ class MingAudioHandler extends BaseAudioHandler with SeekHandler {
   Future<void> Function()? _onNextRequest;
   Future<void> Function()? _onPreviousRequest;
 
+  /// 需求：通知栏增加红心 —— 由上层注入 toggleLike 回调；
+  /// 喜欢状态变化时经 [setLiked] 同步通知栏图标（空心⇄实心）。
+  Future<void> Function()? _onToggleLike;
+  bool _liked = false;
+
   /// 播放内核暴露给 UI 层（进度条等需要 select 精细监听的场景）
   ja.AudioPlayer get player => _player;
 
@@ -59,6 +64,18 @@ class MingAudioHandler extends BaseAudioHandler with SeekHandler {
   }) {
     _onNextRequest = onNext;
     _onPreviousRequest = onPrevious;
+  }
+
+  /// 通知栏红心点击 → 上层执行喜欢/取消喜欢（成功后回调 [setLiked]）
+  void setLikeHandler(Future<void> Function()? handler) {
+    _onToggleLike = handler;
+  }
+
+  /// 同步通知栏红心状态（状态变化才重新广播，避免无谓的通知刷新）
+  void setLiked(bool liked) {
+    if (_liked == liked) return;
+    _liked = liked;
+    _broadcastState(_player.playbackEvent);
   }
 
   void _bindEventStreams() {
@@ -137,18 +154,31 @@ class MingAudioHandler extends BaseAudioHandler with SeekHandler {
   Future<Uri?> resolveArtworkUri(String cover) async {
     if (cover.startsWith('http')) {
       // 优先本地缓存文件（修复通知栏封面 403：部分 CDN 节点拒绝
-      // 系统通知的直连请求），未缓存时回退网络 URL
+      // 系统通知的直连请求），未缓存时回退网络 URL。
+      // 需求「适当放大歌曲封面」：通知栏取原图分辨率（500y500 → 原图），
+      // 系统按 largeIcon 缩放后明显更清晰饱满；原图经磁盘缓存仅下载一次。
       final Uri? cached = _artworkCache[cover];
       if (cached != null) return cached;
       try {
         final File? f =
-            await CoverImage.cachedFileFor(cover, size: CoverSize.large);
+            await CoverImage.cachedFileFor(cover, size: CoverSize.original);
         if (f != null) {
           final Uri uri = Uri.file(f.path);
           _artworkCache[cover] = uri;
           return uri;
         }
-      } catch (_) {}
+      } catch (_) {
+        // 原图失败回退 500y500
+        try {
+          final File? f =
+              await CoverImage.cachedFileFor(cover, size: CoverSize.large);
+          if (f != null) {
+            final Uri uri = Uri.file(f.path);
+            _artworkCache[cover] = uri;
+            return uri;
+          }
+        } catch (_) {}
+      }
       return Uri.parse(cover);
     }
     final Uri? cached = _artworkCache[cover];
@@ -234,6 +264,22 @@ class MingAudioHandler extends BaseAudioHandler with SeekHandler {
   @override
   Future<void> setSpeed(double speed) => _player.setSpeed(speed);
 
+  /// 自定义通知动作（需求：通知栏红心）。audio_service 把
+  /// MediaAction.custom + CustomMediaAction(name) 路由到本回调；
+  /// 喜欢操作由上层完成后再回写 [setLiked] 刷新图标。
+  @override
+  Future<dynamic> customAction(String name,
+      [Map<String, dynamic>? extras]) async {
+    switch (name) {
+      case 'toggleLike':
+        final Future<void> Function()? h = _onToggleLike;
+        if (h != null) await h();
+        return null;
+      default:
+        return super.customAction(name, extras);
+    }
+  }
+
   @override
   Future<void> stop() async {
     await _player.stop();
@@ -253,13 +299,22 @@ class MingAudioHandler extends BaseAudioHandler with SeekHandler {
   // ---------------------------------------------------------------- broadcast
 
   /// 将 just_audio 事件映射为 audio_service 的 PlaybackState。
-  /// 通知栏按钮组：上一首 | 播放/暂停 | 下一首（紧凑展示前 3 个）。
+  /// 通知栏按钮组（需求：增加红心、缩小播放控件 —— 4 键排布比 3 键更紧凑）：
+  /// 上一首 | 红心 | 播放/暂停 | 下一首（紧凑展示取上一首/播放/下一首）。
   void _broadcastState(ja.PlaybackEvent event) {
     final bool playing = _player.playing;
     playbackState.add(
       PlaybackState(
         controls: <MediaControl>[
           MediaControl.skipToPrevious,
+          MediaControl(
+            androidIcon: _liked
+                ? 'drawable/ic_notif_heart_filled'
+                : 'drawable/ic_notif_heart_outline',
+            label: _liked ? '取消喜欢' : '喜欢',
+            action: MediaAction.custom,
+            customAction: const CustomMediaAction(name: 'toggleLike'),
+          ),
           if (playing) MediaControl.pause else MediaControl.play,
           MediaControl.skipToNext,
         ],
@@ -280,7 +335,7 @@ class MingAudioHandler extends BaseAudioHandler with SeekHandler {
         bufferedPosition: _player.bufferedPosition,
         speed: _player.speed,
         queueIndex: event.currentIndex,
-        androidCompactActionIndices: const <int>[0, 1, 2],
+        androidCompactActionIndices: const <int>[0, 2, 3],
       ),
     );
   }

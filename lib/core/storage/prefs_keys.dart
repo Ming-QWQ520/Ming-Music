@@ -24,4 +24,10 @@ class PrefsKeys {
 
   /// 歌曲本机播放次数统计（json：neteaseId → count）
   static const String playStats = 'player.playStats';
+
+  /// 边听边缓存（默认开启；缓存文件仅在设置中清理）
+  static const String listenCache = 'player.listenCache';
+
+  /// 预加载下一首（默认开启）
+  static const String preloadNext = 'player.preloadNext';
 }
