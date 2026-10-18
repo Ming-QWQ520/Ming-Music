@@ -160,11 +160,13 @@ class MainActivity : AudioServiceActivity() {
                 val router = MediaRouter2.getInstance(this)
                 val routes = router.routes
                 val target = routes.firstOrNull { r ->
+                    // MediaRoute2Info 的 TYPE_BLE_* 常量在部分 compileSdk 缺失，
+                    // 使用等值 AudioDeviceInfo 常量（蓝牙路由类型数值一一对应）
                     r.isSystemRoute && when (mode) {
                         "speaker" -> r.type == MediaRoute2Info.TYPE_BUILTIN_SPEAKER
                         "bluetooth" -> r.type == MediaRoute2Info.TYPE_BLUETOOTH_A2DP ||
-                                r.type == MediaRoute2Info.TYPE_BLE_HEADSET ||
-                                r.type == MediaRoute2Info.TYPE_BLE_SPEAKER
+                                r.type == AudioDeviceInfo.TYPE_BLE_HEADSET ||
+                                r.type == AudioDeviceInfo.TYPE_BLE_SPEAKER
                         else -> true
                     } && (deviceId == null || r.id.contains(deviceId.toString()))
                 }
