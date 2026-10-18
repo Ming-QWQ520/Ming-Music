@@ -17,6 +17,12 @@
         android:name="android.permission.WRITE_EXTERNAL_STORAGE"
         android:maxSdkVersion="28" />
 
+    <!-- ============ 本地音乐（MediaStore 音频库读取） ============ -->
+    <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
+    <uses-permission
+        android:name="android.permission.READ_EXTERNAL_STORAGE"
+        android:maxSdkVersion="32" />
+
     <!-- ============ 媒体输出（发现附近设备，仿网易云投屏） ============ -->
     <!-- Android 12+：蓝牙扫描/连接 -->
     <uses-permission android:name="android.permission.BLUETOOTH_SCAN"

@@ -1,73 +1,46 @@
-/// 全屏播放页（仿 Zephyr-Music 播放界面，支持高度自定义）：
+/// 全屏播放页（仿网易云/Zephyr-Music，支持高度自定义）：
 ///
 ///  - 显示模式（NpDisplayMode）：自适应（平板双列 / 手机可切换）/ 仅封面 / 仅歌词；
-///  - 歌词页交互：单击任意区域切换封面/歌词；双击歌词行 seek 到该行；
-///    切换视图时直接显示当前播放行（固定直显，无滑动动画）；
-///  - 顶栏：收起 / 歌手名（仿网易云；评论与播放页自定义入口已移除，
-///    评论走标题下计数行，自定义走底部条「设置」）；
-///  - 信息区：标题+VIP / 歌手 / 评论数点赞行（仿网易云）；
-///  - 进度行：当前时间 — 音质标签（居中，仿网易云）— 总时长；
-///  - hidePlayerControls：隐藏控制栏（仅保留进度条）；
-///  - 手势：下滑收起播放页；左右滑动切歌（避开边缘 20px），
-///    切歌带方向感知的滑动动画，拖动时内容跟手视差；
-///  - 封面：长按全屏查看 + 保存至本地。
+///  - 封面区：横向 PageView 轮播（左右滑动直接切歌，相邻封面进入页面）；
+///    封面 Hero 与 Mini 播放条同 tag —— 路由转场时无缝放大，配合背景模糊渐入；
+///  - 方形封面：播放时保持尺寸，暂停时明显缩小（缩放幅度 10%）；
+///  - 歌词页：单击切换封面/歌词；双击歌词行 seek；左右滑切歌；
+///  - 播放键：双环描边样式（无白色填充底）；
+///  - 红心：喜欢切换 + 可选迸发动效（heartEffect）；
+///  - 底部功能条：按「播放页底部功能自定义」勾选渲染（媒体输出/相似歌曲/
+///    歌词百科/下载/评论/设置），长按气泡提示；设置 → 播放页自定义底部菜单；
+///  - 手势：下滑收起播放页。
 library;
+
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart' hide RepeatMode;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../../core/constants/app_constants.dart';
-import '../../comments/presentation/comments_page.dart';
+import '../../auth/providers/auth_providers.dart';
 import '../../comments/providers/comments_providers.dart'
     show songCommentCountProvider;
-import '../../discover/presentation/mv_player_page.dart';
-import '../../discover/presentation/song_wiki_page.dart';
+import '../../library/data/download_service.dart';
 import '../../library/domain/track.dart';
 import '../../settings/domain/settings_models.dart'
-    show AudioQuality, AudioQualityX;
+    show AudioQuality;
 import '../../settings/providers/settings_providers.dart'
     show audioQualityProvider;
 import '../domain/np_settings.dart';
 import '../providers/np_settings_providers.dart';
 import '../providers/player_providers.dart';
-import 'np_settings_sheet.dart';
+import 'player_more_sheet.dart';
 import 'widgets/cover_art_view.dart';
 import 'widgets/cover_viewer.dart';
 import 'widgets/karaoke_lyrics_view.dart';
 import 'widgets/media_output_sheet.dart';
 import 'widgets/player_background.dart';
 import 'widgets/progress_bar.dart';
+import 'widgets/quality_sheet.dart';
 import 'widgets/queue_sheet.dart';
 import 'widgets/similar_songs_sheet.dart';
-
-/// 自定义转场路由：上滑进入、下滑退出，沉浸背景
-class FullPlayerRoute<T> extends PageRouteBuilder<T> {
-  FullPlayerRoute()
-      : super(
-          transitionDuration: const Duration(milliseconds: 360),
-          reverseTransitionDuration: const Duration(milliseconds: 300),
-          pageBuilder: (BuildContext context, Animation<double> animation,
-                  Animation<double> secondaryAnimation) =>
-              const FullPlayerPage(),
-          transitionsBuilder: (BuildContext context,
-              Animation<double> animation,
-              Animation<double> secondaryAnimation,
-              Widget child) {
-            final Animation<double> curved =
-                CurvedAnimation(parent: animation, curve: Curves.easeOutCubic);
-            return SlideTransition(
-              position: Tween<Offset>(
-                begin: const Offset(0, 1),
-                end: Offset.zero,
-              ).animate(curved),
-              child: FadeTransition(
-                opacity: Tween<double>(begin: 0.4, end: 1).animate(curved),
-                child: child,
-              ),
-            );
-          },
-        );
-}
 
 class FullPlayerPage extends ConsumerStatefulWidget {
   const FullPlayerPage({super.key});
@@ -79,44 +52,24 @@ class FullPlayerPage extends ConsumerStatefulWidget {
 class _FullPlayerPageState extends ConsumerState<FullPlayerPage> {
   /// 手机端封面/歌词切换：null = 跟随显示模式（both 默认封面）
   bool? _paneOverride;
-  bool _edgeBlocked = false;
-  double _dragDy = 0;
-
-  /// 左右滑动切歌的跟手视差偏移（0.25 系数，最大 ±48px）
-  double _swipeDx = 0;
 
   // ---------------------------------------------------------------- gestures
 
-  void _onHorizontalDragStart(DragStartDetails details) {
-    final double width = MediaQuery.sizeOf(context).width;
-    final double dx = details.localPosition.dx;
-    // 边缘 20px 让位系统侧滑返回（避坑指南 4）
-    _edgeBlocked = dx < AppConstants.gestureEdgeExclusion ||
-        dx > width - AppConstants.gestureEdgeExclusion;
-  }
-
-  void _onHorizontalDragUpdate(DragUpdateDetails details) {
-    if (_edgeBlocked) return;
-    setState(() {
-      _swipeDx = (_swipeDx + details.delta.dx)
-          .clamp(-AppConstants.swipeParallaxMax, AppConstants.swipeParallaxMax);
-    });
-  }
-
   void _onHorizontalDragEnd(DragEndDetails details) {
-    if (mounted) setState(() => _swipeDx = 0);
-    if (_edgeBlocked) return;
     final double vx = details.velocity.pixelsPerSecond.dx;
+    // 歌词区域左右滑切歌（封面区域由 PageView 自己处理）
     if (vx < -AppConstants.dismissVelocityThreshold * 0.7) {
-      ref.read(playerProvider.notifier).next(); // 左滑 → 下一首
+      ref.read(playerProvider.notifier).next();
     } else if (vx > AppConstants.dismissVelocityThreshold * 0.7) {
-      ref.read(playerProvider.notifier).previous(); // 右滑 → 上一首
+      ref.read(playerProvider.notifier).previous();
     }
   }
 
   void _onVerticalDragUpdate(DragUpdateDetails details) {
-    if (details.delta.dy > 0) _dragDy += details.delta.dy;
+    _dragDy += details.delta.dy > 0 ? details.delta.dy : 0;
   }
+
+  double _dragDy = 0;
 
   void _onVerticalDragEnd(DragEndDetails details) {
     final double vy = details.velocity.pixelsPerSecond.dy;
@@ -166,15 +119,20 @@ class _FullPlayerPageState extends ConsumerState<FullPlayerPage> {
       backgroundColor: Colors.transparent,
       body: GestureDetector(
         behavior: HitTestBehavior.translucent,
-        onHorizontalDragStart: _onHorizontalDragStart,
-        onHorizontalDragUpdate: _onHorizontalDragUpdate,
         onHorizontalDragEnd: _onHorizontalDragEnd,
         onVerticalDragUpdate: _onVerticalDragUpdate,
         onVerticalDragEnd: _onVerticalDragEnd,
         child: Stack(
           fit: StackFit.expand,
           children: <Widget>[
-            const PlayerBackground(),
+            // 背景模糊随页面入场动画渐进（需求：Hero + 背景模糊动画）
+            TweenAnimationBuilder<double>(
+              tween: Tween<double>(begin: 0.0, end: 1.0),
+              duration: const Duration(milliseconds: 480),
+              curve: Curves.easeOutCubic,
+              builder: (BuildContext ctx, double t, Widget? child) =>
+                  PlayerBackground(blurFactor: t, dimFactor: t),
+            ),
             SafeArea(
               child: isWide
                   ? _TabletBody(mode: cfg.displayMode)
@@ -186,7 +144,6 @@ class _FullPlayerPageState extends ConsumerState<FullPlayerPage> {
                                 _paneOverride = !showLyrics;
                               })
                           : null,
-                      swipeDx: _swipeDx,
                     ),
             ),
           ],
@@ -203,47 +160,61 @@ class _PhoneBody extends ConsumerStatefulWidget {
     required this.showLyrics,
     required this.switchable,
     required this.onToggleLyrics,
-    required this.swipeDx,
   });
 
   final bool showLyrics;
   final bool switchable;
   final VoidCallback? onToggleLyrics;
 
-  /// 拖动视差偏移（父层手势驱动）
-  final double swipeDx;
-
   @override
   ConsumerState<_PhoneBody> createState() => _PhoneBodyState();
 }
 
 class _PhoneBodyState extends ConsumerState<_PhoneBody> {
-  /// 上一曲下标，用于判定切歌方向（下一首从右滑入 / 上一首从左滑入）
-  int _lastIndex = 0;
+  /// 封面轮播控制器（相邻封面进入页面，对齐网易云样式）
+  PageController? _pageCtrl;
+
+  @override
+  void dispose() {
+    _pageCtrl?.dispose();
+    super.dispose();
+  }
+
+  double _coverSize(BuildContext context) {
+    final double h = MediaQuery.sizeOf(context).height;
+    final double w = MediaQuery.sizeOf(context).width;
+    return (h * (widget.showLyrics ? 0.36 : 0.42)).clamp(200.0, w * 0.88);
+  }
 
   @override
   Widget build(BuildContext context) {
     final NpPlayerSettings cfg = ref.watch(npSettingsProvider);
-    final Track? track =
-        ref.watch(playerProvider.select((PlayerState s) => s.currentTrack));
-    final bool playing =
-        ref.watch(playerProvider.select((PlayerState s) => s.playing));
-    final int index =
-        ref.watch(playerProvider.select((PlayerState s) => s.index));
+    final PlayerState ps = ref.watch(playerProvider);
+    final int index = ps.index;
+    final int queueLen = ps.queue.length;
 
-    // 方向感知：index 变化时记录方向，驱动 TweenAnimationBuilder 重播
-    ref.listen<int>(playerProvider.select((PlayerState s) => s.index),
-        (int? prev, int next) {
-      if (prev != null && prev != next) {
-        setState(() => _lastIndex = prev);
+    // 内核下标变化（按钮/通知切歌）→ 轮播跟随动画；用户滑动场景中
+    // onPageChanged → playAt 已把 index 同步到当前页，差值 < 1 不会回拽
+    if (!widget.showLyrics && queueLen > 0) {
+      final PageController ctrl = _ensureCtrl(queueLen, index);
+      if (ctrl.hasClients &&
+          ctrl.positions.isNotEmpty &&
+          (ctrl.page! - index).abs() >= 0.999) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted || _pageCtrl == null || !_pageCtrl!.hasClients) return;
+          if ((_pageCtrl!.page! - index).abs() < 0.01) return;
+          _pageCtrl!.animateToPage(
+            index.clamp(0, queueLen - 1),
+            duration: const Duration(milliseconds: 320),
+            curve: Curves.easeOutCubic,
+          );
+        });
       }
-    });
-    final int dir = index >= _lastIndex ? 1 : -1;
-    final Object trackKey = Object.hash(track?.id, index);
+    }
 
     final Widget trackContent = Column(
       children: <Widget>[
-        // 上半区：封面 ⇄ 歌词
+        // 上半区：封面轮播 ⇄ 歌词
         Expanded(
           child: AnimatedSwitcher(
             duration: AppConstants.playerPageFlip,
@@ -255,7 +226,7 @@ class _PhoneBodyState extends ConsumerState<_PhoneBody> {
                 ? SizedBox(
                     key: const ValueKey<String>('lyrics'),
                     width: double.infinity,
-                    // 单击歌词区域切换视图；直显当前播放行（固定行为）
+                    // 单击歌词区域切换视图；歌词区左右滑切歌由页面级手势接管
                     child: KaraokeLyricsView(
                       key: const ValueKey<String>('lyrics-view'),
                       onToggleView: widget.onToggleLyrics,
@@ -264,79 +235,84 @@ class _PhoneBodyState extends ConsumerState<_PhoneBody> {
                 : SizedBox(
                     key: const ValueKey<String>('cover'),
                     width: double.infinity,
-                    child: GestureDetector(
-                      onTap: widget.onToggleLyrics,
-                      child: Center(
-                        child: CoverArtView(
-                          style: cfg.coverStyle,
-                          cover: track?.cover,
-                          playing: playing,
-                          size: _coverSize(context),
-                          scale: cfg.coverScale,
-                          shadow: cfg.coverShadow,
-                          squareRadius: cfg.squareCoverRadius,
-                          onLongPress: track?.cover == null
-                              ? null
-                              : () => showCoverViewer(
-                                    context,
-                                    cover: track!.cover,
-                                    title:
-                                        '${track.title} - ${track.artist}',
-                                  ),
-                        ),
-                      ),
+                    child: _CoverCarousel(
+                      cfg: cfg,
+                      size: _coverSize(context),
                     ),
                   ),
           ),
         ),
-        if (!cfg.hidePlayerControls) ...<Widget>[
-          _InfoSection(),
-          const _ProgressSection(),
-          const _ControlBar(),
-          const _BottomStrip(),
-        ] else
-          const _ProgressSection(),
+        _InfoSection(),
+        const _ProgressSection(),
+        const _ControlBar(),
+        const _BottomStrip(),
       ],
     );
 
     return Column(
       children: <Widget>[
         const _TopBar(),
-        // 切歌滑动动画：新曲目内容按方向从左/右滑入 + 淡入；
-        // 拖动跟手视差与切歌动画互不影响（FractionalTranslation 不参与布局）
-        Expanded(
-          child: TweenAnimationBuilder<Offset>(
-            key: ValueKey<Object>(trackKey),
-            tween: Tween<Offset>(
-              begin: Offset(dir * 0.10, 0),
-              end: Offset.zero,
-            ),
-            duration: const Duration(milliseconds: 380),
-            curve: Curves.easeOutCubic,
-            builder: (BuildContext context, Offset off, Widget? child) {
-              final double parallax =
-                  widget.swipeDx * 0.25 + off.dx * MediaQuery.sizeOf(context).width;
-              return FractionalTranslation(
-                translation: Offset(parallax / MediaQuery.sizeOf(context).width, off.dy),
-                child: Opacity(
-                  opacity: (1 - widget.swipeDx.abs() /
-                          (AppConstants.swipeParallaxMax * 6))
-                      .clamp(0.55, 1.0),
-                  child: child,
-                ),
-              );
-            },
-            child: trackContent,
-          ),
-        ),
+        Expanded(child: trackContent),
       ],
     );
   }
 
-  double _coverSize(BuildContext context) {
-    final double h = MediaQuery.sizeOf(context).height;
-    final double w = MediaQuery.sizeOf(context).width;
-    return (h * (widget.showLyrics ? 0.36 : 0.42)).clamp(200.0, w * 0.88);
+  PageController _ensureCtrl(int len, int index) {
+    _pageCtrl ??= PageController(
+      viewportFraction: 0.84,
+      initialPage: index.clamp(0, len - 1),
+    );
+    return _pageCtrl!;
+  }
+}
+
+/// 封面轮播：每页一首歌的封面（支持黑胶/方形/圆形样式），左右滑切歌
+class _CoverCarousel extends ConsumerWidget {
+  const _CoverCarousel({required this.cfg, required this.size});
+
+  final NpPlayerSettings cfg;
+  final double size;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final PlayerState ps = ref.watch(playerProvider);
+    final int len = ps.queue.length;
+    if (len == 0) return const SizedBox.shrink();
+    final _PhoneBodyState? host =
+        context.findAncestorStateOfType<_PhoneBodyState>();
+    final PageController ctrl = host!._ensureCtrl(len, ps.index);
+
+    return PageView.builder(
+      controller: ctrl,
+      itemCount: len,
+      onPageChanged: (int page) {
+        if (page == ps.index) return;
+        ref.read(playerProvider.notifier).playAt(page);
+      },
+      itemBuilder: (BuildContext context, int i) {
+        final Track t = ps.queue[i];
+        final bool current = i == ps.index;
+        return Center(
+          child: CoverArtView(
+            style: cfg.coverStyle,
+            cover: t.cover,
+            playing: current ? ps.playing : false,
+            size: size,
+            scale: cfg.coverScale,
+            shadow: cfg.coverShadow,
+            squareRadius: cfg.squareCoverRadius,
+            // 非当前页封面不可长按（避免误触查看错误封面）
+            onLongPress: t.cover == null || !current
+                ? null
+                : () => showCoverViewer(
+                      context,
+                      cover: t.cover,
+                      title: '${t.title} - ${t.artist}',
+                    ),
+          ),
+        );
+      },
+    );
   }
 }
 
@@ -379,10 +355,9 @@ class _TabletBody extends ConsumerWidget {
         ),
         _InfoSection(),
         const _ProgressSection(),
-        if (!cfg.hidePlayerControls) ...<Widget>[
-          const _ControlBar(),
-          const SizedBox(height: 12),
-        ],
+        const _ControlBar(),
+        const SizedBox(height: 8),
+        const _BottomStrip(),
       ],
     );
 
@@ -429,7 +404,7 @@ class _TabletBody extends ConsumerWidget {
 
 // ---------------------------------------------------------------- 顶部栏
 
-/// 仿网易云顶栏：仅 收起 + 居中歌手名（评论/自定义入口已按要求移除）
+/// 仿网易云顶栏：仅 收起 + 居中歌手名
 class _TopBar extends ConsumerWidget {
   const _TopBar();
 
@@ -492,7 +467,7 @@ class _InfoSection extends ConsumerWidget {
     final TextTheme theme = Theme.of(context).textTheme;
 
     return Padding(
-      // 需求：歌曲名称和歌手名称往下移动一点（上边距 6 → 16）
+      // 需求：歌曲名称和歌手名称往下移动一点
       padding: const EdgeInsets.fromLTRB(24, 16, 24, 0),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -557,14 +532,22 @@ class _InfoSection extends ConsumerWidget {
   }
 }
 
-// ---------------------------------------------------------------- 点赞/评论计数行
+// ---------------------------------------------------------------- 喜欢/评论计数行
 
 /// 仿网易云：标题下方右侧 喜欢 + 评论数（点击评论跳转评论页）
-class _CountsRow extends ConsumerWidget {
+class _CountsRow extends ConsumerStatefulWidget {
   const _CountsRow();
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<_CountsRow> createState() => _CountsRowState();
+}
+
+class _CountsRowState extends ConsumerState<_CountsRow> {
+  /// 红心迸发动效触发器
+  bool _burst = false;
+
+  @override
+  Widget build(BuildContext context) {
     final Track? track =
         ref.watch(playerProvider.select((PlayerState s) => s.currentTrack));
     if (track == null) return const SizedBox.shrink();
@@ -572,16 +555,58 @@ class _CountsRow extends ConsumerWidget {
     final int count = songId == null
         ? 0
         : ref.watch(songCommentCountProvider(songId)).value ?? 0;
+    final bool liked = (songId ?? 0) > 0 &&
+        ref.watch(authProvider
+            .select((AuthState s) => s.likedIds.contains(songId)));
+    final NpPlayerSettings cfg = ref.watch(npSettingsProvider);
     final Color tint = Colors.white.withValues(alpha: 0.78);
 
     return Row(
       children: <Widget>[
         const Spacer(),
-        Icon(Icons.favorite_border_rounded, size: 20, color: tint),
+        // 喜欢（服务器红心，乐观更新）
+        GestureDetector(
+          onTap: () async {
+            if (songId == null || songId == 0) return;
+            final String? error = await ref
+                .read(authProvider.notifier)
+                .toggleLikeSong(songId);
+            if (!context.mounted) return;
+            if (error != null) {
+              ScaffoldMessenger.of(context)
+                  .showSnackBar(SnackBar(content: Text(error)));
+              return;
+            }
+            if (cfg.heartEffect && !liked) {
+              setState(() => _burst = true);
+              Future<void>.delayed(const Duration(milliseconds: 620), () {
+                if (mounted) setState(() => _burst = false);
+              });
+            }
+          },
+          child: Stack(
+            clipBehavior: Clip.none,
+            children: <Widget>[
+              Icon(
+                liked ? Icons.favorite_rounded : Icons.favorite_border_rounded,
+                size: 20,
+                color: liked ? AppConstants.brandColor : tint,
+              ),
+              if (_burst)
+                Positioned.fill(
+                  child: IgnorePointer(
+                    child: _HeartBurst(
+                      color: AppConstants.brandColor,
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
         const SizedBox(width: 18),
         InkWell(
           borderRadius: BorderRadius.circular(14),
-          onTap: () => showCommentsPage(context, track),
+          onTap: () => context.push('/comments', extra: track),
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 2),
             child: Row(
@@ -602,12 +627,96 @@ class _CountsRow extends ConsumerWidget {
     );
   }
 
-  /// 仿网易云计数：千以内原样，万以上「x万+」（999+w+ 风格）
+  /// 仿网易云计数：千以内原样，万以上「x万+」
   static String _formatWan(int n) {
     if (n >= 100000000) return '${(n / 100000000).toStringAsFixed(0)}亿+';
     if (n >= 10000) return '${(n / 10000).toStringAsFixed(0)}万+';
     return '$n';
   }
+}
+
+/// 红心迸发：一个放大的心形从实心向外扩散淡出
+class _HeartBurst extends StatefulWidget {
+  const _HeartBurst({required this.color});
+
+  final Color color;
+
+  @override
+  State<_HeartBurst> createState() => _HeartBurstState();
+}
+
+class _HeartBurstState extends State<_HeartBurst>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _ctrl = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 600),
+  )..forward();
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _ctrl,
+      builder: (BuildContext ctx, Widget? _) {
+        final double t = Curves.easeOutCubic.transform(_ctrl.value);
+        return CustomPaint(
+          painter: _HeartBurstPainter(
+            color: widget.color,
+            progress: t,
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _HeartBurstPainter extends CustomPainter {
+  const _HeartBurstPainter({required this.color, required this.progress});
+
+  final Color color;
+  final double progress;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    // 外圈扩散环
+    final Paint ring = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2.4 * (1 - progress)
+      ..color = color.withValues(alpha: (1 - progress) * 0.9);
+    canvas.drawCircle(
+      Offset(size.width / 2, size.height / 2),
+      size.shortestSide * (0.5 + progress * 0.9),
+      ring,
+    );
+
+    // 中心放大的心
+    final Paint heart = Paint()
+      ..color = color.withValues(alpha: (1 - progress) * 0.65)
+      ..style = PaintingStyle.fill;
+    final double s = size.shortestSide * (0.28 + progress * 0.34);
+    final Path p = Path()
+      ..moveTo(size.width / 2, size.height / 2 + s * 0.32)
+      ..cubicTo(
+        size.width / 2 - s * 1.1, size.height / 2 - s * 0.45,
+        size.width / 2 - s * 0.34, size.height / 2 - s * 1.05,
+        size.width / 2, size.height / 2 - s * 0.42,
+      )
+      ..cubicTo(
+        size.width / 2 + s * 0.34, size.height / 2 - s * 1.05,
+        size.width / 2 + s * 1.1, size.height / 2 - s * 0.45,
+        size.width / 2, size.height / 2 + s * 0.32,
+      );
+    canvas.drawPath(p, heart);
+  }
+
+  @override
+  bool shouldRepaint(_HeartBurstPainter oldDelegate) =>
+      oldDelegate.progress != progress;
 }
 
 // ---------------------------------------------------------------- MV 入口
@@ -622,7 +731,8 @@ class _MvPill extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
-      onTap: () => openMvPlayer(context, mvId: mvId, fallbackTitle: title),
+      onTap: () => context.push(
+          '/mv/$mvId?title=${Uri.encodeComponent(title)}'),
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2.5),
         decoration: BoxDecoration(
@@ -668,8 +778,6 @@ class _ProgressSection extends ConsumerWidget {
   }
 }
 
-// ---------------------------------------------------------------- 音质切换
-
 /// 音质标签按钮：点击弹出音质选择，切换后全队列重解析并保留进度续播
 class _QualityButton extends ConsumerWidget {
   const _QualityButton();
@@ -678,7 +786,7 @@ class _QualityButton extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final AudioQuality quality = ref.watch(audioQualityProvider);
     return GestureDetector(
-      onTap: () => _showQualitySheet(context, ref, quality),
+      onTap: () => showQualitySheet(context, quality),
       behavior: HitTestBehavior.opaque,
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
@@ -698,95 +806,6 @@ class _QualityButton extends ConsumerWidget {
             color: Colors.white.withValues(alpha: 0.55),
             fontSize: 11.5,
           ),
-        ),
-      ),
-    );
-  }
-
-  void _showQualitySheet(
-    BuildContext context,
-    WidgetRef ref,
-    AudioQuality current,
-  ) {
-    showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: Colors.transparent,
-      builder: (BuildContext ctx) => _QualitySheet(current: current),
-    );
-  }
-}
-
-class _QualitySheet extends ConsumerStatefulWidget {
-  const _QualitySheet({required this.current});
-
-  final AudioQuality current;
-
-  @override
-  ConsumerState<_QualitySheet> createState() => _QualitySheetState();
-}
-
-class _QualitySheetState extends ConsumerState<_QualitySheet> {
-  String? _switching;
-
-  @override
-  Widget build(BuildContext context) {
-    final ThemeData theme = Theme.of(context);
-    return Container(
-      decoration: const BoxDecoration(
-        color: AppConstants.darkSurface,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
-      ),
-      child: SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: <Widget>[
-            const SizedBox(height: 10),
-            Text('选择音质',
-                style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w700,
-                    color: theme.colorScheme.onSurface)),
-            const SizedBox(height: 6),
-            for (final AudioQuality q in AudioQuality.values)
-              ListTile(
-                title: Text(
-                  q.label,
-                  style: TextStyle(
-                    fontSize: 15,
-                    fontWeight:
-                        q == widget.current ? FontWeight.w700 : FontWeight.w400,
-                    color: q == widget.current
-                        ? AppConstants.brandColor
-                        : theme.colorScheme.onSurface,
-                  ),
-                ),
-                trailing: _switching == q.name
-                    ? const SizedBox(
-                        width: 18,
-                        height: 18,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : (q == widget.current
-                        ? const Icon(Icons.check_rounded,
-                            color: AppConstants.brandColor, size: 20)
-                        : null),
-                onTap: _switching != null
-                    ? null
-                    : () async {
-                        setState(() => _switching = q.name);
-                        final String? error = await ref
-                            .read(playerProvider.notifier)
-                            .switchQuality(q);
-                        if (!context.mounted) return;
-                        Navigator.of(context).pop();
-                        if (error != null) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(content: Text('切换失败：$error')));
-                        }
-                      },
-              ),
-            const SizedBox(height: 8),
-          ],
         ),
       ),
     );
@@ -817,11 +836,9 @@ class _ControlBar extends ConsumerWidget {
             size: 36,
             onTap: () => ref.read(playerProvider.notifier).previous(),
           ),
-          _CtrlIcon(
-            icon: playing
-                ? Icons.pause_circle_filled_rounded
-                : Icons.play_circle_filled_rounded,
-            size: 66,
+          // 需求：去除播放/暂停白色背景 —— 双环描边 + 实心图形（网易云样式）
+          _RingPlayButton(
+            playing: playing,
             busy: busy,
             onTap: () => ref.read(playerProvider.notifier).playPause(),
           ),
@@ -841,34 +858,125 @@ class _ControlBar extends ConsumerWidget {
   }
 }
 
+/// 双环描边播放键：外环 2px + 内环 1px（半透明），中心三角/双竖条
+class _RingPlayButton extends StatelessWidget {
+  const _RingPlayButton({
+    required this.playing,
+    required this.busy,
+    required this.onTap,
+  });
+
+  final bool playing;
+  final bool busy;
+  final VoidCallback onTap;
+
+  static const double _size = 66;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: SizedBox(
+        width: _size,
+        height: _size,
+        child: busy
+            ? const Padding(
+                padding: EdgeInsets.all(18),
+                child: CircularProgressIndicator(
+                  strokeWidth: 2.4,
+                  color: Colors.white,
+                ),
+              )
+            : AnimatedSwitcher(
+                duration: const Duration(milliseconds: 200),
+                transitionBuilder:
+                    (Widget child, Animation<double> anim) => ScaleTransition(
+                  scale: anim,
+                  child: child,
+                ),
+                child: CustomPaint(
+                  key: ValueKey<bool>(playing),
+                  size: const Size(_size, _size),
+                  painter: _RingPlayPainter(playing: playing),
+                ),
+              ),
+      ),
+    );
+  }
+}
+
+class _RingPlayPainter extends CustomPainter {
+  const _RingPlayPainter({required this.playing});
+
+  final bool playing;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final Offset c = Offset(size.width / 2, size.height / 2);
+    final double r = size.shortestSide / 2 - 1;
+
+    // 外环
+    final Paint outer = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2
+      ..color = Colors.white;
+    canvas.drawCircle(c, r, outer);
+
+    // 内环（半透明）
+    final Paint inner = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1
+      ..color = Colors.white.withValues(alpha: 0.45);
+    canvas.drawCircle(c, r - 4.5, inner);
+
+    // 中心图形：三角 / 双竖条
+    final Paint fg = Paint()..color = Colors.white;
+    if (playing) {
+      final double barW = size.width * 0.052;
+      final double barH = size.height * 0.30;
+      final double gap = size.width * 0.030;
+      final RRect left = RRect.fromRectAndRadius(
+        Rect.fromLTWH(c.dx - gap / 2 - barW, c.dy - barH / 2, barW, barH),
+        Radius.circular(barW / 2),
+      );
+      final RRect right = RRect.fromRectAndRadius(
+        Rect.fromLTWH(c.dx + gap / 2, c.dy - barH / 2, barW, barH),
+        Radius.circular(barW / 2),
+      );
+      canvas.drawRRect(left, fg);
+      canvas.drawRRect(right, fg);
+    } else {
+      final double w = size.width * 0.24;
+      final Path tri = Path()
+        ..moveTo(c.dx - w / 2 + 1.5, c.dy - w * 0.62)
+        ..lineTo(c.dx + w / 2 + 1.5, c.dy)
+        ..lineTo(c.dx - w / 2 + 1.5, c.dy + w * 0.62)
+        ..close();
+      // 圆角三角
+      final Paint triPaint = Paint()..color = Colors.white;
+      canvas.drawPath(tri, triPaint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(_RingPlayPainter oldDelegate) =>
+      oldDelegate.playing != playing;
+}
+
 class _CtrlIcon extends StatelessWidget {
   const _CtrlIcon({
     required this.icon,
     required this.size,
     required this.onTap,
-    this.busy = false,
   });
 
   final IconData icon;
   final double size;
   final VoidCallback onTap;
-  final bool busy;
 
   @override
   Widget build(BuildContext context) {
-    if (busy) {
-      return SizedBox(
-        width: size,
-        height: size,
-        child: Padding(
-          padding: EdgeInsets.all(size * 0.28),
-          child: const CircularProgressIndicator(
-            strokeWidth: 2.4,
-            color: Colors.white,
-          ),
-        ),
-      );
-    }
     return IconButton(
       onPressed: onTap,
       icon: Icon(icon, size: size, color: Colors.white),
@@ -912,8 +1020,7 @@ class _RepeatButton extends ConsumerWidget {
 
 // ---------------------------------------------------------------- 底部条
 
-/// 仿网易云播放页底部功能条（左→右）：
-/// 媒体输出 / 相似歌曲 / 歌词百科 / 设置。
+/// 播放页底部功能条：按钮集合与顺序由「播放页底部功能自定义」配置驱动。
 /// 需求：不显示文字名称，长按显示气泡提示（Tooltip 默认长按触发）。
 class _BottomStrip extends ConsumerWidget {
   const _BottomStrip();
@@ -922,52 +1029,101 @@ class _BottomStrip extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final Track? track =
         ref.watch(playerProvider.select((PlayerState s) => s.currentTrack));
+    final NpPlayerSettings cfg = ref.watch(npSettingsProvider);
     final Color tint = Colors.white.withValues(alpha: 0.75);
 
+    final Map<String, Widget> builders = <String, Widget>{
+      'output': _StripButton(
+        icon: Icons.sensors_rounded,
+        label: '媒体输出',
+        color: tint,
+        onTap: track == null ? null : () => showMediaOutputSheet(context),
+      ),
+      'similar': _StripButton(
+        icon: Icons.graphic_eq_rounded,
+        label: '相似歌曲',
+        color: tint,
+        onTap: track?.neteaseId == null
+            ? null
+            : () => showSimilarSongsSheet(context, track!),
+      ),
+      'wiki': _StripButton(
+        icon: Icons.menu_book_rounded,
+        label: '歌词百科',
+        color: tint,
+        onTap: track?.neteaseId == null
+            ? null
+            : () => context.push(
+                  '/wiki/${track!.neteaseId}?title=${Uri.encodeComponent(track.title)}'
+                  '&artist=${Uri.encodeComponent(track.artist)}'
+                  '${track.mvId != null ? '&mv=${track.mvId}' : ''}',
+                ),
+      ),
+      'download': const _DownloadStripButton(),
+      'comments': _StripButton(
+        icon: Icons.mode_comment_outlined,
+        label: '评论',
+        color: tint,
+        onTap: track == null ? null : () => context.push('/comments', extra: track),
+      ),
+      'settings': _StripButton(
+        icon: Icons.settings_outlined,
+        label: '设置',
+        color: tint,
+        onTap: () => showPlayerMoreSheet(context),
+      ),
+    };
+
+    final List<Widget> buttons = <Widget>[
+      for (final String id in cfg.stripButtons)
+        if (builders[id] != null) builders[id]!,
+    ];
+
     return Padding(
-      padding: const EdgeInsets.fromLTRB(34, 4, 34, 12),
+      padding: EdgeInsets.fromLTRB(
+          math.max(34.0 - buttons.length * 4, 16), 4, 34, 12),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: <Widget>[
-          _StripButton(
-            icon: Icons.sensors_rounded,
-            label: '媒体输出',
-            color: tint,
-            onTap: track == null ? null : () => showMediaOutputSheet(context),
-          ),
-          _StripButton(
-            icon: Icons.graphic_eq_rounded,
-            label: '相似歌曲',
-            color: tint,
-            onTap: track?.neteaseId == null
-                ? null
-                : () => showSimilarSongsSheet(context, track!),
-          ),
-          _StripButton(
-            icon: Icons.menu_book_rounded,
-            label: '歌词百科',
-            color: tint,
-            onTap: track?.neteaseId == null
-                ? null
-                : () => Navigator.of(context).push<void>(
-                      MaterialPageRoute<void>(
-                        builder: (BuildContext _) => SongWikiPage(
-                          songId: track!.neteaseId!,
-                          title: track.title,
-                          artist: track.artist,
-                          mvId: track.mvId,
-                        ),
-                      ),
-                    ),
-          ),
-          _StripButton(
-            icon: Icons.settings_outlined,
-            label: '设置',
-            color: tint,
-            onTap: () => showNpSettingsSheet(context),
-          ),
-        ],
+        children: buttons.isEmpty
+            ? <Widget>[const SizedBox.shrink()]
+            : buttons,
       ),
+    );
+  }
+}
+
+/// 下载按钮（带下载中转圈状态）
+class _DownloadStripButton extends ConsumerStatefulWidget {
+  const _DownloadStripButton();
+
+  @override
+  ConsumerState<_DownloadStripButton> createState() =>
+      _DownloadStripButtonState();
+}
+
+class _DownloadStripButtonState extends ConsumerState<_DownloadStripButton> {
+  bool _busy = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final Track? track =
+        ref.watch(playerProvider.select((PlayerState s) => s.currentTrack));
+    final Color tint = Colors.white.withValues(alpha: 0.75);
+    return _StripButton(
+      icon: Icons.download_outlined,
+      label: '下载',
+      color: tint,
+      busy: _busy,
+      onTap: track == null || _busy
+          ? null
+          : () async {
+              setState(() => _busy = true);
+              final DownloadResult r = await downloadTrack(ref, track);
+              if (!context.mounted) return;
+              setState(() => _busy = false);
+              ScaffoldMessenger.of(context)
+                  .showSnackBar(SnackBar(content: Text(r.message)));
+            },
     );
   }
 }
@@ -978,12 +1134,14 @@ class _StripButton extends StatelessWidget {
     required this.label,
     required this.color,
     required this.onTap,
+    this.busy = false,
   });
 
   final IconData icon;
   final String label;
   final Color color;
   final VoidCallback? onTap;
+  final bool busy;
 
   @override
   Widget build(BuildContext context) {
@@ -1005,7 +1163,13 @@ class _StripButton extends StatelessWidget {
         borderRadius: BorderRadius.circular(12),
         child: Padding(
           padding: const EdgeInsets.all(8),
-          child: Icon(icon, size: 23, color: c),
+          child: busy
+              ? const SizedBox(
+                  width: 22,
+                  height: 22,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : Icon(icon, size: 23, color: c),
         ),
       ),
     );

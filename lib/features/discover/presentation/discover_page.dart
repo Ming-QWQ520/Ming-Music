@@ -9,8 +9,7 @@ import '../../../core/constants/app_constants.dart';
 import '../../../core/widgets/cover_image.dart';
 import '../data/netease_providers.dart';
 import '../data/netease_repository.dart' show kToplists;
-import 'playlist_detail_page.dart';
-import 'search_page.dart';
+import 'package:go_router/go_router.dart';
 
 class DiscoverPage extends ConsumerWidget {
   const DiscoverPage({super.key});
@@ -33,11 +32,7 @@ class DiscoverPage extends ConsumerWidget {
             actions: <Widget>[
               IconButton(
                 icon: const Icon(Icons.search_rounded, size: 26),
-                onPressed: () => Navigator.of(context).push(
-                  MaterialPageRoute<void>(
-                    builder: (BuildContext context) => const SearchPage(),
-                  ),
-                ),
+                onPressed: () => context.push('/search'),
               ),
               const SizedBox(width: 8),
             ],
@@ -102,12 +97,8 @@ class _ToplistCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
-      onTap: () => Navigator.of(context).push(
-        MaterialPageRoute<void>(
-          builder: (BuildContext context) =>
-              PlaylistDetailPage.toplist(id: id, name: name),
-        ),
-      ),
+      onTap: () =>
+          context.push('/toplist/$id?name=${Uri.encodeComponent(name)}'),
       child: Container(
         width: 140,
         decoration: BoxDecoration(
@@ -224,11 +215,9 @@ class _PlaylistCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
     return GestureDetector(
-      onTap: () => Navigator.of(context).push(
-        MaterialPageRoute<void>(
-          builder: (BuildContext context) =>
-              PlaylistDetailPage.playlist(meta: meta),
-        ),
+      onTap: () => context.push(
+        '/playlist/${meta.id}?name=${Uri.encodeComponent(meta.name)}',
+        extra: meta,
       ),
       child: SizedBox(
         width: 122,
@@ -330,13 +319,8 @@ class _HotWordsSection extends ConsumerWidget {
                             .surfaceContainerHighest
                             .withValues(alpha: 0.5),
                         side: BorderSide.none,
-                        onPressed: () => Navigator.of(context).push(
-                          MaterialPageRoute<void>(
-                            builder: (BuildContext context) => SearchPage(
-                              initialKeyword: words[i].word,
-                            ),
-                          ),
-                        ),
+                        onPressed: () =>
+                            context.push('/search?kw=${Uri.encodeComponent(words[i].word)}'),
                       ),
                   ],
                 ),

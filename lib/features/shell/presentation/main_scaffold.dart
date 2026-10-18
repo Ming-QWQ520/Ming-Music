@@ -1,15 +1,15 @@
-/// 主页面架构：手机/平板双端自适应导航 + 悬浮 Mini 播放条。
+/// 主页面架构：手机/平板双端自适应导航 + Mini 播放条。
 ///
-/// 两个 Tab：发现（网易云首页风格）/ 我的（仿网易云，集成登录与设置）。
-///
-/// 布局规范：
-///  - 手机（宽度 < 600dp）：底部 NavigationBar，Mini 播放条悬浮于其上方；
+/// 布局规范（需求）：
+///  - Mini 样式 = compact（紧凑极简）：悬浮条位于 NavigationBar 上方；
+///  - 其余样式（classic/overlay/wide）：播放条嵌入底部导航栏，
+///    位于「发现」与「我的」正中间，且不带任何控制键；
 ///  - 平板（宽度 >= 600dp）：左侧 NavigationRail，右侧内容区底部 MiniPlayer；
 ///  - IndexedStack 保持各 Tab 状态（列表滚动位置等）。
 ///
 /// 通知栏点击（需求）：点击媒体通知的封面区域 → 跳转音乐播放界面（封面视图）。
 /// audio_service 会在通知点击时向 Dart 发出 notificationClicked 事件，
-/// 于此监听并 push 全屏播放页（有队列时）。
+/// 于此监听并经 go_router 打开全屏播放页（有队列时）。
 library;
 
 import 'dart:async';
@@ -19,10 +19,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/constants/app_constants.dart';
+import '../../../core/router.dart' show openFullPlayer;
 import '../../discover/presentation/discover_page.dart';
 import '../../library/presentation/my_music_page.dart';
-import '../../player/presentation/full_player_page.dart';
+import '../../player/domain/np_settings.dart';
 import '../../player/presentation/widgets/mini_player.dart';
+import '../../player/providers/np_settings_providers.dart';
 import '../../player/providers/player_providers.dart';
 
 /// 当前 Tab
@@ -65,9 +67,7 @@ class _MainScaffoldState extends ConsumerState<MainScaffold> {
       if (_playerOpen) return;
       if (!ref.read(hasQueueProvider)) return;
       _playerOpen = true;
-      Navigator.of(context)
-          .push<void>(FullPlayerRoute<void>())
-          .whenComplete(() => _playerOpen = false);
+      openFullPlayer(context).whenComplete(() => _playerOpen = false);
     });
   }
 
@@ -80,6 +80,8 @@ class _MainScaffoldState extends ConsumerState<MainScaffold> {
   @override
   Widget build(BuildContext context) {
     final int tab = ref.watch(selectedTabProvider);
+    final MiniPlayerStyle miniStyle = ref.watch(
+        npSettingsProvider.select((NpPlayerSettings s) => s.miniStyle));
 
     return LayoutBuilder(
       builder: (BuildContext context, BoxConstraints constraints) {
@@ -88,7 +90,7 @@ class _MainScaffoldState extends ConsumerState<MainScaffold> {
         if (isWide) {
           return _tabletScaffold(context, ref, tab);
         }
-        return _phoneScaffold(context, ref, tab);
+        return _phoneScaffold(context, ref, tab, miniStyle);
       },
     );
   }
@@ -125,31 +127,112 @@ class _MainScaffoldState extends ConsumerState<MainScaffold> {
 
   // ---------------------------------------------------------------- 手机
 
-  Widget _phoneScaffold(BuildContext context, WidgetRef ref, int tab) {
+  Widget _phoneScaffold(
+    BuildContext context,
+    WidgetRef ref,
+    int tab,
+    MiniPlayerStyle miniStyle,
+  ) {
+    final bool navEmbedded = miniInNavBar(miniStyle);
+    final bool hasQueue = ref.watch(hasQueueProvider);
+
+    final Widget navBar = _CenterNavBar(
+      selectedIndex: tab,
+      onSelect: (int i) => ref.read(selectedTabProvider.notifier).select(i),
+      center: navEmbedded && hasQueue ? const MiniPlayer(embedded: true) : null,
+    );
+
     return Scaffold(
       body: IndexedStack(index: tab, children: MainScaffold._pages),
       bottomNavigationBar: Column(
         mainAxisSize: MainAxisSize.min,
         children: <Widget>[
-          const MiniPlayer(),
-          NavigationBar(
-            height: 64,
-            selectedIndex: tab,
-            onDestinationSelected: (int i) =>
-                ref.read(selectedTabProvider.notifier).select(i),
-            destinations: const <Widget>[
-              NavigationDestination(
-                icon: Icon(Icons.explore_outlined),
-                selectedIcon: Icon(Icons.explore_rounded),
-                label: '发现',
+          if (!navEmbedded) const MiniPlayer(embedded: false),
+          navBar,
+        ],
+      ),
+    );
+  }
+}
+
+// ------------------------------------------------------------- 中央导航栏
+
+/// 底部导航：发现 | 中央 Mini 播放条（可选） | 我的。
+/// 全透明无 elevation；中央槽位由 Mini 播放条填充（无边框透明）。
+class _CenterNavBar extends StatelessWidget {
+  const _CenterNavBar({
+    required this.selectedIndex,
+    required this.onSelect,
+    required this.center,
+  });
+
+  final int selectedIndex;
+  final ValueChanged<int> onSelect;
+  final Widget? center;
+
+  static const double _height = 64;
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    final Color active = theme.colorScheme.onSurface;
+    final Color inactive =
+        theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.75);
+
+    Widget item(int index, IconData outline, IconData filled, String label) {
+      final bool selected = selectedIndex == index;
+      return Expanded(
+        child: InkWell(
+          onTap: () => onSelect(index),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: <Widget>[
+              AnimatedSwitcher(
+                duration: const Duration(milliseconds: 180),
+                transitionBuilder:
+                    (Widget child, Animation<double> anim) => ScaleTransition(
+                  scale: anim,
+                  child: child,
+                ),
+                child: Icon(
+                  selected ? filled : outline,
+                  key: ValueKey<bool>(selected),
+                  size: 24,
+                  color: selected ? active : inactive,
+                ),
               ),
-              NavigationDestination(
-                icon: Icon(Icons.person_outline_rounded),
-                selectedIcon: Icon(Icons.person_rounded),
-                label: '我的',
+              const SizedBox(height: 3),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 10.5,
+                  fontWeight: selected ? FontWeight.w700 : FontWeight.w400,
+                  color: selected ? active : inactive,
+                ),
               ),
             ],
           ),
+        ),
+      );
+    }
+
+    return Container(
+      // 全透明：Mini 播放条与导航背景融为一体（需求：非极简样式透明）
+      color: Colors.transparent,
+      height: _height + MediaQuery.paddingOf(context).bottom,
+      padding: EdgeInsets.only(bottom: MediaQuery.paddingOf(context).bottom),
+      child: Row(
+        children: <Widget>[
+          item(0, Icons.explore_outlined, Icons.explore_rounded, '发现'),
+          // 中央槽位：Mini 播放条（无边框透明，点击进播放页）
+          SizedBox(
+            width: 150,
+            height: _height,
+            child: Center(
+              child: center ?? const SizedBox.shrink(),
+            ),
+          ),
+          item(1, Icons.person_outline_rounded, Icons.person_rounded, '我的'),
         ],
       ),
     );

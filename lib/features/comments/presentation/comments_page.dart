@@ -7,6 +7,7 @@ library;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../../core/constants/app_constants.dart';
 import '../../../core/widgets/cover_image.dart';
@@ -25,18 +26,20 @@ Future<void> showCommentsPage(BuildContext context, Track track) {
     );
     return Future<void>.value();
   }
-  return Navigator.of(context).push<void>(
-    MaterialPageRoute<void>(
-      builder: (BuildContext ctx) => CommentsPage(track: track, songId: songId),
-    ),
+  return GoRouter.of(context).push<void>(
+    '/comments',
+    extra: CommentsSubject(id: songId, track: track),
   );
 }
 
 class CommentsPage extends StatelessWidget {
-  const CommentsPage({super.key, required this.track, required this.songId});
+  const CommentsPage({
+    super.key,
+    required this.subject,
+  });
 
-  final Track track;
-  final int songId;
+  /// 评论主题（歌曲 / 歌单 / 专辑通用）
+  final CommentsSubject subject;
 
   @override
   Widget build(BuildContext context) {
@@ -47,9 +50,9 @@ class CommentsPage extends StatelessWidget {
           onPressed: () => Navigator.of(context).maybePop(),
           icon: const Icon(Icons.arrow_back_rounded, size: 24),
         ),
-        title: _Title(songId: songId),
+        title: _Title(subjectKey: subject.key),
       ),
-      body: _CommentsBody(track: track, songId: songId),
+      body: _CommentsBody(subject: subject),
     );
   }
 }
@@ -57,14 +60,14 @@ class CommentsPage extends StatelessWidget {
 // ---------------------------------------------------------------- 标题
 
 class _Title extends ConsumerWidget {
-  const _Title({required this.songId});
+  const _Title({required this.subjectKey});
 
-  final int songId;
+  final String subjectKey;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final int total =
-        ref.watch(commentsProvider(songId)).value?.totalCount ?? 0;
+        ref.watch(commentsProvider(subjectKey)).value?.totalCount ?? 0;
     return Text(
       total > 0 ? '评论 (${_formatCount(total)})' : '评论',
       style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w700),
@@ -75,10 +78,9 @@ class _Title extends ConsumerWidget {
 // ---------------------------------------------------------------- 主体
 
 class _CommentsBody extends ConsumerStatefulWidget {
-  const _CommentsBody({required this.track, required this.songId});
+  const _CommentsBody({required this.subject});
 
-  final Track track;
-  final int songId;
+  final CommentsSubject subject;
 
   @override
   ConsumerState<_CommentsBody> createState() => _CommentsBodyState();
@@ -105,7 +107,7 @@ class _CommentsBodyState extends ConsumerState<_CommentsBody> {
     final String text = _ctrl.text;
     if (text.trim().isEmpty) return;
     final String? error = await ref
-        .read(commentsProvider(widget.songId).notifier)
+        .read(commentsProvider(widget.subject.key).notifier)
         .send(text, replyTo: _replyTo?.commentId);
     if (!mounted) return;
     if (error == null) {
@@ -126,14 +128,29 @@ class _CommentsBodyState extends ConsumerState<_CommentsBody> {
   @override
   Widget build(BuildContext context) {
     final AsyncValue<CommentPage?> async =
-        ref.watch(commentsProvider(widget.songId));
+        ref.watch(commentsProvider(widget.subject.key));
     final Set<int> liked = ref.watch(likedCommentsProvider);
     final int sortType =
-        ref.watch(commentsProvider(widget.songId).notifier).sortType;
+        ref.watch(commentsProvider(widget.subject.key).notifier).sortType;
 
     return Column(
       children: <Widget>[
-        _SongHeader(track: widget.track),
+        if (widget.subject.track != null)
+          _SongHeader(track: widget.subject.track!)
+        else if (widget.subject.title.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 10, 16, 6),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                widget.subject.title,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                    fontSize: 14.5, fontWeight: FontWeight.w600),
+              ),
+            ),
+          ),
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 2, 16, 10),
           child: Row(
@@ -149,7 +166,7 @@ class _CommentsBodyState extends ConsumerState<_CommentsBody> {
                     label: e.value,
                     active: sortType == e.key,
                     onTap: () => ref
-                        .read(commentsProvider(widget.songId).notifier)
+                        .read(commentsProvider(widget.subject.key).notifier)
                         .switchSort(e.key),
                   ),
                 ),
@@ -181,7 +198,7 @@ class _CommentsBodyState extends ConsumerState<_CommentsBody> {
             const SizedBox(height: 8),
             TextButton(
               onPressed: () =>
-                  ref.read(commentsProvider(widget.songId).notifier).reload(),
+                  ref.read(commentsProvider(widget.subject.key).notifier).reload(),
               child: const Text('重试'),
             ),
           ],
@@ -198,7 +215,7 @@ class _CommentsBodyState extends ConsumerState<_CommentsBody> {
     return NotificationListener<ScrollNotification>(
       onNotification: (ScrollNotification n) {
         if (n.metrics.pixels + 400 >= n.metrics.maxScrollExtent) {
-          ref.read(commentsProvider(widget.songId).notifier).loadMore();
+          ref.read(commentsProvider(widget.subject.key).notifier).loadMore();
         }
         return false;
       },
@@ -233,7 +250,7 @@ class _CommentsBodyState extends ConsumerState<_CommentsBody> {
             liked: liked.contains(c.commentId),
             onLike: () async {
               final String? error = await ref
-                  .read(commentsProvider(widget.songId).notifier)
+                  .read(commentsProvider(widget.subject.key).notifier)
                   .toggleLike(c);
               if (error != null) _showError(error);
             },
@@ -259,7 +276,7 @@ class _CommentsBodyState extends ConsumerState<_CommentsBody> {
                     );
                     if (ok != true) return;
                     final String? error = await ref
-                        .read(commentsProvider(widget.songId).notifier)
+                        .read(commentsProvider(widget.subject.key).notifier)
                         .delete(c);
                     if (error != null) _showError(error);
                   }

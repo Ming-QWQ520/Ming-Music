@@ -122,12 +122,20 @@ class NeteaseUserPlaylist {
     required this.name,
     required this.coverUrl,
     required this.trackCount,
+    this.creatorUserId = 0,
+    this.playCount = 0,
+    this.description = '',
   });
 
   final int id;
   final String name;
   final String coverUrl;
   final int trackCount;
+
+  /// 创建者用户 id（区分「我创建的」/「我收藏的」）
+  final int creatorUserId;
+  final int playCount;
+  final String description;
 
   static NeteaseUserPlaylist fromMap(Map<String, Object?> j) {
     return NeteaseUserPlaylist(
@@ -137,6 +145,9 @@ class NeteaseUserPlaylist {
         (j['coverImgUrl'] as String?) ?? (j['picUrl'] as String?),
       ),
       trackCount: (j['trackCount'] as num?)?.toInt() ?? 0,
+      creatorUserId: (j['userId'] as num?)?.toInt() ?? 0,
+      playCount: (j['playCount'] as num?)?.toInt() ?? 0,
+      description: (j['description'] as String?) ?? '',
     );
   }
 }

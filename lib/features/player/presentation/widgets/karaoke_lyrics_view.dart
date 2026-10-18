@@ -121,9 +121,7 @@ class _KaraokeLyricsViewState extends ConsumerState<KaraokeLyricsView> {
     }
     _scroll.animateTo(
       target,
-      duration: Duration(
-          milliseconds:
-              (340 * ref.read(npSettingsProvider).animationSpeed).round()),
+      duration: const Duration(milliseconds: 340),
       curve: Curves.easeOutCubic,
     );
   }
@@ -424,10 +422,13 @@ class _YrcRowState extends ConsumerState<_YrcRow>
         ),
       );
     } else {
-      // 非活动行 / 元数据行：按 position 快照静态着色
+      // 非活动行 / 元数据行：静态着色。
+      // 需求（高亮机制改造）：默认「只高亮当前播放行/字」—— 已播放行
+      // 不再显示已唱色（保持未唱色）；开启「高亮已播放歌词」后恢复
+      // 经典卡拉OK的已唱高亮。
       final List<InlineSpan> spans = <InlineSpan>[];
       for (final YrcWord w in line.words) {
-        final bool sung = widget.position >= w.end;
+        final bool sung = widget.position >= w.end && cfg.highlightPlayed;
         spans.add(TextSpan(
           text: w.text,
           style: style.copyWith(color: sung ? sungColor : baseColor),

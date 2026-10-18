@@ -20,6 +20,7 @@ import 'package:flutter/services.dart' show ByteData, rootBundle;
 import 'package:just_audio/just_audio.dart' as ja;
 import 'package:path_provider/path_provider.dart';
 
+import '../../../core/widgets/cover_image.dart';
 import '../../library/domain/track.dart';
 
 class MingAudioHandler extends BaseAudioHandler with SeekHandler {
@@ -94,11 +95,19 @@ class MingAudioHandler extends BaseAudioHandler with SeekHandler {
   }
 
   ja.AudioSource _sourceOf(Track t) {
+    final String src = t.source;
+    // 本地文件（本地音乐页）：绝对路径 / file:// URI
+    if (src.startsWith('file://')) {
+      return ja.AudioSource.uri(Uri.parse(src));
+    }
+    if (src.startsWith('/')) {
+      return ja.AudioSource.uri(Uri.file(src));
+    }
     if (t.isNetwork) {
-      return ja.AudioSource.uri(Uri.parse(t.source));
+      return ja.AudioSource.uri(Uri.parse(src));
     }
     // AudioSource.asset 需要完整 asset key（含 assets/ 前缀）
-    return ja.AudioSource.asset('assets/${t.source}');
+    return ja.AudioSource.asset('assets/$src');
   }
 
   MediaItem _mediaItemOf(Track t) {
@@ -111,18 +120,34 @@ class MingAudioHandler extends BaseAudioHandler with SeekHandler {
       artist: t.artist,
       duration:
           t.durationMs != null ? Duration(milliseconds: t.durationMs!) : null,
-      // 网络封面直接透传；asset 封面记录在 extras，异步解析为缓存文件后回填
+      // 网络封面：异步解析为本地缓存文件（系统通知栏直接读文件，
+      // 规避网易 CDN 对部分节点的 403）；asset 封面记录在 extras
       artUri: isUrlCover ? Uri.parse(cover) : null,
       extras: (cover != null && !isUrlCover)
           ? <String, String>{'assetCover': cover}
-          : null,
+          : <String, String>{'urlCover': cover ?? ''},
     );
   }
 
   final Map<String, Uri> _artworkCache = <String, Uri>{};
 
   Future<Uri?> resolveArtworkUri(String cover) async {
-    if (cover.startsWith('http')) return Uri.parse(cover);
+    if (cover.startsWith('http')) {
+      // 优先本地缓存文件（修复通知栏封面 403：部分 CDN 节点拒绝
+      // 系统通知的直连请求），未缓存时回退网络 URL
+      final Uri? cached = _artworkCache[cover];
+      if (cached != null) return cached;
+      try {
+        final File? f =
+            await CoverImage.cachedFileFor(cover, size: CoverSize.large);
+        if (f != null) {
+          final Uri uri = Uri.file(f.path);
+          _artworkCache[cover] = uri;
+          return uri;
+        }
+      } catch (_) {}
+      return Uri.parse(cover);
+    }
     final Uri? cached = _artworkCache[cover];
     if (cached != null) return cached;
     try {
@@ -150,6 +175,15 @@ class MingAudioHandler extends BaseAudioHandler with SeekHandler {
       final Uri? uri =
           await resolveArtworkUri(item.extras!['assetCover'] as String);
       if (uri != null) {
+        mediaItem.add(item.copyWith(artUri: uri));
+        return;
+      }
+    }
+    if (item.extras?['urlCover'] is String &&
+        (item.extras!['urlCover'] as String).startsWith('http')) {
+      final Uri? uri =
+          await resolveArtworkUri(item.extras!['urlCover'] as String);
+      if (uri != null && uri.scheme == 'file') {
         mediaItem.add(item.copyWith(artUri: uri));
         return;
       }

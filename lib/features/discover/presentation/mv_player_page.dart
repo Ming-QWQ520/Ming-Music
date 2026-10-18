@@ -8,6 +8,7 @@ library;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:video_player/video_player.dart';
 
 import '../../../core/constants/app_constants.dart';
@@ -20,11 +21,8 @@ Future<void> openMvPlayer(
   required int mvId,
   required String fallbackTitle,
 }) {
-  return Navigator.of(context).push<void>(
-    MaterialPageRoute<void>(
-      builder: (BuildContext _) =>
-          MvPlayerPage(mvId: mvId, fallbackTitle: fallbackTitle),
-    ),
+  return GoRouter.of(context).push<void>(
+    '/mv/$mvId?title=${Uri.encodeComponent(fallbackTitle)}',
   );
 }
 

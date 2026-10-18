@@ -10,6 +10,7 @@ library;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../../core/api/netease_models.dart';
 import '../../../core/constants/app_constants.dart';
@@ -21,9 +22,7 @@ import '../../comments/data/comments_repository.dart'
 import '../../library/domain/track.dart';
 import '../../player/providers/player_providers.dart';
 import '../data/netease_providers.dart' show neteaseRepositoryProvider;
-import 'artist_songs_page.dart';
 import 'mv_player_page.dart';
-import 'playlist_detail_page.dart';
 
 class SongWikiPage extends ConsumerWidget {
   const SongWikiPage({
@@ -513,14 +512,8 @@ class _ArtistCardState extends ConsumerState<_ArtistCard> {
         if (info == null) return const SizedBox.shrink();
         return _SectionCard(
           title: '艺人',
-          onMore: () => Navigator.of(context).push<void>(
-            MaterialPageRoute<void>(
-              builder: (BuildContext _) => ArtistSongsPage(
-                artistId: info.id,
-                artistName: info.name,
-              ),
-            ),
-          ),
+          onMore: () => context.push(
+              '/artist/${info.id}?name=${Uri.encodeComponent(info.name)}'),
           child: Row(
             children: <Widget>[
               ClipOval(
@@ -772,17 +765,9 @@ class _SimiPlaylistsCardState extends ConsumerState<_SimiPlaylistsCard> {
             itemBuilder: (BuildContext ctx, int index) {
               final PlaylistMeta p = list[index];
               return GestureDetector(
-                onTap: () => Navigator.of(context).push<void>(
-                  MaterialPageRoute<void>(
-                    builder: (BuildContext _) => PlaylistDetailPage.playlist(
-                      meta: PlaylistMeta(
-                        id: p.id,
-                        name: p.name,
-                        coverUrl: p.coverUrl,
-                        trackCount: p.trackCount,
-                      ),
-                    ),
-                  ),
+                onTap: () => context.push(
+                  '/playlist/${p.id}?name=${Uri.encodeComponent(p.name)}',
+                  extra: p,
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,

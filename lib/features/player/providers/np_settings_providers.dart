@@ -7,7 +7,15 @@ import 'dart:ui' show Color;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../settings/providers/settings_providers.dart';
-import '../domain/np_settings.dart';
+import '../domain/np_settings.dart'
+    show
+        MiniPlayerStyle,
+        NpCoverStyle,
+        NpDisplayMode,
+        NpLyricAlign,
+        NpPlayerSettings,
+        kStripButtonDefaults,
+        kStripButtonIds;
 
 final NotifierProvider<NpSettingsNotifier, NpPlayerSettings>
     npSettingsProvider = NotifierProvider<NpSettingsNotifier, NpPlayerSettings>(
@@ -42,9 +50,6 @@ class NpSettingsNotifier extends Notifier<NpPlayerSettings> {
 
   void setDisplayMode(NpDisplayMode mode) =>
       _commit(state.copyWith(displayMode: mode));
-
-  void setHideControls(bool hide) =>
-      _commit(state.copyWith(hidePlayerControls: hide));
 
   void setCoverStyle(NpCoverStyle style) =>
       _commit(state.copyWith(coverStyle: style));
@@ -86,6 +91,24 @@ class NpSettingsNotifier extends Notifier<NpPlayerSettings> {
 
   void setYrcColors(Color played, Color unplayed) =>
       _commit(state.copyWith(yrcPlayed: played, yrcUnplayed: unplayed));
+
+  void setHighlightPlayed(bool on) =>
+      _commit(state.copyWith(highlightPlayed: on));
+
+  void setHeartEffect(bool on) => _commit(state.copyWith(heartEffect: on));
+
+  /// 底部功能条按钮显隐（保持 kStripButtonIds 中的原始顺序）
+  void setStripButtons(List<String> enabled) {
+    final List<String> ordered = <String>[
+      for (final String id in kStripButtonIds)
+        if (enabled.contains(id)) id,
+    ];
+    _commit(state.copyWith(
+      stripButtons: ordered.isEmpty
+          ? List<String>.of(kStripButtonDefaults)
+          : ordered,
+    ));
+  }
 
   void reset() => _commit(NpPlayerSettings.defaults);
 }

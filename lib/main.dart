@@ -8,6 +8,7 @@ library;
 import 'dart:io';
 
 import 'package:audio_service/audio_service.dart';
+import 'package:audio_session/audio_session.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -43,7 +44,18 @@ Future<void> main() async {
     prefs = await SharedPreferences.getInstance();
   }
 
-  // 2) Android 13+ 通知权限（通知栏媒体控制的前提）
+  // 2) 系统级音频焦点管理（audio_session）：
+  //    音乐会话配置 —— 播放时请求音频焦点、插耳机自动恢复、
+  //    电话铃声打断时自动淡出暂停、被打断恢复后继续播放。
+  //    just_audio 检测到 audio_session 依赖后自动接管焦点事件。
+  try {
+    final AudioSession session = await AudioSession.instance;
+    await session.configure(const AudioSessionConfiguration.music());
+  } catch (e) {
+    debugPrint('audio_session 初始化失败（忽略，不影响播放）: $e');
+  }
+
+  // 3) Android 13+ 通知权限（通知栏媒体控制的前提）
   if (!kIsWeb && Platform.isAndroid) {
     try {
       await Permission.notification.request();
@@ -52,7 +64,7 @@ Future<void> main() async {
     }
   }
 
-  // 3) 全局唯一 AudioHandler（生命周期 = App 生命周期）
+  // 4) 全局唯一 AudioHandler（生命周期 = App 生命周期）
   final MingAudioHandler audioHandler = await AudioService.init(
     builder: MingAudioHandler.new,
     config: const AudioServiceConfig(

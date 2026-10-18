@@ -108,6 +108,10 @@ class PlaylistMeta {
     this.trackCount,
     this.creator,
     this.description,
+    this.creatorUserId,
+    this.subscribed,
+    this.creatorAvatarUrl,
+    this.commentCount,
   });
 
   final int id;
@@ -118,6 +122,18 @@ class PlaylistMeta {
   final String? creator;
   final String? description;
 
+  /// 歌单创建者用户 id（区分「我创建的」/「我收藏的」）
+  final int? creatorUserId;
+
+  /// 是否为收藏的歌单（/user/playlist 返回的 subscribed 字段）
+  final bool? subscribed;
+
+  /// 创作者头像（歌单详情页创作者行）
+  final String? creatorAvatarUrl;
+
+  /// 评论数（歌单详情动态字段）
+  final int? commentCount;
+
   static PlaylistMeta fromJson(Map<String, Object?> j) => PlaylistMeta(
         id: (j['id'] as num?)?.toInt() ?? 0,
         name: (j['name'] as String?) ?? '歌单',
@@ -127,6 +143,12 @@ class PlaylistMeta {
             (j['trackIds'] as List<Object?>?)?.length,
         creator: _creatorName(j),
         description: j['description'] as String?,
+        creatorUserId: (j['userId'] as num?)?.toInt(),
+        subscribed: j['subscribed'] as bool?,
+        creatorAvatarUrl: normalizeNeteaseUrl(
+          ((j['creator'] as Map<String, Object?>?)?['avatarUrl']) as String?,
+        ),
+        commentCount: (j['commentCount'] as num?)?.toInt(),
       );
 
   static String? _pickCover(Map<String, Object?> j) {
@@ -473,4 +495,168 @@ class WikiGroup {
 
   final String title;
   final List<String> items;
+}
+
+// ---------------------------------------------------------------- 听歌排行 / 最近播放 / 云盘 / 专辑
+
+/// 听歌排行 / 最近播放条目（/user/record、/record/recent/song）
+class PlayRecordSong {
+  const PlayRecordSong({
+    required this.song,
+    this.score = 0,
+    this.playAt,
+  });
+
+  /// 歌曲体（/user/record 为 {song:{...}, playCount}；/record/recent 为
+  /// {data:{list:[{data:{...歌曲体}, playTime}]}} 双层 data 包裹）
+  final Song song;
+
+  /// 播放次数（听歌排行的计分）
+  final int score;
+
+  /// 最近播放时间（毫秒时间戳，/record/recent/song）
+  final int? playAt;
+
+  static Song? _songOf(Object? raw) {
+    if (raw is! Map<String, Object?>) return null;
+    final Song s = Song.fromCloudJson(raw);
+    return s.id == 0 ? null : s;
+  }
+
+  /// /user/record 列表项
+  static PlayRecordSong? fromRecordJson(Map<String, Object?> j) {
+    final Song? s = _songOf(j['song']);
+    if (s == null) return null;
+    return PlayRecordSong(
+      song: s,
+      score: (j['playCount'] as num?)?.toInt() ?? 0,
+    );
+  }
+
+  /// /record/recent/song 列表项
+  static PlayRecordSong? fromRecentJson(Map<String, Object?> j) {
+    final Song? s = _songOf(j['data'] ?? j['song']);
+    if (s == null) return null;
+    return PlayRecordSong(
+      song: s,
+      playAt: (j['playTime'] as num?)?.toInt(),
+      score: (j['playCount'] as num?)?.toInt() ?? 0,
+    );
+  }
+}
+
+/// 音乐云盘歌曲（/user/cloud → data[].simpleSong）
+class CloudSong {
+  const CloudSong({
+    required this.song,
+    this.fileSize = 0,
+    this.fileName = '',
+  });
+
+  final Song song;
+
+  /// 文件大小（字节）
+  final int fileSize;
+
+  /// 云盘文件名
+  final String fileName;
+
+  bool get isVip => song.isVipOnly;
+
+  static CloudSong? fromJson(Map<String, Object?> j) {
+    final Map<String, Object?>? simple =
+        j['simpleSong'] as Map<String, Object?>?;
+    final Map<String, Object?>? songNode =
+        j['song'] as Map<String, Object?>?;
+    final Song? s = simple != null
+        ? Song.fromCloudJson(simple)
+        : (songNode != null ? Song.fromCloudJson(songNode) : null);
+    if (s == null || s.id == 0) return null;
+    final String name = (j['fileName'] as String?) ??
+        (j['songName'] as String?) ??
+        s.name;
+    return CloudSong(
+      song: s,
+      fileSize: (j['fileSize'] as num?)?.toInt() ?? 0,
+      fileName: name,
+    );
+  }
+}
+
+/// 专辑详情（/album）
+class AlbumDetail {
+  const AlbumDetail({required this.meta, required this.tracks});
+
+  final PlaylistMeta meta;
+  final List<Song> tracks;
+
+  static AlbumDetail fromJson(Map<String, Object?> j) {
+    final Map<String, Object?> album =
+        (j['album'] as Map<String, Object?>?) ?? j;
+    final PlaylistMeta meta = PlaylistMeta(
+      id: (album['id'] as num?)?.toInt() ?? 0,
+      name: (album['name'] as String?) ?? '专辑',
+      coverUrl: normalizeNeteaseUrl(album['picUrl'] as String?),
+      trackCount: (album['size'] as num?)?.toInt(),
+      description: j['description'] is String
+          ? j['description'] as String
+          : (album['description'] as String?),
+      creator: _artistNames(album['artists'] ?? album['artist']),
+    );
+    return AlbumDetail(
+      meta: meta,
+      tracks: (j['songs'] as List<Object?>? ?? const <Object?>[])
+          .whereType<Map<String, Object?>>()
+          .map(Song.fromCloudJson)
+          .where((Song s) => s.id != 0)
+          .toList(growable: false),
+    );
+  }
+
+  static String? _artistNames(Object? raw) {
+    if (raw is! List<Object?>) return null;
+    final List<String> names = <String>[];
+    for (final Object? item in raw) {
+      if (item is Map<String, Object?>) {
+        final String? n = item['name'] as String?;
+        if (n != null && n.isNotEmpty) names.add(n);
+      }
+    }
+    return names.isEmpty ? null : names.join(' / ');
+  }
+}
+
+/// 搜索建议（/search/suggest → result）
+class SearchSuggest {
+  const SearchSuggest({
+    this.keywords = const <String>[],
+    this.artists = const <String>[],
+    this.albums = const <String>[],
+  });
+
+  final List<String> keywords;
+  final List<String> artists;
+  final List<String> albums;
+
+  bool get isEmpty => keywords.isEmpty && artists.isEmpty && albums.isEmpty;
+
+  static SearchSuggest fromJson(Map<String, Object?> result) {
+    List<String> names(Object? raw) {
+      if (raw is! List<Object?>) return const <String>[];
+      final List<String> out = <String>[];
+      for (final Object? item in raw) {
+        if (item is Map<String, Object?>) {
+          final String? n = item['name'] as String?;
+          if (n != null && n.isNotEmpty) out.add(n);
+        }
+      }
+      return out;
+    }
+
+    return SearchSuggest(
+      keywords: names(result['allMatch']),
+      artists: names(result['artists'] ?? result['artist']),
+      albums: names(result['albums'] ?? result['album']),
+    );
+  }
 }

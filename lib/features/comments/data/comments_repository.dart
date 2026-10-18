@@ -101,17 +101,18 @@ class CommentsRepository {
 
   final NeteaseApi _api;
 
-  /// 拉取歌曲评论（type=0 歌曲）
+  /// 拉取评论（subjectType：0 歌曲 / 2 歌单 / 4 专辑 / 6 MV）
   Future<CommentPage> fetchComments(
     int songId, {
     int sortType = 1,
     int pageNo = 1,
     int pageSize = 20,
     int? cursor,
+    String subjectType = '0',
   }) async {
     final Map<String, String> params = <String, String>{
       'id': '$songId',
-      'type': '0',
+      'type': subjectType,
       'sortType': '$sortType',
       'pageNo': '$pageNo',
       'pageSize': '$pageSize',
@@ -145,10 +146,11 @@ class CommentsRepository {
     required int songId,
     String? content,
     int? commentId,
+    String subjectType = '0',
   }) async {
     final Map<String, String> params = <String, String>{
       't': '$t',
-      'type': '0',
+      'type': subjectType,
       'id': '$songId',
       // 网易云评论接口风控：os=android 模拟移动端绕过「请切换至移动端」
       'os': 'android',
@@ -169,6 +171,7 @@ class CommentsRepository {
     required int songId,
     required int commentId,
     required bool like,
+    String subjectType = '0',
   }) async {
     final Map<String, Object?> res = await _api.post(
       '/comment/like',
@@ -176,7 +179,7 @@ class CommentsRepository {
         'id': '$songId',
         'cid': '$commentId',
         't': like ? '1' : '0',
-        'type': '0',
+        'type': subjectType,
       },
       throwOnCode: false,
     );

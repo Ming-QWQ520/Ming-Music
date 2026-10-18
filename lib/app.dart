@@ -1,13 +1,13 @@
-/// 应用根 Widget：主题模式 + 路由入口。
+/// 应用根 Widget：主题模式 + go_router 路由入口。
 library;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'core/router.dart';
 import 'core/theme/app_theme.dart';
 import 'features/settings/providers/settings_providers.dart';
-import 'features/shell/presentation/main_scaffold.dart';
 
 class MingMusicApp extends ConsumerWidget {
   const MingMusicApp({super.key});
@@ -15,7 +15,7 @@ class MingMusicApp extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final ThemeMode mode = ref.watch(themeModeProvider);
-    return MaterialApp(
+    return MaterialApp.router(
       title: AppTitle.text,
       debugShowCheckedModeBanner: false,
       theme: AppTheme.light(),
@@ -31,7 +31,7 @@ class MingMusicApp extends ConsumerWidget {
         Locale('en'),
       ],
       locale: const Locale('zh'),
-      home: const MainScaffold(),
+      routerConfig: appRouter,
     );
   }
 }

@@ -13,6 +13,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/constants/app_constants.dart';
 import '../../../library/domain/track.dart';
+import '../../../library/presentation/add_to_playlist_sheet.dart';
 import '../../../discover/presentation/widgets/song_tile.dart' show VipBadge;
 import '../../providers/player_providers.dart';
 import '../../services/queue_persistence.dart' show QueueSnapshot;
@@ -256,6 +257,10 @@ class _CurrentPane extends ConsumerWidget {
                   Navigator.of(context).pop();
                   await ref.read(playerProvider.notifier).playAt(index);
                 },
+                onRemove: () =>
+                    ref.read(playerProvider.notifier).removeFromQueue(index),
+                onAddTo: () =>
+                    showAddToPlaylistSheet(context, ref, <int>[t.neteaseId ?? 0]),
               );
             },
           ),
@@ -503,8 +508,10 @@ class _HistoryPane extends StatelessWidget {
 // ---------------------------------------------------------------- 行
 
 /// 当前播放行（需求布局，从左到右）：
-/// 抖动条纹（当前曲才显示）→ VIP 标识（是才显示）→ 歌名 - 歌手 → 拖动按键
-class _QueueRow extends StatelessWidget {
+/// 抖动条纹（当前曲才显示）→ VIP 标识（是才显示）→ 歌名 - 歌手
+/// → 移除键（x）+ 拖动按键；
+/// 手势：右滑删除出队列；左滑添加至歌单（底部弹出菜单）。
+class _QueueRow extends ConsumerWidget {
   const _QueueRow({
     super.key,
     required this.track,
@@ -512,6 +519,8 @@ class _QueueRow extends StatelessWidget {
     required this.playing,
     required this.index,
     required this.onTap,
+    required this.onRemove,
+    required this.onAddTo,
   });
 
   final Track track;
@@ -519,14 +528,16 @@ class _QueueRow extends StatelessWidget {
   final bool playing;
   final int index;
   final VoidCallback onTap;
+  final VoidCallback onRemove;
+  final VoidCallback onAddTo;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final ThemeData theme = Theme.of(context);
     final Color titleColor =
         current ? AppConstants.brandColor : theme.colorScheme.onSurface;
 
-    return InkWell(
+    final Widget row = InkWell(
       onTap: onTap,
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
@@ -577,8 +588,25 @@ class _QueueRow extends StatelessWidget {
                 overflow: TextOverflow.ellipsis,
               ),
             ),
-            const SizedBox(width: 8),
-            // ④ 拖动按键（自定义排序；行内 x 删除键与封面已按要求移除）
+            const SizedBox(width: 4),
+            // ④ 移除键（需求：补回移除按键；右滑删除等效）
+            SizedBox(
+              width: 30,
+              height: 30,
+              child: IconButton(
+                padding: EdgeInsets.zero,
+                visualDensity: VisualDensity.compact,
+                tooltip: '移除',
+                icon: Icon(
+                  Icons.close_rounded,
+                  size: 17,
+                  color: theme.colorScheme.onSurfaceVariant
+                      .withValues(alpha: 0.8),
+                ),
+                onPressed: onRemove,
+              ),
+            ),
+            // ⑤ 拖动按键（自定义排序）
             ReorderableDragStartListener(
               index: index,
               child: Padding(
@@ -592,6 +620,78 @@ class _QueueRow extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+
+    // 手势：右滑 = 移除出队列；左滑 = 添加至歌单（需求）
+    return Dismissible(
+      key: ValueKey<String>('swipe_${track.id}_$index'),
+      confirmDismiss: (DismissDirection dir) async {
+        if (dir == DismissDirection.startToEnd) {
+          onRemove();
+          return false; // 状态由 removeAt 驱动，动画交给列表重建
+        }
+        onAddTo();
+        return false;
+      },
+      background: _SwipeBg(
+        color: AppConstants.brandColor,
+        icon: Icons.remove_circle_outline_rounded,
+        label: '移除',
+        alignRight: false,
+      ),
+      secondaryBackground: _SwipeBg(
+        color: const Color(0xFF3D7BFF),
+        icon: Icons.playlist_add_rounded,
+        label: '添加到歌单',
+        alignRight: true,
+      ),
+      child: row,
+    );
+  }
+}
+
+/// 滑动操作背景
+class _SwipeBg extends StatelessWidget {
+  const _SwipeBg({
+    required this.color,
+    required this.icon,
+    required this.label,
+    required this.alignRight,
+  });
+
+  final Color color;
+  final IconData icon;
+  final String label;
+  final bool alignRight;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      color: color,
+      alignment: alignRight ? Alignment.centerRight : Alignment.centerLeft,
+      padding: const EdgeInsets.symmetric(horizontal: 20),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          if (alignRight) ...<Widget>[
+            Text(label,
+                style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w600)),
+            const SizedBox(width: 6),
+          ],
+          Icon(icon, color: Colors.white, size: 18),
+          if (!alignRight) ...<Widget>[
+            const SizedBox(width: 6),
+            Text(label,
+                style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w600)),
+          ],
+        ],
       ),
     );
   }

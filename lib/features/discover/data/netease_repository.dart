@@ -33,18 +33,38 @@ class NeteaseRepository {
 
   final NeteaseApi _api;
 
-  /// 搜索（cloudsearch 字段更全：fee/dt/picUrl）
+  /// 搜索（对齐 Zephyr-Music：/search 为主，/cloudsearch 兜底 ——
+  /// 增强版 API 的 cloudsearch 在部分关键词下返回异常结构导致搜索报错）。
   Future<List<Song>> search(String keywords, {int limit = 30}) async {
-    final Map<String, Object?> res =
-        await _api.get('/cloudsearch', <String, String>{
+    final Map<String, String> params = <String, String>{
       'keywords': keywords,
       'limit': '$limit',
       'offset': '0',
       'type': '1',
-    });
+    };
+    try {
+      final Map<String, Object?> res = await _api.get('/search', params);
+      final Object? result = res['result'];
+      final Object? songs =
+          (result is Map<String, Object?>) ? result['songs'] : null;
+      final List<Song> parsed = _songsFrom(songs);
+      if (parsed.isNotEmpty) return parsed;
+    } catch (_) {
+      // 主接口抖动 → 走 cloudsearch 兜底
+    }
+    final Map<String, Object?> res = await _api.get('/cloudsearch', params);
     final Object? data = res['data'];
     final Object? songs = (data is Map<String, Object?>) ? data['songs'] : null;
     return _songsFrom(songs);
+  }
+
+  /// 搜索建议（/search/suggest，type=mobile 返回 allMatch）
+  Future<SearchSuggest> searchSuggest(String keywords) async {
+    final Map<String, Object?> res = await _api.get('/search/suggest',
+        <String, String>{'keywords': keywords, 'type': 'mobile'});
+    final Object? result = res['result'];
+    if (result is! Map<String, Object?>) return const SearchSuggest();
+    return SearchSuggest.fromJson(result);
   }
 
   /// 热搜词（详细版，带icon与热度）
@@ -229,6 +249,157 @@ class NeteaseRepository {
         .map(PlaylistMeta.fromJson)
         .where((PlaylistMeta p) => p.id != 0)
         .toList(growable: false);
+  }
+
+  // -------------------------------------------------- 歌单 CRUD / 收藏
+
+  /// 新建歌单（/playlist/create）
+  Future<int> playlistCreate(String name, {bool privacy = false}) async {
+    final Map<String, Object?> res = await _api.get('/playlist/create',
+        <String, String>{'name': name, 'privacy': privacy ? '10' : '0'});
+    final int id = (res['id'] as num?)?.toInt() ?? 0;
+    if (id == 0) throw ApiException('歌单创建失败');
+    return id;
+  }
+
+  /// 删除歌单（/playlist/delete）
+  Future<void> playlistDelete(int id) async {
+    final Map<String, Object?> res =
+        await _api.get('/playlist/delete', <String, String>{'id': '$id'});
+    final Object? code = res['code'];
+    if (code is int && code != 200) {
+      throw ApiException('删除歌单失败（$code）');
+    }
+  }
+
+  /// 收藏 / 取消收藏歌单（/playlist/subscribe，t=1 收藏 2 取消）
+  Future<void> playlistSubscribe(int id, {required bool subscribe}) async {
+    await _api.get('/playlist/subscribe',
+        <String, String>{'id': '$id', 't': subscribe ? '1' : '2'});
+  }
+
+  /// 歌单增删歌曲（/playlist/tracks?op=add|del&pid=&tracks=）
+  Future<void> playlistTracks({
+    required int playlistId,
+    required List<int> trackIds,
+    required bool add,
+  }) async {
+    final Map<String, Object?> res = await _api.get('/playlist/tracks',
+        <String, String>{
+          'op': add ? 'add' : 'del',
+          'pid': '$playlistId',
+          'tracks': trackIds.join(','),
+        });
+    final Object? body = res['body'];
+    // 部分版本返回 {body:{code:502,...}}：曲目已存在等场景给出明确错误
+    if (body is Map<String, Object?>) {
+      final Object? code = body['code'];
+      if (code is int && code != 200) {
+        throw ApiException(code == 502 ? '歌曲已在该歌单中' : '操作失败（$code）');
+      }
+    }
+  }
+
+  /// 收藏 / 取消收藏歌手（/artist/sub，t=1 收藏 0 取消）
+  Future<void> artistSub(int id, {required bool subscribe}) async {
+    await _api.get('/artist/sub',
+        <String, String>{'id': '$id', 't': subscribe ? '1' : '0'});
+  }
+
+  // -------------------------------------------------- 听歌排行 / 最近播放
+
+  /// 听歌排行（/user/record，type=0 所有时间 1 最近一周）
+  Future<List<PlayRecordSong>> userRecord(int uid,
+      {required bool week}) async {
+    final Map<String, Object?> res = await _api.get('/user/record',
+        <String, String>{'uid': '$uid', 'type': week ? '1' : '0'});
+    final Map<String, Object?> payload = apiPayload(res);
+    for (final String key in <String>['weekData', 'allData']) {
+      final Object? list = payload[key];
+      if (list is! List<Object?>) continue;
+      return list
+          .whereType<Map<String, Object?>>()
+          .map(PlayRecordSong.fromRecordJson)
+          .whereType<PlayRecordSong>()
+          .toList(growable: false);
+    }
+    return const <PlayRecordSong>[];
+  }
+
+  /// 最近播放-歌曲（/record/recent/song）
+  Future<List<PlayRecordSong>> recentSongs({int limit = 100}) async {
+    final Map<String, Object?> res = await _api
+        .get('/record/recent/song', <String, String>{'limit': '$limit'});
+    final Map<String, Object?> payload = apiPayload(res);
+    Object? list = payload['list'];
+    if (list == null) {
+      final Object? data = payload['data'];
+      if (data is Map<String, Object?>) list = data['list'];
+    }
+    if (list is! List<Object?>) return const <PlayRecordSong>[];
+    return list
+        .whereType<Map<String, Object?>>()
+        .map(PlayRecordSong.fromRecentJson)
+        .whereType<PlayRecordSong>()
+        .toList(growable: false);
+  }
+
+  // -------------------------------------------------- 音乐云盘
+
+  /// 云盘列表（/user/cloud）
+  Future<List<CloudSong>> cloudList({int limit = 100, int offset = 0}) async {
+    final Map<String, Object?> res = await _api.get('/user/cloud',
+        <String, String>{'limit': '$limit', 'offset': '$offset'});
+    final Object? data = res['data'];
+    if (data is! List<Object?>) return const <CloudSong>[];
+    return data
+        .whereType<Map<String, Object?>>()
+        .map(CloudSong.fromJson)
+        .whereType<CloudSong>()
+        .toList(growable: false);
+  }
+
+  /// 删除云盘歌曲（/user/cloud/del）
+  Future<void> cloudDelete(int id) async {
+    final Map<String, Object?> res =
+        await _api.get('/user/cloud/del', <String, String>{'id': '$id'});
+    final Object? code = res['code'];
+    if (code is int && code != 200) {
+      throw ApiException('删除失败（$code）');
+    }
+  }
+
+  // -------------------------------------------------- 专辑 / 心动漫游
+
+  /// 专辑详情（/album）
+  Future<AlbumDetail> albumDetail(int id) async {
+    final Map<String, Object?> res =
+        await _api.get('/album', <String, String>{'id': '$id'});
+    if (res['album'] == null && res['code'] != 200) {
+      throw ApiException('专辑不存在或已下架');
+    }
+    return AlbumDetail.fromJson(res);
+  }
+
+  /// 心动模式/智能播放（/playmode/intelligence/list）：登录后个性化推荐
+  Future<List<Song>> intelligenceList(int songId, int playlistId) async {
+    final Map<String, Object?> res =
+        await _api.get('/playmode/intelligence/list', <String, String>{
+      'songId': '$songId',
+      'pid': '$playlistId',
+      'limit': '30',
+    });
+    final Object? data = res['data'];
+    if (data is! List<Object?>) return const <Song>[];
+    final List<Song> out = <Song>[];
+    for (final Object? item in data) {
+      if (item is! Map<String, Object?>) continue;
+      final Object? info = item['songInfo'];
+      if (info is! Map<String, Object?>) continue;
+      final Song s = Song.fromCloudJson(info);
+      if (s.id != 0) out.add(s);
+    }
+    return out;
   }
 
   List<Song> _songsFrom(Object? raw) {

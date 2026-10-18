@@ -1,6 +1,6 @@
 /// 播放页自定义设置（参考 Zephyr-Music PlayerSettings）：
 ///
-///  - 显示模式（双列/仅封面/仅歌词）、隐藏控制栏；
+///  - 显示模式（双列/仅封面/仅歌词）；
 ///  - 封面样式（黑胶/圆角方形/圆形）+ 缩放 + 阴影；
 ///  - 背景模糊/变暗强度；
 ///  - 歌词排版（字号/行距/对齐/翻译/淡出/模糊）与逐字着色；
@@ -77,10 +77,33 @@ extension NpLyricAlignX on NpLyricAlign {
       };
 }
 
+/// 底部功能条按钮 id（「播放页底部功能自定义」面板可勾选显隐）
+const List<String> kStripButtonIds = <String>[
+  'output',    // 媒体输出
+  'similar',   // 相似歌曲
+  'wiki',      // 歌词百科
+  'download',  // 下载
+  'comments',  // 评论
+  'settings',  // 设置
+];
+
+const List<String> kStripButtonDefaults = <String>[
+  'output', 'similar', 'wiki', 'settings',
+];
+
+String stripButtonLabel(String id) => switch (id) {
+      'output' => '媒体输出',
+      'similar' => '相似歌曲',
+      'wiki' => '歌词百科',
+      'download' => '下载',
+      'comments' => '评论',
+      'settings' => '设置',
+      _ => id,
+    };
+
 class NpPlayerSettings {
   const NpPlayerSettings({
     this.displayMode = NpDisplayMode.both,
-    this.hidePlayerControls = false,
     this.coverStyle = NpCoverStyle.vinyl,
     this.coverScale = 1.0,
     this.coverShadow = true,
@@ -95,8 +118,10 @@ class NpPlayerSettings {
     this.lyricBlur = 0,
     this.yrcPlayed = const Color(0xFFFFFFFF),
     this.yrcUnplayed = const Color(0x66FFFFFF),
-    this.animationSpeed = 1.0,
+    this.highlightPlayed = false,
+    this.heartEffect = true,
     this.miniStyle = MiniPlayerStyle.classic,
+    this.stripButtons = kStripButtonDefaults,
   });
 
   static const int version = 1;
@@ -107,9 +132,6 @@ class NpPlayerSettings {
 
   /// 显示模式（平板双列 / 锁定单视图）
   final NpDisplayMode displayMode;
-
-  /// 隐藏控制栏（仅保留进度条与手势，Zephyr hidePlayerControls）
-  final bool hidePlayerControls;
 
   // ---- 封面 ----
 
@@ -162,12 +184,17 @@ class NpPlayerSettings {
   /// 逐字未唱颜色
   final Color yrcUnplayed;
 
-  /// 自动跟随滚动动画时长倍率（0.5 - 2.0）
-  final double animationSpeed;
+  /// 高亮已播放歌词（关 = 只高亮当前播放行/字，已播放行不高亮；开 = 经典卡拉OK）
+  final bool highlightPlayed;
+
+  /// 红心动效（喜欢时心形迸发动画）
+  final bool heartEffect;
+
+  /// 播放页底部功能条按钮（有序 id 列表，来自 kStripButtonIds）
+  final List<String> stripButtons;
 
   NpPlayerSettings copyWith({
     NpDisplayMode? displayMode,
-    bool? hidePlayerControls,
     NpCoverStyle? coverStyle,
     double? coverScale,
     bool? coverShadow,
@@ -182,12 +209,13 @@ class NpPlayerSettings {
     double? lyricBlur,
     Color? yrcPlayed,
     Color? yrcUnplayed,
-    double? animationSpeed,
+    bool? highlightPlayed,
+    bool? heartEffect,
     MiniPlayerStyle? miniStyle,
+    List<String>? stripButtons,
   }) {
     return NpPlayerSettings(
       displayMode: displayMode ?? this.displayMode,
-      hidePlayerControls: hidePlayerControls ?? this.hidePlayerControls,
       coverStyle: coverStyle ?? this.coverStyle,
       coverScale: coverScale ?? this.coverScale,
       coverShadow: coverShadow ?? this.coverShadow,
@@ -202,15 +230,16 @@ class NpPlayerSettings {
       lyricBlur: lyricBlur ?? this.lyricBlur,
       yrcPlayed: yrcPlayed ?? this.yrcPlayed,
       yrcUnplayed: yrcUnplayed ?? this.yrcUnplayed,
-      animationSpeed: animationSpeed ?? this.animationSpeed,
+      highlightPlayed: highlightPlayed ?? this.highlightPlayed,
+      heartEffect: heartEffect ?? this.heartEffect,
       miniStyle: miniStyle ?? this.miniStyle,
+      stripButtons: stripButtons ?? this.stripButtons,
     );
   }
 
   Map<String, Object?> toMap() => <String, Object?>{
         '_v': version,
         'displayMode': displayMode.name,
-        'hidePlayerControls': hidePlayerControls,
         'coverStyle': coverStyle.name,
         'coverScale': coverScale,
         'coverShadow': coverShadow,
@@ -225,8 +254,10 @@ class NpPlayerSettings {
         'lyricBlur': lyricBlur,
         'yrcPlayed': yrcPlayed.toARGB32(),
         'yrcUnplayed': yrcUnplayed.toARGB32(),
-        'animationSpeed': animationSpeed,
+        'highlightPlayed': highlightPlayed,
+        'heartEffect': heartEffect,
         'miniStyle': miniStyle.name,
+        'stripButtons': stripButtons,
       };
 
   factory NpPlayerSettings.fromMap(Map<Object?, Object?> map) {
@@ -237,12 +268,17 @@ class NpPlayerSettings {
 
     Color colorOf(Object? v, Color fallback) => v is int ? Color(v) : fallback;
 
+    final List<String> strip = (map['stripButtons'] as List<Object?>?)
+            ?.whereType<String>()
+            .where((String id) => kStripButtonIds.contains(id))
+            .toList() ??
+        List<String>.of(kStripButtonDefaults);
+
     return NpPlayerSettings(
       displayMode: NpDisplayMode.values.firstWhere(
         (NpDisplayMode m) => m.name == map['displayMode'],
         orElse: () => NpDisplayMode.both,
       ),
-      hidePlayerControls: map['hidePlayerControls'] == true,
       coverStyle: NpCoverStyle.values.firstWhere(
         (NpCoverStyle s) => s.name == map['coverStyle'],
         orElse: () => NpCoverStyle.vinyl,
@@ -254,10 +290,6 @@ class NpPlayerSettings {
       squareCoverRadius: map['squareCoverRadius'] is bool
           ? map['squareCoverRadius']! as bool
           : defaults.squareCoverRadius,
-      miniStyle: MiniPlayerStyle.values.firstWhere(
-        (MiniPlayerStyle s) => s.name == map['miniStyle'],
-        orElse: () => defaults.miniStyle,
-      ),
       bgBlur: clampD(map['bgBlur'], 0, 40, defaults.bgBlur),
       bgDim: clampD(map['bgDim'], 0, 100, defaults.bgDim),
       lyricFontSize:
@@ -274,8 +306,15 @@ class NpPlayerSettings {
       lyricBlur: clampD(map['lyricBlur'], 0, 10, defaults.lyricBlur),
       yrcPlayed: colorOf(map['yrcPlayed'], defaults.yrcPlayed),
       yrcUnplayed: colorOf(map['yrcUnplayed'], defaults.yrcUnplayed),
-      animationSpeed:
-          clampD(map['animationSpeed'], 0.5, 2.0, defaults.animationSpeed),
+      highlightPlayed: map['highlightPlayed'] == true,
+      heartEffect: map['heartEffect'] is bool
+          ? map['heartEffect']! as bool
+          : defaults.heartEffect,
+      miniStyle: MiniPlayerStyle.values.firstWhere(
+        (MiniPlayerStyle s) => s.name == map['miniStyle'],
+        orElse: () => defaults.miniStyle,
+      ),
+      stripButtons: strip.isEmpty ? List<String>.of(kStripButtonDefaults) : strip,
     );
   }
 

@@ -22,7 +22,7 @@ import '../../auth/providers/auth_providers.dart' show authProvider;
 import '../../discover/data/netease_providers.dart';
 import '../../discover/data/netease_repository.dart';
 import '../../library/domain/track.dart';
-import '../../../core/api/netease_models.dart' show SongUrlInfo;
+import '../../../core/api/netease_models.dart' show Song, SongUrlInfo;
 import '../../settings/domain/settings_models.dart' show AudioQuality, AudioQualityX;
 import '../../settings/providers/settings_providers.dart'
     show audioQualityProvider, sharedPreferencesProvider;
@@ -103,6 +103,50 @@ final StreamProvider<Duration> durationProvider = StreamProvider<Duration>(
       .durationStream
       .map((Duration? d) => d ?? Duration.zero),
 );
+
+/// 定时关闭（sleep timer）：remaining 为 null 表示未开启；到点自动暂停
+final NotifierProvider<SleepTimerNotifier, Duration?> sleepTimerProvider =
+    NotifierProvider<SleepTimerNotifier, Duration?>(SleepTimerNotifier.new);
+
+class SleepTimerNotifier extends Notifier<Duration?> {
+  Timer? _tick;
+
+  @override
+  Duration? build() => null;
+
+  void start(Duration d) {
+    _tick?.cancel();
+    state = d;
+    _tick = Timer.periodic(const Duration(seconds: 1), (Timer t) {
+      final Duration? left = state;
+      if (left == null) {
+        t.cancel();
+        return;
+      }
+      if (left <= const Duration(seconds: 1)) {
+        t.cancel();
+        state = null;
+        ref.read(playerProvider.notifier).pause();
+      } else {
+        state = left - const Duration(seconds: 1);
+      }
+    });
+  }
+
+  void cancel() {
+    _tick?.cancel();
+    _tick = null;
+    state = null;
+  }
+
+  void toggle(Duration d) {
+    if (state == null) {
+      start(d);
+    } else {
+      cancel();
+    }
+  }
+}
 
 /// 播放器主状态
 final NotifierProvider<PlayerNotifier, PlayerState> playerProvider =
@@ -557,6 +601,56 @@ class PlayerNotifier extends Notifier<PlayerState> {
     );
     await ref.read(queuePersistenceProvider).clearQueueState();
   }
+
+  /// 心动模式漫游：优先 /playmode/intelligence/list（登录态个性化），
+  /// 失败回退 /simi/song。返回错误文案（null 成功）
+  Future<String?> startRoaming() async {
+    final Track? current = state.currentTrack;
+    final int? songId = current?.neteaseId;
+    if (songId == null || songId == 0) return '当前没有可漫游的歌曲';
+    state = state.copyWith(processing: AppProcessingState.loading);
+    try {
+      final NeteaseRepository repo = ref.read(neteaseRepositoryProvider);
+      List<Song> songs = const <Song>[];
+      try {
+        songs = await repo.intelligenceList(songId, 0);
+      } catch (_) {
+        // 个性化接口失败 → 相似歌曲
+      }
+      if (songs.isEmpty) {
+        songs = await repo.simiSongs(songId);
+      }
+      if (songs.isEmpty) {
+        state = state.copyWith(processing: AppProcessingState.idle);
+        return '暂无相似歌曲可漫游';
+      }
+      // 当前曲放首位，后续为相似歌曲
+      final List<Track> tracks = <Track>[current!, ...songs.map((Song s) => s.toTrack())];
+      state = state.copyWith(processing: AppProcessingState.idle);
+      await playSongs(tracks, startIndex: 0, queueTitle: '心动模式 · 相似歌曲漫游');
+      return null;
+    } catch (e) {
+      state = state.copyWith(processing: AppProcessingState.idle);
+      return '漫游失败：$e';
+    }
+  }
+
+  /// 插播相似歌曲：取一首当前曲目的相似歌曲插入下一首并立即播放
+  Future<String?> playNextSimilar() async {
+    final Track? current = state.currentTrack;
+    final int? songId = current?.neteaseId;
+    if (songId == null || songId == 0) return '当前没有可插播的歌曲';
+    try {
+      final List<Song> songs = await ref.read(neteaseRepositoryProvider).simiSongs(songId);
+      if (songs.isEmpty) return '暂无相似歌曲';
+      return await playSimilarNext(songs.first.toTrack());
+    } catch (e) {
+      return '插播失败：$e';
+    }
+  }
+
+  /// 直接暂停（定时关闭用）
+  Future<void> pause() => _handler.pause();
 
   Future<void> playPause() async {
     final PlayerState s = state;

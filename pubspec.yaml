@@ -18,6 +18,15 @@ dependencies:
   # --- 状态管理 ---
   flutter_riverpod: ^2.6.1
 
+  # --- 路由管理 ---
+  go_router: ^14.8.1
+
+  # --- 动效库（列表/迷你条/弹层入场等统一动效） ---
+  flutter_animate: ^4.5.2
+
+  # --- 系统级音频焦点管理 ---
+  audio_session: ^0.2.4
+
   # --- 音频引擎 ---
   just_audio: ^0.10.3        # 播放内核
   audio_service: ^0.18.18    # 后台播放 / 通知栏 / 锁屏控制

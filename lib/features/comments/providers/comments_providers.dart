@@ -11,6 +11,7 @@ import '../../auth/providers/auth_providers.dart' show authProvider, AuthState;
 import '../../discover/data/netease_providers.dart' show neteaseApiProvider;
 import '../../settings/providers/settings_providers.dart'
     show sharedPreferencesProvider;
+import '../../library/domain/track.dart';
 import '../data/comments_repository.dart';
 
 final Provider<CommentsRepository> commentsRepositoryProvider =
@@ -18,7 +19,25 @@ final Provider<CommentsRepository> commentsRepositoryProvider =
   (Ref ref) => CommentsRepository(ref.watch(neteaseApiProvider)),
 );
 
-/// 歌曲评论总数（轻量请求 pageSize=1）：播放页信息区仿网易云展示「20万+」
+/// 评论主题：subjectType（0 歌曲 / 2 歌单 / 4 专辑）+ id + 展示标题
+class CommentsSubject {
+  const CommentsSubject({
+    required this.id,
+    this.subjectType = '0',
+    this.title = '',
+    this.track,
+  });
+
+  final int id;
+  final String subjectType;
+  final String title;
+  final Track? track;
+
+  /// Provider family key
+  String get key => '$subjectType:$id';
+}
+
+/// 评论总数（轻量请求 pageSize=1）：播放页信息区仿网易云展示「20万+」
 final FutureProviderFamily<int, int> songCommentCountProvider =
     FutureProvider.family<int, int>((Ref ref, int songId) async {
   try {
@@ -71,16 +90,27 @@ class LikedCommentsNotifier extends Notifier<Set<int>> {
   }
 }
 
-/// 单首歌曲的评论页状态（按 songId family 隔离）
-class CommentsController extends FamilyAsyncNotifier<CommentPage?, int> {
+/// 单个主题的评论页状态（family key = 'subjectType:id'）
+class CommentsController extends FamilyAsyncNotifier<CommentPage?, String> {
   int _sortType = 1;
   int _pageNo = 1;
   int _cursor = 0;
 
   int get sortType => _sortType;
 
+  /// '0'歌曲 / '2'歌单 / '4'专辑
+  String get subjectType {
+    final int idx = arg.indexOf(':');
+    return idx <= 0 ? '0' : arg.substring(0, idx);
+  }
+
+  int get subjectId {
+    final int idx = arg.indexOf(':');
+    return int.tryParse(idx < 0 ? arg : arg.substring(idx + 1)) ?? 0;
+  }
+
   @override
-  Future<CommentPage?> build(int songId) async {
+  Future<CommentPage?> build(String arg) async {
     _sortType = 1;
     _pageNo = 1;
     _cursor = 0;
@@ -95,11 +125,12 @@ class CommentsController extends FamilyAsyncNotifier<CommentPage?, int> {
     try {
       final CommentPage page =
           await ref.read(commentsRepositoryProvider).fetchComments(
-                arg,
+                subjectId,
                 sortType: _sortType,
                 pageNo: _pageNo,
                 pageSize: 20,
                 cursor: _cursor == 0 ? null : _cursor,
+                subjectType: subjectType,
               );
       if (reset) {
         _cursor = page.cursor ?? 0;
@@ -148,9 +179,10 @@ class CommentsController extends FamilyAsyncNotifier<CommentPage?, int> {
     final (int code, String msg) =
         await ref.read(commentsRepositoryProvider).action(
               t: replyTo == null ? 1 : 2,
-              songId: arg,
+              songId: subjectId,
               content: content.trim(),
               commentId: replyTo,
+              subjectType: subjectType,
             );
     if (code == 200) {
       await reload();
@@ -163,7 +195,12 @@ class CommentsController extends FamilyAsyncNotifier<CommentPage?, int> {
   Future<String?> delete(CommentItem comment) async {
     final (int code, String msg) = await ref
         .read(commentsRepositoryProvider)
-        .action(t: 0, songId: arg, commentId: comment.commentId);
+        .action(
+          t: 0,
+          songId: subjectId,
+          commentId: comment.commentId,
+          subjectType: subjectType,
+        );
     if (code != 200) return _errorMessage(code, msg);
     // 本地移除 + 计数减一
     final CommentPage? page = state.value;
@@ -222,9 +259,10 @@ class CommentsController extends FamilyAsyncNotifier<CommentPage?, int> {
     try {
       final (int code, String msg) =
           await ref.read(commentsRepositoryProvider).like(
-                songId: arg,
+                songId: subjectId,
                 commentId: comment.commentId,
                 like: !wasLiked,
+                subjectType: subjectType,
               );
       if (code == 200) return null;
       adjust(wasLiked ? 1 : -1);
@@ -247,7 +285,7 @@ class CommentsController extends FamilyAsyncNotifier<CommentPage?, int> {
   }
 }
 
-final AsyncNotifierProviderFamily<CommentsController, CommentPage?, int>
+final AsyncNotifierProviderFamily<CommentsController, CommentPage?, String>
     commentsProvider =
-    AsyncNotifierProviderFamily<CommentsController, CommentPage?, int>(
+    AsyncNotifierProviderFamily<CommentsController, CommentPage?, String>(
         CommentsController.new);

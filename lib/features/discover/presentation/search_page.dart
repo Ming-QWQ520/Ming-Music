@@ -1,4 +1,5 @@
-/// 搜索页：热搜榜 + 关键词搜索，结果整页可作队列播放。
+/// 搜索页：热搜榜 + 搜索建议 + 关键词搜索（对齐 Zephyr-Music：
+/// /search 为主接口、/search/suggest 实时建议），结果整页可作队列播放。
 library;
 
 import 'dart:async';
@@ -11,6 +12,7 @@ import '../../../core/constants/app_constants.dart';
 import '../data/netease_providers.dart';
 import '../../library/domain/track.dart';
 import '../../player/providers/player_providers.dart';
+import 'widgets/song_actions_sheet.dart';
 import 'widgets/song_tile.dart';
 
 class SearchPage extends ConsumerStatefulWidget {
@@ -30,6 +32,7 @@ class _SearchPageState extends ConsumerState<SearchPage> {
   bool _searching = false;
   String? _error;
   bool _showResults = false;
+  SearchSuggest? _suggest;
 
   @override
   void initState() {
@@ -52,19 +55,34 @@ class _SearchPageState extends ConsumerState<SearchPage> {
   void _onChanged(String value) {
     _debounce?.cancel();
     if (value.trim().isEmpty) {
-      setState(() => _showResults = false);
+      setState(() {
+        _showResults = false;
+        _suggest = null;
+      });
       return;
     }
-    _debounce = Timer(const Duration(milliseconds: 450), () {
-      _doSearch(value.trim());
+    // 搜索建议（实时，250ms 防抖，对齐 Zephyr useSearchSuggest）
+    _debounce = Timer(const Duration(milliseconds: 250), () async {
+      try {
+        final SearchSuggest s = await ref
+            .read(neteaseRepositoryProvider)
+            .searchSuggest(value.trim());
+        if (!mounted || value.trim() != _controller.text.trim()) return;
+        setState(() => _suggest = s);
+      } catch (_) {
+        if (mounted) setState(() => _suggest = null);
+      }
     });
   }
 
   Future<void> _doSearch(String keywords) async {
+    if (keywords.isEmpty) return;
+    _focus.unfocus();
     setState(() {
       _searching = true;
       _showResults = true;
       _error = null;
+      _suggest = null;
     });
     try {
       final List<Song> songs =
@@ -77,7 +95,7 @@ class _SearchPageState extends ConsumerState<SearchPage> {
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        _error = '搜索失败，请稍后重试';
+        _error = '搜索失败，请稍后重试（$e）';
         _searching = false;
       });
     }
@@ -126,14 +144,27 @@ class _SearchPageState extends ConsumerState<SearchPage> {
                     icon: const Icon(Icons.close_rounded, size: 19),
                     onPressed: () {
                       _controller.clear();
-                      setState(() => _showResults = false);
+                      setState(() {
+                        _showResults = false;
+                        _suggest = null;
+                      });
                       _focus.requestFocus();
                     },
                   ),
           ),
         ),
       ),
-      body: !_showResults ? const _HotList() : _buildResults(theme),
+      body: !_showResults
+          ? (_suggest != null && !_suggest!.isEmpty
+              ? _SuggestList(
+                  suggest: _suggest!,
+                  onTap: (String kw) {
+                    _controller.text = kw;
+                    _doSearch(kw);
+                  },
+                )
+              : _HotList(onWord: _doSearch))
+          : _buildResults(theme),
     );
   }
 
@@ -165,7 +196,40 @@ class _SearchPageState extends ConsumerState<SearchPage> {
       itemBuilder: (BuildContext context, int index) => SongTile(
         song: _results[index],
         onPlay: () => _playAt(index),
+        onMore: () => showSongActionsSheet(context, _results[index].toTrack()),
       ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------- 搜索建议
+
+class _SuggestList extends StatelessWidget {
+  const _SuggestList({required this.suggest, required this.onTap});
+
+  final SearchSuggest suggest;
+  final ValueChanged<String> onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final List<String> keywords = <String>[
+      ...suggest.keywords,
+      ...suggest.artists.map((String a) => a),
+    ];
+    return ListView(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      children: <Widget>[
+        for (final String kw in keywords)
+          ListTile(
+            leading: const Icon(Icons.search_rounded, size: 20),
+            title: Text(kw,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontSize: 14.5)),
+            dense: true,
+            onTap: () => onTap(kw),
+          ),
+      ],
     );
   }
 }
@@ -173,7 +237,10 @@ class _SearchPageState extends ConsumerState<SearchPage> {
 // ---------------------------------------------------------------- 热搜榜
 
 class _HotList extends ConsumerWidget {
-  const _HotList();
+  const _HotList({required this.onWord});
+
+  /// 热搜词点击 → 原页直接搜索（不叠加路由栈）
+  final ValueChanged<String> onWord;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -204,11 +271,7 @@ class _HotList extends ConsumerWidget {
             final HotWord word = words[index];
             final bool top3 = index < 3;
             return InkWell(
-              onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(
-                builder: (BuildContext context) => SearchPage(
-                  initialKeyword: word.word,
-                ),
-              )),
+              onTap: () => onWord(word.word),
               child: Padding(
                 padding:
                     const EdgeInsets.symmetric(horizontal: 20, vertical: 11),
@@ -273,8 +336,12 @@ class _MessagePanel extends StatelessWidget {
         children: <Widget>[
           Icon(icon, size: 44, color: theme.colorScheme.onSurfaceVariant),
           const SizedBox(height: 10),
-          Text(message,
-              style: TextStyle(color: theme.colorScheme.onSurfaceVariant)),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 32),
+            child: Text(message,
+                textAlign: TextAlign.center,
+                style: TextStyle(color: theme.colorScheme.onSurfaceVariant)),
+          ),
           if (action != null) ...<Widget>[
             const SizedBox(height: 12),
             OutlinedButton(onPressed: action, child: const Text('重试')),

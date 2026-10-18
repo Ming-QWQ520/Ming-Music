@@ -22,7 +22,13 @@ import '../../providers/np_settings_providers.dart';
 import '../../providers/player_providers.dart';
 
 class PlayerBackground extends ConsumerWidget {
-  const PlayerBackground({super.key});
+  const PlayerBackground({super.key, this.blurFactor = 1, this.dimFactor = 1});
+
+  /// 入场动画系数（0→1）：随全屏播放页打开渐进模糊（Hero + 背景模糊动画）
+  final double blurFactor;
+
+  /// 入场动画系数（0→1）：随全屏播放页打开渐进压暗
+  final double dimFactor;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -35,11 +41,14 @@ class PlayerBackground extends ConsumerWidget {
     final double bgDim =
         ref.watch(npSettingsProvider.select((NpPlayerSettings s) => s.bgDim));
 
+    final double f = blurFactor.clamp(0.0, 1.0);
+    final double df = dimFactor.clamp(0.0, 1.0);
+
     final Widget child = switch (config.type) {
       BackgroundType.blurCover => _BlurCoverBackground(
           cover: track?.cover,
-          blurSigma: bgBlur.clamp(4, 40),
-          dim: bgDim / 100,
+          blurSigma: (bgBlur * f).clamp(0, 40),
+          dim: (bgDim / 100) * df,
         ),
       BackgroundType.gradient => _GradientBackground(
           preset: kGradientPresets[
@@ -47,7 +56,7 @@ class PlayerBackground extends ConsumerWidget {
         ),
       BackgroundType.image => _ImageBackground(
           path: config.imagePath,
-          dim: bgDim / 100,
+          dim: (bgDim / 100) * df,
         ),
     };
 
@@ -100,6 +109,7 @@ class _BlurCoverBackground extends StatelessWidget {
       fit: StackFit.expand,
       children: <Widget>[
         // 对源图做模糊（ImageFiltered），避免全屏 BackdropFilter 的 GPU 开销
+        // 入场时 sigma 从 0 渐入（blurFactor 驱动，见 PlayerBackground）
         ImageFiltered(
           imageFilter: ImageFilter.blur(sigmaX: blurSigma, sigmaY: blurSigma),
           child: Transform.scale(

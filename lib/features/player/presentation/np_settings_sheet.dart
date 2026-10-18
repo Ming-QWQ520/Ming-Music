@@ -120,13 +120,6 @@ class _DisplayPane extends ConsumerWidget {
               ref.read(npSettingsProvider.notifier).setDisplayMode(v),
         ),
         const _HintText('自适应：平板双列分栏，手机支持封面/歌词切换'),
-        _SwitchRow(
-          label: '隐藏控制栏',
-          hint: '仅保留进度条与手势操作，再次点击进度区可呼出',
-          value: cfg.hidePlayerControls,
-          onChanged: (bool v) =>
-              ref.read(npSettingsProvider.notifier).setHideControls(v),
-        ),
         const _GroupTitle('Mini 播放条'),
         _SegmentedRow<MiniPlayerStyle>(
           label: '样式',
@@ -140,17 +133,8 @@ class _DisplayPane extends ConsumerWidget {
           onChanged: (MiniPlayerStyle v) =>
               ref.read(npSettingsProvider.notifier).setMiniStyle(v),
         ),
-        const _HintText('无边框透明；四种样式的组件布局各不相同'),
-        const _GroupTitle('切换行为'),
-        const _HintText('单击封面/歌词区域切换视图；双击歌词行跳转播放进度'),
-        _SliderRow(
-          label: '跟随滚动速度',
-          value: (cfg.animationSpeed - 0.5) / 1.5,
-          display: '${cfg.animationSpeed.toStringAsFixed(2)}x',
-          onChanged: (double v) => ref.read(npSettingsProvider.notifier).update(
-              (NpPlayerSettings s) =>
-                  s.copyWith(animationSpeed: 0.5 + v * 1.5)),
-        ),
+        const _HintText(
+            '非极简样式嵌入底部导航栏中间；极简样式悬浮在导航栏上方'),
       ],
     );
   }
@@ -319,6 +303,20 @@ class _LyricsPane extends ConsumerWidget {
           value: cfg.showTranslation,
           onChanged: (bool v) =>
               ref.read(npSettingsProvider.notifier).setShowTranslation(v),
+        ),
+        _SwitchRow(
+          label: '高亮已播放歌词',
+          hint: '关：只高亮当前播放行/字；开：已唱部分保持高亮（经典卡拉OK）',
+          value: cfg.highlightPlayed,
+          onChanged: (bool v) =>
+              ref.read(npSettingsProvider.notifier).setHighlightPlayed(v),
+        ),
+        _SwitchRow(
+          label: '红心动效',
+          hint: '点击喜欢时播放心形迸发动画',
+          value: cfg.heartEffect,
+          onChanged: (bool v) =>
+              ref.read(npSettingsProvider.notifier).setHeartEffect(v),
         ),
         const _GroupTitle('效果'),
         _SliderRow(

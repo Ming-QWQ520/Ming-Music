@@ -5,15 +5,18 @@
 ///
 /// 附加自定义：缩放（coverScale）与投影（coverShadow）。
 ///
-/// 方形样式动态（需求）：
-///  - 播放时封面保持完整尺寸；
-///  - 暂停时缩小 10px（AnimatedScale 平滑过渡）。
+/// 方形样式动态（需求加大幅度）：
+///  - 播放时封面保持完整尺寸（scale 1.0）；
+///  - 暂停时明显缩小（scale 0.90，约 10% 幅度，AnimatedScale 平滑过渡）；
+///
+/// Hero（需求）：与 Mini 播放条同 tag —— 路由转场时封面从底部无缝放大。
 library;
 
 import 'package:flutter/material.dart';
 
 import '../../../../core/widgets/cover_image.dart';
 import '../../domain/np_settings.dart';
+import 'mini_player.dart' show heroTagOf;
 import 'vinyl_disc.dart';
 
 class CoverArtView extends StatelessWidget {
@@ -27,6 +30,7 @@ class CoverArtView extends StatelessWidget {
     this.shadow = true,
     this.squareRadius = false,
     this.onLongPress,
+    this.hero = true,
   });
 
   final NpCoverStyle style;
@@ -42,11 +46,14 @@ class CoverArtView extends StatelessWidget {
   /// 长按封面 → 全屏查看 + 保存（需求）
   final VoidCallback? onLongPress;
 
+  /// 是否包 Hero（列表轮播中同封面出现多份时无需关；默认开）
+  final bool hero;
+
   @override
   Widget build(BuildContext context) {
     final double s = size * scale.clamp(0.70, 1.20);
 
-    final Widget child = switch (style) {
+    Widget child = switch (style) {
       NpCoverStyle.vinyl => VinylDisc(
           cover: cover,
           playing: playing,
@@ -54,7 +61,7 @@ class CoverArtView extends StatelessWidget {
         ),
       NpCoverStyle.square => _FlatCover(
           cover: cover,
-          // 需求：播放时尺寸不变，暂停时缩小 10px
+          // 需求：播放时尺寸不变，暂停时明显缩小（幅度 10%）
           size: s * 0.92,
           radius: squareRadius ? s * 0.055 : 0,
           shadow: shadow,
@@ -69,6 +76,13 @@ class CoverArtView extends StatelessWidget {
           playing: playing,
         ),
     };
+
+    if (hero) {
+      child = Hero(
+        tag: heroTagOf(cover),
+        child: child,
+      );
+    }
 
     if (onLongPress == null) return child;
     return GestureDetector(
@@ -94,7 +108,7 @@ class _FlatCover extends StatelessWidget {
   final bool shadow;
   final bool playing;
 
-  /// 方形样式专属：暂停时缩小 10px
+  /// 方形样式专属：暂停时缩小（需求：加大幅度 → scale 0.90）
   final bool shrinkOnPause;
 
   @override
@@ -126,10 +140,10 @@ class _FlatCover extends StatelessWidget {
     );
 
     if (!shrinkOnPause) return content;
-    // 暂停缩小 10px：缩放比例 = (size - 10) / size，AnimatedScale 平滑过渡
+    // 需求（加大幅度）：播放 scale 1.0 ↔ 暂停 scale 0.90（原 10px 固定值太小）
     return AnimatedScale(
-      scale: playing ? 1.0 : (size - 10) / size,
-      duration: const Duration(milliseconds: 280),
+      scale: playing ? 1.0 : 0.90,
+      duration: const Duration(milliseconds: 300),
       curve: Curves.easeOutCubic,
       child: content,
     );

@@ -45,6 +45,13 @@ class CoverImage extends StatefulWidget {
   /// 按字节嗅探图片 MIME（保存至相册需要）
   static String sniffMime(Uint8List bytes) => _CoverImageState.sniffMime(bytes);
 
+  /// 封面磁盘缓存命中路径（供通知栏 artUri 使用：直接指向本地缓存文件，
+  /// 避免系统 MediaNotification 拉取网易 CDN 403）。
+  /// 返回 null 表示尚未缓存（调用方可回退网络 URL）。
+  static Future<File?> cachedFileFor(String? src,
+          {CoverSize size = CoverSize.small}) =>
+      _CoverImageState.cachedFileFor(src, size: size);
+
   @override
   State<CoverImage> createState() => _CoverImageState();
 }
@@ -89,6 +96,24 @@ class _CoverImageState extends State<CoverImage> {
     } else if (mounted) {
       setState(() => _failed = true);
     }
+  }
+
+  /// 封面磁盘缓存命中路径（见 CoverImage.cachedFileFor）
+  static Future<File?> cachedFileFor(String? src,
+      {CoverSize size = CoverSize.small}) async {
+    if (src == null || src.isEmpty || !src.startsWith('http')) return null;
+    try {
+      final Directory dir = await _cacheDir();
+      final File file = File('${dir.path}/${_fileName(src, size)}');
+      if (file.existsSync() && file.lengthSync() > 0) return file;
+      // 未命中：主动触发一次下载（异步等待），保证通知栏封面可用
+      final Uint8List? bytes = await _fetchBytes(src, size);
+      if (bytes != null) {
+        final File f2 = File('${dir.path}/${_fileName(src, size)}');
+        if (f2.existsSync()) return f2;
+      }
+    } catch (_) {}
+    return null;
   }
 
   static Future<Directory> _cacheDir() async {
