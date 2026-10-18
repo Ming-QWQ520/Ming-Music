@@ -6,6 +6,8 @@ import 'dart:io';
 
 import 'package:flutter/services.dart';
 
+import '../widgets/cover_image.dart';
+
 class PlatformActions {
   PlatformActions._();
 
@@ -122,13 +124,15 @@ class PlatformActions {
     return 'audio/mpeg';
   }
 
-  /// 下载网络文件字节（简单重试 1 次）
+  /// 下载网络文件字节（简单重试 1 次）。
+  /// 携带浏览器 UA：网易 CDN 对 Dart 默认 UA 返回 403（与封面同理）
   static Future<Uint8List?> downloadBytes(String url) async {
     for (int attempt = 0; attempt < 2; attempt++) {
       try {
         final HttpClient client = HttpClient()
           ..connectionTimeout = const Duration(seconds: 15);
         final HttpClientRequest req = await client.getUrl(Uri.parse(url));
+        req.headers.set(HttpHeaders.userAgentHeader, CoverImage.kImageUserAgent);
         final HttpClientResponse resp = await req.close().timeout(
               const Duration(seconds: 60),
             );

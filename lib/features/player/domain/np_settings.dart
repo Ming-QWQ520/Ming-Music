@@ -56,12 +56,11 @@ extension MiniPlayerStyleX on MiniPlayerStyle {
       };
 }
 
-/// 封面样式
-enum NpCoverStyle { vinyl, square, circle }
+/// 封面样式（需求：去除黑胶样式，仅保留方形/圆形）
+enum NpCoverStyle { square, circle }
 
 extension NpCoverStyleX on NpCoverStyle {
   String get label => switch (this) {
-        NpCoverStyle.vinyl => '黑胶唱片',
         NpCoverStyle.square => '圆角方形',
         NpCoverStyle.circle => '圆形',
       };
@@ -104,7 +103,7 @@ String stripButtonLabel(String id) => switch (id) {
 class NpPlayerSettings {
   const NpPlayerSettings({
     this.displayMode = NpDisplayMode.both,
-    this.coverStyle = NpCoverStyle.vinyl,
+    this.coverStyle = NpCoverStyle.square,
     this.coverScale = 1.0,
     this.coverShadow = true,
     this.squareCoverRadius = false,
@@ -120,6 +119,7 @@ class NpPlayerSettings {
     this.yrcUnplayed = const Color(0x66FFFFFF),
     this.highlightPlayed = false,
     this.heartEffect = true,
+    this.showMvBadge = true,
     this.miniStyle = MiniPlayerStyle.classic,
     this.stripButtons = kStripButtonDefaults,
   });
@@ -190,6 +190,9 @@ class NpPlayerSettings {
   /// 红心动效（喜欢时心形迸发动画）
   final bool heartEffect;
 
+  /// MV 徽标开关（需求：播放页歌名旁 MV 胶囊可开关显示，默认开启）
+  final bool showMvBadge;
+
   /// 播放页底部功能条按钮（有序 id 列表，来自 kStripButtonIds）
   final List<String> stripButtons;
 
@@ -211,6 +214,7 @@ class NpPlayerSettings {
     Color? yrcUnplayed,
     bool? highlightPlayed,
     bool? heartEffect,
+    bool? showMvBadge,
     MiniPlayerStyle? miniStyle,
     List<String>? stripButtons,
   }) {
@@ -232,6 +236,7 @@ class NpPlayerSettings {
       yrcUnplayed: yrcUnplayed ?? this.yrcUnplayed,
       highlightPlayed: highlightPlayed ?? this.highlightPlayed,
       heartEffect: heartEffect ?? this.heartEffect,
+      showMvBadge: showMvBadge ?? this.showMvBadge,
       miniStyle: miniStyle ?? this.miniStyle,
       stripButtons: stripButtons ?? this.stripButtons,
     );
@@ -256,6 +261,7 @@ class NpPlayerSettings {
         'yrcUnplayed': yrcUnplayed.toARGB32(),
         'highlightPlayed': highlightPlayed,
         'heartEffect': heartEffect,
+        'showMvBadge': showMvBadge,
         'miniStyle': miniStyle.name,
         'stripButtons': stripButtons,
       };
@@ -279,10 +285,12 @@ class NpPlayerSettings {
         (NpDisplayMode m) => m.name == map['displayMode'],
         orElse: () => NpDisplayMode.both,
       ),
-      coverStyle: NpCoverStyle.values.firstWhere(
-        (NpCoverStyle s) => s.name == map['coverStyle'],
-        orElse: () => NpCoverStyle.vinyl,
-      ),
+      // 版本迁移：黑胶样式已移除（需求），历史值回退方形
+      coverStyle: switch (map['coverStyle']) {
+        'circle' => NpCoverStyle.circle,
+        'square' => NpCoverStyle.square,
+        _ => NpCoverStyle.square,
+      },
       coverScale: clampD(map['coverScale'], 0.70, 1.20, defaults.coverScale),
       coverShadow: map['coverShadow'] is bool
           ? map['coverShadow']! as bool
@@ -310,6 +318,9 @@ class NpPlayerSettings {
       heartEffect: map['heartEffect'] is bool
           ? map['heartEffect']! as bool
           : defaults.heartEffect,
+      showMvBadge: map['showMvBadge'] is bool
+          ? map['showMvBadge']! as bool
+          : defaults.showMvBadge,
       miniStyle: MiniPlayerStyle.values.firstWhere(
         (MiniPlayerStyle s) => s.name == map['miniStyle'],
         orElse: () => defaults.miniStyle,

@@ -97,6 +97,8 @@ class NpSettingsNotifier extends Notifier<NpPlayerSettings> {
 
   void setHeartEffect(bool on) => _commit(state.copyWith(heartEffect: on));
 
+  void setShowMvBadge(bool on) => _commit(state.copyWith(showMvBadge: on));
+
   /// 底部功能条按钮显隐（保持 kStripButtonIds 中的原始顺序）
   void setStripButtons(List<String> enabled) {
     final List<String> ordered = <String>[

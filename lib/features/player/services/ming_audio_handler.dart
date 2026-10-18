@@ -27,6 +27,9 @@ class MingAudioHandler extends BaseAudioHandler with SeekHandler {
   MingAudioHandler({ja.AudioPlayer? player})
       : _player = player ?? ja.AudioPlayer() {
     _bindEventStreams();
+    // 需求：通知栏始终显示控制栏 —— 服务启动即广播一次完整状态，
+    // 避免首次播放事件到达前通知以空 controls 渲染（部分 ROM 会隐藏按钮）。
+    _broadcastState(_player.playbackEvent);
   }
 
   final ja.AudioPlayer _player;

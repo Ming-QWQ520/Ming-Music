@@ -117,6 +117,9 @@ class AuthNotifier extends Notifier<AuthState> {
   String _qrKey = '';
   bool _disposed = false;
 
+  /// 点赞进行中标记（避免 refreshLikeList 覆盖乐观更新）
+  bool _likeToggling = false;
+
   @override
   AuthState build() {
     ref.onDispose(() {
@@ -377,22 +380,49 @@ class AuthNotifier extends Notifier<AuthState> {
   bool isLiked(int? neteaseId) =>
       neteaseId != null && state.likedIds.contains(neteaseId);
 
+  /// 刷新喜欢列表（切歌时节流触发，保障播放页红心点亮）。
+  /// 点赞进行中或未登录时跳过；服务端拉取失败静默（保留本地状态）。
+  Future<void> refreshLikeList() async {
+    final int? uid = state.profile?.userId;
+    if (uid == null || !state.loggedIn || _likeToggling) return;
+    try {
+      final List<int> ids = await _repo.likeList(uid);
+      if (_disposed || _likeToggling) return;
+      state = state.copyWith(likedIds: Set<int>.of(ids));
+    } catch (_) {
+      // 静默：保留本地喜欢状态
+    }
+  }
+
   /// 喜欢 / 取消喜欢（乐观更新 + 失败回滚）。返回错误文案（null 成功）
   Future<String?> toggleLikeSong(int neteaseId) async {
     if (!state.loggedIn) return '请先登录网易云音乐';
-    final bool wasLiked = state.likedIds.contains(neteaseId);
-    final Set<int> next = Set<int>.of(state.likedIds);
-    if (wasLiked) {
-      next.remove(neteaseId);
-    } else {
-      next.add(neteaseId);
-    }
-    state = state.copyWith(likedIds: next);
+    _likeToggling = true;
     try {
-      final bool ok = await _repo.likeSong(neteaseId, like: !wasLiked);
-      if (!ok) {
-        state = state.copyWith(likedIds: Set<int>.of(state.likedIds));
-        // 回滚
+      final bool wasLiked = state.likedIds.contains(neteaseId);
+      final Set<int> next = Set<int>.of(state.likedIds);
+      if (wasLiked) {
+        next.remove(neteaseId);
+      } else {
+        next.add(neteaseId);
+      }
+      state = state.copyWith(likedIds: next);
+      try {
+        final bool ok = await _repo.likeSong(neteaseId, like: !wasLiked);
+        if (!ok) {
+          state = state.copyWith(likedIds: Set<int>.of(state.likedIds));
+          // 回滚
+          final Set<int> rollback = Set<int>.of(state.likedIds);
+          if (wasLiked) {
+            rollback.add(neteaseId);
+          } else {
+            rollback.remove(neteaseId);
+          }
+          state = state.copyWith(likedIds: rollback);
+          return '操作失败，请稍后重试';
+        }
+        return null;
+      } catch (e) {
         final Set<int> rollback = Set<int>.of(state.likedIds);
         if (wasLiked) {
           rollback.add(neteaseId);
@@ -400,18 +430,10 @@ class AuthNotifier extends Notifier<AuthState> {
           rollback.remove(neteaseId);
         }
         state = state.copyWith(likedIds: rollback);
-        return '操作失败，请稍后重试';
+        return '网络异常：$e';
       }
-      return null;
-    } catch (e) {
-      final Set<int> rollback = Set<int>.of(state.likedIds);
-      if (wasLiked) {
-        rollback.add(neteaseId);
-      } else {
-        rollback.remove(neteaseId);
-      }
-      state = state.copyWith(likedIds: rollback);
-      return '网络异常：$e';
+    } finally {
+      _likeToggling = false;
     }
   }
 }

@@ -510,7 +510,7 @@ class _HistoryPane extends StatelessWidget {
 /// 当前播放行（需求布局，从左到右）：
 /// 抖动条纹（当前曲才显示）→ VIP 标识（是才显示）→ 歌名 - 歌手
 /// → 移除键（x）+ 拖动按键；
-/// 手势：右滑删除出队列；左滑添加至歌单（底部弹出菜单）。
+/// 手势（需求）：左滑 = 删除出队列；右滑 = 添加至歌单（底部弹出菜单）。
 class _QueueRow extends ConsumerWidget {
   const _QueueRow({
     super.key,
@@ -623,27 +623,30 @@ class _QueueRow extends ConsumerWidget {
       ),
     );
 
-    // 手势：右滑 = 移除出队列；左滑 = 添加至歌单（需求）
+    // 手势（需求）：左滑 = 移除出队列；右滑 = 添加至歌单
+    // Dismissible 语义：secondaryBackground 对应 endToStart（左滑）；
+    // background 对应 startToEnd（右滑）。两种滑动都不自行移除条目
+    // （删除由 provider 重建驱动，添加只弹菜单）。
     return Dismissible(
       key: ValueKey<String>('swipe_${track.id}_$index'),
       confirmDismiss: (DismissDirection dir) async {
-        if (dir == DismissDirection.startToEnd) {
-          onRemove();
+        if (dir == DismissDirection.endToStart) {
+          onRemove(); // 左滑 → 删除
           return false; // 状态由 removeAt 驱动，动画交给列表重建
         }
-        onAddTo();
+        onAddTo(); // 右滑 → 添加至歌单
         return false;
       },
       background: _SwipeBg(
-        color: AppConstants.brandColor,
-        icon: Icons.remove_circle_outline_rounded,
-        label: '移除',
-        alignRight: false,
-      ),
-      secondaryBackground: _SwipeBg(
         color: const Color(0xFF3D7BFF),
         icon: Icons.playlist_add_rounded,
         label: '添加到歌单',
+        alignRight: false,
+      ),
+      secondaryBackground: _SwipeBg(
+        color: AppConstants.brandColor,
+        icon: Icons.remove_circle_outline_rounded,
+        label: '删除',
         alignRight: true,
       ),
       child: row,

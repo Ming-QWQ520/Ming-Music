@@ -1,9 +1,14 @@
-/// 我的页（仿网易云 UI）：
-///  - 用户卡：未登录 → 登录引导卡；已登录 → 头像/昵称/VIP/等级/签名 + 听歌数据；
-///  - 快捷入口（3 宫格）：我喜欢的音乐 / 本地音乐 / 音乐云盘；
-///  - 功能行：最近播放 / 听歌排行榜；
-///  - 创建的歌单 + 收藏的歌单（显示歌单封面，对齐网易云列表样式）；
-///  - 设置集成：播放页自定义 / 设置 / 退出登录。
+/// 我的页（仿 kgka_Music_hl LibraryPage 布局重写）：
+///
+///  - 顶栏：大标题「我的」+ 新建歌单 + 设置（kgka 顶栏动作）；
+///  - 用户资料头部：圆形头像 + 昵称 + 登录状态点（点击进入个人主页，对齐
+///    Zephyr ProfileView 的数据与 API）；
+///  - 2x2 功能宫格（kgka _LibraryQuickGrid）：我喜欢的音乐 / 最近播放 /
+///    本地音乐 / 音乐云盘，渐变图标块 + 按压缩放；
+///  - 功能行：听歌排行榜（对齐 kgka 折叠分组之外的入口行）；
+///  - 折叠分组：创建的歌单 / 收藏的歌单（AnimatedCrossFade，显示歌单封面，
+///    对齐需求：歌单需要显示歌单封面）；「我的云盘」折叠项；
+///  - 未登录 → 登录引导卡；校验失败 → 重试卡（对齐 Zephyr 容错策略）。
 library;
 
 import 'package:flutter/material.dart';
@@ -15,10 +20,10 @@ import '../../../core/api/netease_models.dart' show PlaylistMeta;
 import '../../../core/constants/app_constants.dart';
 import '../../../core/widgets/cover_image.dart';
 import '../../auth/data/netease_auth_repository.dart'
-    show NeteaseLevel, NeteaseProfile, NeteaseUserPlaylist;
+    show NeteaseUserPlaylist;
 import '../../auth/presentation/login_sheet.dart';
 import '../../auth/providers/auth_providers.dart';
-import '../../player/presentation/np_settings_sheet.dart';
+import '../../discover/data/netease_providers.dart';
 
 class MyMusicPage extends ConsumerStatefulWidget {
   const MyMusicPage({super.key});
@@ -28,8 +33,9 @@ class MyMusicPage extends ConsumerStatefulWidget {
 }
 
 class _MyMusicPageState extends ConsumerState<MyMusicPage> {
-  /// 用户歌单（登录后拉取；null = 未加载）
   List<NeteaseUserPlaylist>? _playlists;
+  bool _createdExpanded = true;
+  bool _collectedExpanded = true;
 
   @override
   void initState() {
@@ -53,8 +59,64 @@ class _MyMusicPageState extends ConsumerState<MyMusicPage> {
     }
   }
 
+  Future<void> _refresh() async {
+    await ref.read(authProvider.notifier).refreshExtras();
+    await _loadPlaylists();
+  }
+
+  Future<void> _openLogin(BuildContext context) async {
+    await showLoginSheet(context);
+    if (!mounted) return;
+    if (ref.read(authProvider).loggedIn) _loadPlaylists();
+  }
+
+  Future<void> _createPlaylist(BuildContext context) async {
+    final TextEditingController ctrl = TextEditingController();
+    final String? name = await showDialog<String>(
+      context: context,
+      builder: (BuildContext ctx) => AlertDialog(
+        title: const Text('新建歌单'),
+        content: TextField(
+          controller: ctrl,
+          autofocus: true,
+          maxLength: 40,
+          decoration: const InputDecoration(
+              hintText: '请输入歌单名称', counterText: ''),
+        ),
+        actions: <Widget>[
+          TextButton(
+              onPressed: () => Navigator.of(ctx).pop(), child: const Text('取消')),
+          FilledButton(
+            style: FilledButton.styleFrom(
+                backgroundColor: AppConstants.brandColor),
+            onPressed: () =>
+                Navigator.of(ctx).pop(ctrl.text.trim()),
+            child: const Text('创建'),
+          ),
+        ],
+      ),
+    );
+    if (name == null || name.isEmpty || !context.mounted) return;
+    try {
+      final int id =
+          await ref.read(neteaseRepositoryProvider).playlistCreate(name);
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('已创建歌单「$name」')));
+      _loadPlaylists();
+      if (id > 0) {
+        context.push('/playlist/$id?name=${Uri.encodeComponent(name)}');
+      }
+    } catch (e) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('创建失败：$e')));
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
     final AuthState auth = ref.watch(authProvider);
 
     return Scaffold(
@@ -62,92 +124,140 @@ class _MyMusicPageState extends ConsumerState<MyMusicPage> {
         titleSpacing: 20,
         title: const Text(
           '我的',
-          style: TextStyle(fontSize: 22, fontWeight: FontWeight.w700),
+          style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900),
         ),
         actions: <Widget>[
-          if (!auth.loggedIn)
-            Padding(
-              padding: const EdgeInsets.only(right: 16),
-              child: ActionChip(
-                backgroundColor: AppConstants.brandColor,
-                label: const Text('登录',
-                    style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 12.5,
-                        fontWeight: FontWeight.w600)),
-                onPressed: () => _openLogin(context),
-              ),
+          if (auth.loggedIn)
+            IconButton(
+              tooltip: '新建歌单',
+              icon: const Icon(Icons.add_rounded, size: 26),
+              onPressed: () => _createPlaylist(context),
             ),
+          IconButton(
+            tooltip: '设置',
+            icon: const Icon(Icons.settings_rounded, size: 23),
+            onPressed: () => context.push('/settings'),
+          ),
+          const SizedBox(width: 8),
         ],
       ),
       body: RefreshIndicator(
         color: AppConstants.brandColor,
-        onRefresh: () async {
-          await ref.read(authProvider.notifier).refreshExtras();
-          await _loadPlaylists();
-        },
+        onRefresh: _refresh,
         child: ListView(
           physics: const AlwaysScrollableScrollPhysics(),
-          padding: const EdgeInsets.only(top: 4, bottom: 28),
+          padding: const EdgeInsets.only(top: 4, bottom: 120),
           children: <Widget>[
-            _UserCard(onLogin: () => _openLogin(context)),
-            _QuickEntries(loggedIn: auth.loggedIn),
-            const _FeatureRows(),
-            _PlaylistSections(
-              playlists: auth.loggedIn ? _playlists : null,
-              myUid: auth.profile?.userId ?? 0,
-              onReload: _loadPlaylists,
+            _ProfileHeader(
+              loggedIn: auth.loggedIn,
+              statusCheckFailed: auth.statusCheckFailed,
+              likesCount: auth.loggedIn ? auth.likedIds.length : null,
+              onRetry: () => ref.read(authProvider.notifier).recheckLogin(),
+              onLogin: () => _openLogin(context),
             ),
-            const _SettingsGroup(),
+            const SizedBox(height: 6),
+            // 2x2 功能宫格（kgka）
+            const _QuickGrid(),
+            const SizedBox(height: 10),
+            // 功能行：听歌排行榜
+            const _RankRow(),
+            // 折叠分组：创建 / 收藏的歌单 + 云盘
+            if (auth.loggedIn) ...<Widget>[
+              const SizedBox(height: 8),
+              _PlaylistSection(
+                header: '创建的歌单',
+                count: _createdList.length,
+                playlists: _createdList,
+                expanded: _createdExpanded,
+                onToggle: () => setState(
+                    () => _createdExpanded = !_createdExpanded),
+              ),
+              if (_collectedList.isNotEmpty) ...<Widget>[
+                const SizedBox(height: 4),
+                _PlaylistSection(
+                  header: '收藏的歌单',
+                  count: _collectedList.length,
+                  playlists: _collectedList,
+                  expanded: _collectedExpanded,
+                  onToggle: () => setState(
+                      () => _collectedExpanded = !_collectedExpanded),
+                ),
+              ],
+              const _CloudDriveItem(),
+            ],
+            const SizedBox(height: 12),
+            Center(
+              child: Text(
+                '下拉可刷新歌单列表',
+                style: TextStyle(
+                    fontSize: 11, color: theme.colorScheme.onSurfaceVariant),
+              ),
+            ),
           ],
         ),
       ),
     );
   }
 
-  Future<void> _openLogin(BuildContext context) async {
-    await showLoginSheet(context);
-    if (!mounted) return;
-    // 登录成功后刷新歌单
-    final AuthState auth = ref.read(authProvider);
-    if (auth.loggedIn) _loadPlaylists();
+  List<NeteaseUserPlaylist> get _createdList {
+    final int myUid = ref.read(authProvider).profile?.userId ?? 0;
+    return (_playlists ?? const <NeteaseUserPlaylist>[])
+        .where((NeteaseUserPlaylist p) => p.creatorUserId == myUid)
+        .toList(growable: false);
+  }
+
+  List<NeteaseUserPlaylist> get _collectedList {
+    final int myUid = ref.read(authProvider).profile?.userId ?? 0;
+    return (_playlists ?? const <NeteaseUserPlaylist>[])
+        .where((NeteaseUserPlaylist p) =>
+            p.creatorUserId != myUid && p.creatorUserId != 0)
+        .toList(growable: false);
   }
 }
 
-// ---------------------------------------------------------------- 用户卡
+// ---------------------------------------------------------------- 资料头部
 
-class _UserCard extends ConsumerWidget {
-  const _UserCard({required this.onLogin});
+/// 用户资料头部（kgka _UserProfileHeader）：54 圆头像（白描边）+ 昵称 +
+/// 登录状态点；点击进入个人主页（Zephyr 对齐）。
+class _ProfileHeader extends ConsumerWidget {
+  const _ProfileHeader({
+    required this.loggedIn,
+    required this.statusCheckFailed,
+    required this.onLogin,
+    required this.onRetry,
+    this.likesCount,
+  });
 
+  final bool loggedIn;
+  final bool statusCheckFailed;
   final VoidCallback onLogin;
+  final VoidCallback onRetry;
+  final int? likesCount;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final AuthState auth = ref.watch(authProvider);
     final ThemeData theme = Theme.of(context);
+    final AuthState auth = ref.watch(authProvider);
 
-    if (auth.statusCheckFailed) {
-      // 本地有登录凭证但 /login/status 校验失败（服务端抖动）：
-      // 不清 cookie，展示重试卡（对齐 Zephyr 的容错策略）
+    if (statusCheckFailed) {
       return Padding(
         padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
         child: Material(
-          color: theme.colorScheme.surfaceContainerHighest
-              .withValues(alpha: 0.55),
+          color:
+              theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.55),
           borderRadius: BorderRadius.circular(18),
           child: InkWell(
-            onTap: () => ref.read(authProvider.notifier).recheckLogin(),
+            onTap: onRetry,
             borderRadius: BorderRadius.circular(18),
             child: Padding(
-              padding: const EdgeInsets.all(18),
+              padding: const EdgeInsets.all(16),
               child: Row(
                 children: <Widget>[
-                  CircleAvatar(
-                    radius: 30,
-                    backgroundColor:
-                        theme.colorScheme.surfaceContainerHighest,
-                    child: const Icon(Icons.cloud_off_rounded,
-                        size: 30, color: Colors.white38),
+                  const CircleAvatar(
+                    radius: 27,
+                    backgroundColor: Colors.white12,
+                    child: Icon(Icons.cloud_off_rounded,
+                        size: 28, color: Colors.white38),
                   ),
                   const SizedBox(width: 14),
                   const Expanded(
@@ -158,15 +268,13 @@ class _UserCard extends ConsumerWidget {
                             style: TextStyle(
                                 fontSize: 16, fontWeight: FontWeight.w700)),
                         SizedBox(height: 4),
-                        Text(
-                          '网络异常或服务波动，登录信息已保留，点击重试',
-                          style: TextStyle(fontSize: 12.5),
-                        ),
+                        Text('网络异常或服务波动，登录信息已保留，点击重试',
+                            style: TextStyle(fontSize: 12.5)),
                       ],
                     ),
                   ),
                   Icon(Icons.refresh_rounded,
-                      size: 26, color: theme.colorScheme.onSurfaceVariant),
+                      size: 24, color: theme.colorScheme.onSurfaceVariant),
                 ],
               ),
             ),
@@ -175,340 +283,255 @@ class _UserCard extends ConsumerWidget {
       );
     }
 
-    if (!auth.loggedIn) {
-      // 未登录：引导卡
-      return Padding(
-        padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
-        child: Material(
-          color:
-              theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.55),
-          borderRadius: BorderRadius.circular(18),
-          child: InkWell(
-            onTap: onLogin,
-            borderRadius: BorderRadius.circular(18),
-            child: Padding(
-              padding: const EdgeInsets.all(18),
-              child: Row(
-                children: <Widget>[
-                  CircleAvatar(
-                    radius: 30,
-                    backgroundColor: theme.colorScheme.surfaceContainerHighest,
-                    child: const Icon(Icons.person_rounded,
-                        size: 34, color: Colors.white38),
-                  ),
-                  const SizedBox(width: 14),
-                  const Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: <Widget>[
-                        Text('未登录',
-                            style: TextStyle(
-                                fontSize: 16.5, fontWeight: FontWeight.w700)),
-                        SizedBox(height: 4),
-                        Text(
-                          '登录后可使用喜欢歌曲、我的歌单、音乐云盘',
-                          style: TextStyle(fontSize: 12.5),
-                        ),
-                      ],
-                    ),
-                  ),
-                  FilledButton(
-                    style: FilledButton.styleFrom(
-                      backgroundColor: AppConstants.brandColor,
-                      padding: const EdgeInsets.symmetric(horizontal: 18),
-                    ),
-                    onPressed: onLogin,
-                    child: const Text('立即登录',
-                        style: TextStyle(
-                            fontSize: 13, fontWeight: FontWeight.w600)),
-                  ),
-                ],
-              ),
-            ),
+    final Widget avatar = Container(
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        border: Border.all(
+            color: Colors.white.withValues(alpha: 0.85), width: 1.8),
+        boxShadow: <BoxShadow>[
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.28),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
           ),
-        ),
-      );
-    }
-
-    // 已登录：用户信息卡
-    final NeteaseProfile? profile = auth.profile;
-    final NeteaseLevel? level = auth.level;
-    final String listenText = _formatListen(auth.listenSeconds);
-
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
-      child: Material(
-        color:
-            theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.55),
-        borderRadius: BorderRadius.circular(18),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(18),
-          onTap: () => context.push('/listen-rank'),
-          child: Padding(
-            padding: const EdgeInsets.all(18),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                Row(
-                  children: <Widget>[
-                    _Avatar(url: profile?.avatarUrl),
-                    const SizedBox(width: 14),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: <Widget>[
-                          Row(
-                            children: <Widget>[
-                              Flexible(
-                                child: Text(
-                                  profile?.nickname ?? '网易云用户',
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(
-                                      fontSize: 17,
-                                      fontWeight: FontWeight.w700),
-                                ),
-                              ),
-                              // VIP：优先 /vip/info/v2（含黑胶等级），回退 profile.vipType
-                              if ((auth.vip?.isVip ?? false) ||
-                                  (profile?.isVip ?? false)) ...<Widget>[
-                                const SizedBox(width: 6),
-                                Container(
-                                  padding: const EdgeInsets.symmetric(
-                                      horizontal: 5, vertical: 1.5),
-                                  decoration: BoxDecoration(
-                                    gradient: const LinearGradient(
-                                        colors: <Color>[
-                                          Color(0xFFB8873B),
-                                          Color(0xFFE8B45C),
-                                        ]),
-                                    borderRadius: BorderRadius.circular(4),
-                                  ),
-                                  child: Text(
-                                    (auth.vip?.redVipLevel ?? 0) > 0
-                                        ? 'VIP·${auth.vip!.redVipLevel}'
-                                        : 'VIP',
-                                    style: const TextStyle(
-                                        color: Colors.white,
-                                        fontSize: 10,
-                                        fontWeight: FontWeight.w800),
-                                  ),
-                                ),
-                              ],
-                            ],
-                          ),
-                          if (level != null) ...<Widget>[
-                            const SizedBox(height: 5),
-                            Row(
-                              children: <Widget>[
-                                Container(
-                                  padding: const EdgeInsets.symmetric(
-                                      horizontal: 6, vertical: 1),
-                                  decoration: BoxDecoration(
-                                    border: Border.all(
-                                        color: theme
-                                            .colorScheme.onSurfaceVariant
-                                            .withValues(alpha: 0.4)),
-                                    borderRadius: BorderRadius.circular(8),
-                                  ),
-                                  child: Text(
-                                    'Lv.${level.level}',
-                                    style: TextStyle(
-                                      fontSize: 10.5,
-                                      fontWeight: FontWeight.w700,
-                                      color:
-                                          theme.colorScheme.onSurfaceVariant,
-                                    ),
-                                  ),
-                                ),
-                                const SizedBox(width: 8),
-                                Expanded(
-                                  child: ClipRRect(
-                                    borderRadius: BorderRadius.circular(4),
-                                    child: LinearProgressIndicator(
-                                      value: (level.progress / 100)
-                                          .clamp(0.0, 1.0),
-                                      minHeight: 4,
-                                      backgroundColor: theme
-                                          .colorScheme.surfaceContainerHighest,
-                                      color: AppConstants.brandColor,
-                                    ),
-                                  ),
-                                ),
-                                const SizedBox(width: 8),
-                                Text('${level.progress}%',
-                                    style: TextStyle(
-                                        fontSize: 10.5,
-                                        color: theme
-                                            .colorScheme.onSurfaceVariant)),
-                              ],
-                            ),
-                          ],
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-                if ((profile?.signature ?? '').isNotEmpty) ...<Widget>[
-                  const SizedBox(height: 10),
-                  Text(
-                    profile!.signature,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: theme.colorScheme.onSurfaceVariant,
-                    ),
-                  ),
-                ],
-                if (listenText.isNotEmpty) ...<Widget>[
-                  const SizedBox(height: 10),
-                  Row(
-                    children: <Widget>[
-                      Icon(Icons.headphones_rounded,
-                          size: 14, color: theme.colorScheme.onSurfaceVariant),
-                      const SizedBox(width: 5),
-                      Text('累计听歌 $listenText',
-                          style: TextStyle(
-                              fontSize: 12,
-                              color: theme.colorScheme.onSurfaceVariant)),
-                    ],
-                  ),
-                ],
-              ],
-            ),
-          ),
+        ],
+      ),
+      child: ClipOval(
+        child: CoverImage(
+          src: loggedIn ? auth.profile?.avatarUrl : null,
+          size: 54,
+          radius: 27,
         ),
       ),
     );
-  }
 
-  static String _formatListen(int seconds) {
-    if (seconds <= 0) return '';
-    final int h = seconds ~/ 3600;
-    final int m = (seconds % 3600) ~/ 60;
-    if (h > 0) return '$h小时$m分钟';
-    return '$m分钟';
-  }
-}
-
-class _Avatar extends StatelessWidget {
-  const _Avatar({required this.url});
-
-  final String? url;
-
-  @override
-  Widget build(BuildContext context) {
-    if (url == null || url!.isEmpty) {
-      return CircleAvatar(
-        radius: 30,
-        backgroundColor: Theme.of(context).colorScheme.surfaceContainerHighest,
-        child:
-            const Icon(Icons.person_rounded, size: 34, color: Colors.white38),
-      );
-    }
-    return ClipOval(
-      child: CoverImage(src: url, size: 60, radius: 30),
+    final Widget nameCol = Expanded(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Text(
+            loggedIn ? (auth.profile?.nickname ?? '网易云用户') : '未登录',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+                fontSize: 20, fontWeight: FontWeight.w900, letterSpacing: -0.3),
+          ),
+          const SizedBox(height: 4),
+          Row(
+            children: <Widget>[
+              Container(
+                width: 7.5,
+                height: 7.5,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: loggedIn
+                      ? const Color(0xFF4CAF50)
+                      : Colors.white.withValues(alpha: 0.45),
+                ),
+              ),
+              const SizedBox(width: 6),
+              Text(
+                statusCheckFailed
+                    ? '校验中…'
+                    : (loggedIn ? '已登录网易云音乐' : '点击登录网易云音乐'),
+                style: TextStyle(
+                    fontSize: 12, color: theme.colorScheme.onSurfaceVariant),
+              ),
+            ],
+          ),
+        ],
+      ),
     );
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(16),
+        onTap: loggedIn
+            ? () => context.push('/profile')
+            : onLogin,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 8),
+          child: Row(
+            children: <Widget>[
+              avatar,
+              const SizedBox(width: 14),
+              nameCol,
+              if (loggedIn && likesCount != null)
+                Text('$likesCount首喜欢',
+                    style: TextStyle(
+                        fontSize: 11.5,
+                        color: theme.colorScheme.onSurfaceVariant)),
+              const SizedBox(width: 6),
+              Icon(
+                loggedIn
+                    ? Icons.chevron_right_rounded
+                    : Icons.login_rounded,
+                size: 22,
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ],
+          ),
+        ),
+      ),
+    ).animate(delay: 30.ms).fadeIn(duration: 240.ms).slideY(begin: 0.05, end: 0);
   }
 }
 
-// ---------------------------------------------------------------- 快捷入口
+// ---------------------------------------------------------------- 功能宫格
 
-/// 三宫格（对齐网易云「我的」页快捷入口）：喜欢的音乐 / 本地音乐 / 音乐云盘
-class _QuickEntries extends ConsumerWidget {
-  const _QuickEntries({required this.loggedIn});
+/// 2x2 功能宫格（kgka _LibraryQuickGrid）：渐变图标块 + 标题 + 副标题，
+/// 按压 AnimatedScale(0.95)。
+class _QuickGrid extends ConsumerWidget {
+  const _QuickGrid();
 
-  final bool loggedIn;
+  static const List<List<Color>> _gradients = <List<Color>>[
+    <Color>[Color(0xFFFF85A1), Color(0xFFFF3366)], // 喜欢：红粉
+    <Color>[Color(0xFF70B9FE), Color(0xFF2C7BF6)], // 最近：蓝
+    <Color>[Color(0xFF67E3C8), Color(0xFF00BFA5)], // 本地：青
+    <Color>[Color(0xFF9BE7A4), Color(0xFF4ADE80)], // 云盘：绿
+  ];
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final AuthState auth = ref.watch(authProvider);
-    final String likeCount =
-        auth.loggedIn ? '${auth.likedIds.length}' : '—';
+    final String likeSub = auth.loggedIn ? '${auth.likedIds.length} 首' : '登录后可用';
 
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
-      child: Row(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+      child: Column(
         children: <Widget>[
-          Expanded(
-            child: _EntryCard(
-              icon: Icons.favorite_rounded,
-              iconColor: AppConstants.brandColor,
-              title: '我喜欢的音乐',
-              subtitle: loggedIn ? '$likeCount 首' : '登录后可用',
-              onTap: () => context.push('/liked-songs'),
-            ),
+          Row(
+            children: <Widget>[
+              Expanded(
+                child: _QuickHubTile(
+                  icon: Icons.favorite_rounded,
+                  gradient: _gradients[0],
+                  title: '喜欢的音乐',
+                  subtitle: likeSub,
+                  onTap: () => context.push('/liked-songs'),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: _QuickHubTile(
+                  icon: Icons.history_rounded,
+                  gradient: _gradients[1],
+                  title: '最近播放',
+                  subtitle: '刚刚听过',
+                  onTap: () => context.push('/recent-songs'),
+                ),
+              ),
+            ],
           ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: _EntryCard(
-              icon: Icons.library_music_rounded,
-              iconColor: const Color(0xFF38BDF8),
-              title: '本地音乐',
-              subtitle: '扫描设备音频',
-              onTap: () => context.push('/local-music'),
-            ),
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: _EntryCard(
-              icon: Icons.cloud_rounded,
-              iconColor: const Color(0xFF4ADE80),
-              title: '音乐云盘',
-              subtitle: '登录后可用',
-              onTap: () => context.push('/cloud-drive'),
-            ),
+          const SizedBox(height: 10),
+          Row(
+            children: <Widget>[
+              Expanded(
+                child: _QuickHubTile(
+                  icon: Icons.library_music_rounded,
+                  gradient: _gradients[2],
+                  title: '本地音乐',
+                  subtitle: '扫描设备音频',
+                  onTap: () => context.push('/local-music'),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: _QuickHubTile(
+                  icon: Icons.cloud_rounded,
+                  gradient: _gradients[3],
+                  title: '音乐云盘',
+                  subtitle: '登录后可用',
+                  onTap: () => context.push('/cloud-drive'),
+                ),
+              ),
+            ],
           ),
         ],
       ),
-    ).animate(delay: 40.ms).fadeIn(duration: 260.ms).slideY(begin: 0.06, end: 0);
+    ).animate(delay: 70.ms).fadeIn(duration: 260.ms).slideY(begin: 0.05, end: 0);
   }
 }
 
-class _EntryCard extends StatelessWidget {
-  const _EntryCard({
+class _QuickHubTile extends StatefulWidget {
+  const _QuickHubTile({
     required this.icon,
-    required this.iconColor,
+    required this.gradient,
     required this.title,
     required this.subtitle,
     required this.onTap,
   });
 
   final IconData icon;
-  final Color iconColor;
+  final List<Color> gradient;
   final String title;
   final String subtitle;
   final VoidCallback onTap;
 
   @override
+  State<_QuickHubTile> createState() => _QuickHubTileState();
+}
+
+class _QuickHubTileState extends State<_QuickHubTile> {
+  bool _pressed = false;
+
+  @override
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
-    return Material(
-      color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.55),
-      borderRadius: BorderRadius.circular(14),
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(14),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+    return GestureDetector(
+      onTapDown: (_) => setState(() => _pressed = true),
+      onTapUp: (_) => setState(() => _pressed = false),
+      onTapCancel: () => setState(() => _pressed = false),
+      onTap: widget.onTap,
+      child: AnimatedScale(
+        scale: _pressed ? 0.95 : 1.0,
+        duration: const Duration(milliseconds: 120),
+        curve: Curves.easeOut,
+        child: Container(
+          height: 68,
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          decoration: BoxDecoration(
+            color: theme.colorScheme.surfaceContainerHighest
+                .withValues(alpha: 0.5),
+            borderRadius: BorderRadius.circular(16),
+          ),
+          child: Row(
             children: <Widget>[
-              Icon(icon, size: 21, color: iconColor),
-              const SizedBox(height: 8),
-              Text(title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                      fontSize: 12.5, fontWeight: FontWeight.w600)),
-              const SizedBox(height: 1),
-              Text(subtitle,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                      fontSize: 10.5,
-                      color: theme.colorScheme.onSurfaceVariant)),
+              Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: widget.gradient,
+                  ),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Icon(widget.icon, size: 21, color: Colors.white),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Text(widget.title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                            fontSize: 13.5, fontWeight: FontWeight.w700)),
+                    const SizedBox(height: 1),
+                    Text(widget.subtitle,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                            fontSize: 10.5,
+                            color: theme.colorScheme.onSurfaceVariant)),
+                  ],
+                ),
+              ),
             ],
           ),
         ),
@@ -519,171 +542,149 @@ class _EntryCard extends StatelessWidget {
 
 // ---------------------------------------------------------------- 功能行
 
-class _FeatureRows extends StatelessWidget {
-  const _FeatureRows();
+class _RankRow extends StatelessWidget {
+  const _RankRow();
 
   @override
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
+      padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
       child: Material(
         color:
-            theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.55),
-        borderRadius: BorderRadius.circular(18),
-        child: Column(
-          children: <Widget>[
-            _MenuRow(
-              icon: Icons.history_rounded,
-              label: '最近播放',
-              onTap: () => context.push('/recent-songs'),
+            theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
+        borderRadius: BorderRadius.circular(16),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(16),
+          onTap: () => context.push('/listen-rank'),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            child: Row(
+              children: <Widget>[
+                Icon(Icons.leaderboard_rounded,
+                    size: 20, color: AppConstants.brandColor),
+                const SizedBox(width: 12),
+                const Expanded(
+                  child: Text('听歌排行榜',
+                      style: TextStyle(
+                          fontSize: 14.5, fontWeight: FontWeight.w600)),
+                ),
+                Text('本周 / 所有时间',
+                    style: TextStyle(
+                        fontSize: 11,
+                        color: theme.colorScheme.onSurfaceVariant)),
+                const SizedBox(width: 4),
+                Icon(Icons.chevron_right_rounded,
+                    size: 19, color: theme.colorScheme.onSurfaceVariant),
+              ],
             ),
-            Divider(
-                height: 1,
-                indent: 54,
-                color: theme.dividerColor.withValues(alpha: 0.4)),
-            _MenuRow(
-              icon: Icons.leaderboard_rounded,
-              label: '听歌排行',
-              onTap: () => context.push('/listen-rank'),
-            ),
-          ],
+          ),
         ),
       ),
     );
   }
 }
 
-// ---------------------------------------------------------------- 歌单
+// ---------------------------------------------------------------- 歌单分组
 
-class _PlaylistSections extends StatelessWidget {
-  const _PlaylistSections({
-    required this.playlists,
-    required this.myUid,
-    required this.onReload,
-  });
-
-  /// null = 未登录 / 加载中（隐藏区块）；空 = 已登录但无歌单
-  final List<NeteaseUserPlaylist>? playlists;
-  final int myUid;
-  final VoidCallback onReload;
-
-  @override
-  Widget build(BuildContext context) {
-    final ThemeData theme = Theme.of(context);
-    if (playlists == null) return const SizedBox.shrink();
-
-    final List<NeteaseUserPlaylist> created = playlists!
-        .where((NeteaseUserPlaylist p) => p.creatorUserId == myUid)
-        .toList(growable: false);
-    final List<NeteaseUserPlaylist> collected = playlists!
-        .where((NeteaseUserPlaylist p) => p.creatorUserId != myUid)
-        .toList(growable: false);
-    if (created.isEmpty && collected.isEmpty) return const SizedBox.shrink();
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: <Widget>[
-        if (created.isNotEmpty)
-          _PlaylistGroup(
-            header: '创建的歌单',
-            count: created.length,
-            playlists: created,
-          ),
-        if (collected.isNotEmpty) ...<Widget>[
-          const SizedBox(height: 16),
-          _PlaylistGroup(
-            header: '收藏的歌单',
-            count: collected.length,
-            playlists: collected,
-          ),
-        ],
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-          child: Text(
-            '下拉可刷新歌单列表',
-            style: TextStyle(
-                fontSize: 11, color: theme.colorScheme.onSurfaceVariant),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _PlaylistGroup extends StatelessWidget {
-  const _PlaylistGroup({
+class _PlaylistSection extends StatelessWidget {
+  const _PlaylistSection({
     required this.header,
     required this.count,
     required this.playlists,
+    required this.expanded,
+    required this.onToggle,
   });
 
   final String header;
   final int count;
   final List<NeteaseUserPlaylist> playlists;
+  final bool expanded;
+  final VoidCallback onToggle;
 
   @override
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: <Widget>[
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 16, 16, 6),
-          child: Row(
-            children: <Widget>[
-              Text(header,
-                  style: const TextStyle(
-                      fontSize: 16, fontWeight: FontWeight.w700)),
-              const SizedBox(width: 6),
-              Text('$count',
-                  style: TextStyle(
-                      fontSize: 12.5,
-                      color: theme.colorScheme.onSurfaceVariant)),
-            ],
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+      child: Column(
+        children: <Widget>[
+          InkWell(
+            borderRadius: BorderRadius.circular(12),
+            onTap: onToggle,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+              child: Row(
+                children: <Widget>[
+                  AnimatedRotation(
+                    turns: expanded ? 0.0 : -0.25,
+                    duration: const Duration(milliseconds: 200),
+                    child: Icon(Icons.expand_more_rounded,
+                        size: 20, color: theme.colorScheme.onSurfaceVariant),
+                  ),
+                  const SizedBox(width: 6),
+                  Text(header,
+                      style: const TextStyle(
+                          fontSize: 15.5, fontWeight: FontWeight.w700)),
+                  const SizedBox(width: 6),
+                  Text('$count',
+                      style: TextStyle(
+                          fontSize: 12,
+                          color: theme.colorScheme.onSurfaceVariant)),
+                  const Spacer(),
+                  Icon(
+                    Icons.keyboard_arrow_right_rounded,
+                    size: 18,
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                ],
+              ),
+            ),
           ),
-        ),
-        Container(
-          margin: const EdgeInsets.symmetric(horizontal: 16),
-          decoration: BoxDecoration(
-            color: theme.colorScheme.surfaceContainerHighest
-                .withValues(alpha: 0.5),
-            borderRadius: BorderRadius.circular(16),
+          AnimatedCrossFade(
+            firstChild: const SizedBox(width: double.infinity),
+            secondChild: Container(
+              decoration: BoxDecoration(
+                color: theme.colorScheme.surfaceContainerHighest
+                    .withValues(alpha: 0.5),
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: Column(
+                children: <Widget>[
+                  for (int i = 0; i < playlists.length; i++)
+                    _PlaylistRowTile(
+                      playlist: playlists[i],
+                      isLast: i == playlists.length - 1,
+                    ),
+                ],
+              ),
+            ),
+            crossFadeState: expanded
+                ? CrossFadeState.showSecond
+                : CrossFadeState.showFirst,
+            duration: const Duration(milliseconds: 220),
+            sizeCurve: Curves.easeOutCubic,
           ),
-          child: Column(
-            children: <Widget>[
-              for (int i = 0; i < playlists.length; i++)
-                _PlaylistRowTile(
-                  playlist: playlists[i],
-                  isLast: i == playlists.length - 1,
-                  isFirst: i == 0,
-                ),
-            ],
-          ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 }
 
 class _PlaylistRowTile extends StatelessWidget {
-  const _PlaylistRowTile({
-    required this.playlist,
-    required this.isLast,
-    required this.isFirst,
-  });
+  const _PlaylistRowTile({required this.playlist, required this.isLast});
 
   final NeteaseUserPlaylist playlist;
   final bool isLast;
-  final bool isFirst;
 
   @override
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
-    // 需求：歌单显示歌单封面（网易云样式：封面 44 + 名称 + 曲目数）
+    // 需求：歌单显示歌单封面（网易云样式：封面 46 + 名称 + 曲目数）
     final Widget row = ListTile(
       dense: true,
-      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 3),
+      contentPadding:
+          const EdgeInsets.symmetric(horizontal: 12, vertical: 3),
       leading: ClipRRect(
         borderRadius: BorderRadius.circular(8),
         child: CoverImage(
@@ -731,134 +732,61 @@ class _PlaylistRowTile extends StatelessWidget {
   }
 }
 
-// ---------------------------------------------------------------- 设置组
+// ---------------------------------------------------------------- 云盘项
 
-class _SettingsGroup extends ConsumerWidget {
-  const _SettingsGroup();
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final AuthState auth = ref.watch(authProvider);
-    final ThemeData theme = Theme.of(context);
-
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 18, 16, 0),
-      child: Material(
-        color:
-            theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.55),
-        borderRadius: BorderRadius.circular(18),
-        child: Column(
-          children: <Widget>[
-            _MenuRow(
-              icon: Icons.tune_rounded,
-              label: '播放页自定义',
-              subtitle: '显示模式 / 封面 / 背景 / 歌词',
-              onTap: () => showNpSettingsSheet(context),
-            ),
-            Divider(
-                height: 1,
-                indent: 54,
-                color: theme.dividerColor.withValues(alpha: 0.4)),
-            _MenuRow(
-              icon: Icons.settings_outlined,
-              label: '设置',
-              subtitle: '主题 / 背景系统 / 音质 / 关于',
-              onTap: () => context.push('/settings'),
-            ),
-            if (auth.loggedIn) ...<Widget>[
-              Divider(
-                  height: 1,
-                  indent: 54,
-                  color: theme.dividerColor.withValues(alpha: 0.4)),
-              _MenuRow(
-                icon: Icons.logout_rounded,
-                label: '退出登录',
-                subtitle: auth.profile?.nickname ?? '',
-                danger: true,
-                onTap: () => _confirmLogout(context, ref),
-              ),
-            ],
-          ],
-        ),
-      ),
-    );
-  }
-
-  Future<void> _confirmLogout(BuildContext context, WidgetRef ref) async {
-    final bool? ok = await showDialog<bool>(
-      context: context,
-      builder: (BuildContext ctx) => AlertDialog(
-        title: const Text('退出登录'),
-        content: const Text('确定退出当前网易云音乐账号吗？'),
-        actions: <Widget>[
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(false),
-            child: const Text('取消'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(ctx).pop(true),
-            child: const Text('退出'),
-          ),
-        ],
-      ),
-    );
-    if (ok == true) {
-      await ref.read(authProvider.notifier).logout();
-    }
-  }
-}
-
-class _MenuRow extends StatelessWidget {
-  const _MenuRow({
-    required this.icon,
-    required this.label,
-    required this.onTap,
-    this.subtitle = '',
-    this.danger = false,
-  });
-
-  final IconData icon;
-  final String label;
-  final String subtitle;
-  final VoidCallback onTap;
-  final bool danger;
+class _CloudDriveItem extends StatelessWidget {
+  const _CloudDriveItem();
 
   @override
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
-    final Color? color = danger ? AppConstants.brandColor : null;
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(18),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
-        child: Row(
-          children: <Widget>[
-            Icon(icon,
-                size: 20,
-                color: color ??
-                    theme.colorScheme.onSurface.withValues(alpha: 0.75)),
-            const SizedBox(width: 18),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: <Widget>[
-                  Text(label,
-                      style: TextStyle(
-                          fontSize: 14.5,
-                          fontWeight: FontWeight.w500,
-                          color: color)),
-                  if (subtitle.isNotEmpty)
-                    Text(subtitle,
-                        style: TextStyle(
-                            fontSize: 11,
-                            color: theme.colorScheme.onSurfaceVariant)),
-                ],
-              ),
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+      child: Material(
+        color:
+            theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
+        borderRadius: BorderRadius.circular(16),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(16),
+          onTap: () => context.push('/cloud-drive'),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            child: Row(
+              children: <Widget>[
+                Container(
+                  width: 38,
+                  height: 38,
+                  decoration: BoxDecoration(
+                    gradient: const LinearGradient(
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                      colors: <Color>[Color(0xFF81D4FA), Color(0xFF0288D1)],
+                    ),
+                    borderRadius: BorderRadius.circular(11),
+                  ),
+                  child:
+                      const Icon(Icons.cloud_upload_rounded,
+                          size: 20, color: Colors.white),
+                ),
+                const SizedBox(width: 12),
+                const Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: <Widget>[
+                      Text('我的云盘',
+                          style: TextStyle(
+                              fontSize: 14.5, fontWeight: FontWeight.w600)),
+                      SizedBox(height: 1),
+                      Text('随时随地，同步云端音乐资产',
+                          style: TextStyle(fontSize: 11)),
+                    ],
+                  ),
+                ),
+                Icon(Icons.chevron_right_rounded,
+                    size: 19, color: theme.colorScheme.onSurfaceVariant),
+              ],
             ),
-            Icon(Icons.chevron_right_rounded,
-                size: 20, color: theme.colorScheme.onSurfaceVariant),
-          ],
+          ),
         ),
       ),
     );

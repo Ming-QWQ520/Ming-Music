@@ -32,6 +32,13 @@ class CoverImage extends StatefulWidget {
     this.coverSize = CoverSize.small,
   });
 
+  /// 网易云 CDN 对 Dart 默认 User-Agent 直接返回 403（实测取证：
+  /// `Dart/x.x (dart:io)` → 403，浏览器 UA → 200），封面/头像全灭的根因。
+  /// 所有网易 CDN 图片/音频请求必须携带浏览器 UA（跨文件共用）。
+  static const String kImageUserAgent =
+      'Mozilla/5.0 (Linux; Android 12) AppleWebKit/537.36 (KHTML, like Gecko) '
+      'Chrome/120.0.0.0 Mobile Safari/537.36';
+
   /// 网络封面 URL（http(s)）；asset 路径兼容保留；null 显示占位。
   final String? src;
   final double size;
@@ -51,6 +58,28 @@ class CoverImage extends StatefulWidget {
   static Future<File?> cachedFileFor(String? src,
           {CoverSize size = CoverSize.small}) =>
       _CoverImageState.cachedFileFor(src, size: size);
+
+  /// 封面缓存总字节数（设置页「缓存」展示）
+  static Future<int> cacheSizeBytes() async {
+    try {
+      final Directory dir = await _CoverImageState._cacheDir();
+      if (!dir.existsSync()) return 0;
+      return dir
+          .listSync()
+          .whereType<File>()
+          .fold<int>(0, (int acc, File f) => acc + f.lengthSync());
+    } catch (_) {
+      return 0;
+    }
+  }
+
+  /// 清理封面缓存（设置页「缓存」清理；同时清空内存态 inflight 无需处理）
+  static Future<void> clearCache() async {
+    try {
+      final Directory dir = await _CoverImageState._cacheDir();
+      if (dir.existsSync()) dir.deleteSync(recursive: true);
+    } catch (_) {}
+  }
 
   @override
   State<CoverImage> createState() => _CoverImageState();
@@ -170,12 +199,17 @@ class _CoverImageState extends State<CoverImage> {
     return null;
   }
 
+  /// 网易云 CDN 对 Dart 默认 User-Agent 直接返回 403（实测取证）。
+  /// 所有网易 CDN 图片请求必须携带浏览器 UA。
+  static const String kImageUserAgent = CoverImage.kImageUserAgent;
+
   static Future<Uint8List?> _download(String sizedUrl) {
     return _inflight.putIfAbsent(sizedUrl, () async {
       try {
         final HttpClient client = HttpClient()
           ..connectionTimeout = const Duration(seconds: 12);
         final HttpClientRequest req = await client.getUrl(Uri.parse(sizedUrl));
+        req.headers.set(HttpHeaders.userAgentHeader, kImageUserAgent);
         final HttpClientResponse resp = await req.close();
         if (resp.statusCode != 200) {
           await resp.drain<Object?>();

@@ -329,7 +329,10 @@ class _PlayerMoreSheetState extends ConsumerState<_PlayerMoreSheet> {
                     _QuickIcon(
                       icon: Icons.groups_rounded,
                       label: '一起听',
-                      onTap: () => _toast('一起听需要在网易云音乐 App 中发起'),
+                      onTap: () {
+                        Navigator.of(context).pop();
+                        _router?.push('/listen');
+                      },
                     ),
                   ],
                 ),

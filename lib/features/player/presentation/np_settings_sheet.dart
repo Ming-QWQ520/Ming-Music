@@ -134,7 +134,7 @@ class _DisplayPane extends ConsumerWidget {
               ref.read(npSettingsProvider.notifier).setMiniStyle(v),
         ),
         const _HintText(
-            '非极简样式嵌入底部导航栏中间；极简样式悬浮在导航栏上方'),
+            '紧凑极简：嵌入底部导航栏中间；其余样式悬浮于导航栏上方（透明无底色）'),
       ],
     );
   }
@@ -154,13 +154,19 @@ class _CoverPane extends ConsumerWidget {
         _SegmentedRow<NpCoverStyle>(
           label: '样式',
           groups: const <(NpCoverStyle, String)>[
-            (NpCoverStyle.vinyl, '黑胶'),
             (NpCoverStyle.square, '方形'),
             (NpCoverStyle.circle, '圆形'),
           ],
           value: cfg.coverStyle,
           onChanged: (NpCoverStyle v) =>
               ref.read(npSettingsProvider.notifier).setCoverStyle(v),
+        ),
+        _SwitchRow(
+          label: 'MV 标识',
+          hint: '歌名旁显示 MV 胶囊入口（点击播放 MV）',
+          value: cfg.showMvBadge,
+          onChanged: (bool v) =>
+              ref.read(npSettingsProvider.notifier).setShowMvBadge(v),
         ),
         _SwitchRow(
           label: '方形封面圆角',

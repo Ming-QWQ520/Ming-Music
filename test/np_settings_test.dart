@@ -78,7 +78,7 @@ void main() {
       final NpPlayerSettings fromEmpty =
           NpPlayerSettings.fromMap(<Object?, Object?>{});
       expect(fromEmpty.displayMode, NpDisplayMode.both);
-      expect(fromEmpty.coverStyle, NpCoverStyle.vinyl);
+      expect(fromEmpty.coverStyle, NpCoverStyle.square);
       expect(fromEmpty.lyricAlign, NpLyricAlign.left);
       expect(fromEmpty.miniStyle, MiniPlayerStyle.classic);
       expect(fromEmpty.stripButtons, kStripButtonDefaults);
@@ -94,7 +94,7 @@ void main() {
         'stripButtons': <String>['wiki', 'bogus-id', 'settings'],
       });
       expect(fromGarbage.displayMode, NpDisplayMode.both);
-      expect(fromGarbage.coverStyle, NpCoverStyle.vinyl);
+      expect(fromGarbage.coverStyle, NpCoverStyle.square);
       expect(fromGarbage.coverScale, closeTo(1.2, 1e-9));
       expect(fromGarbage.lyricFontSize, 12);
       expect(fromGarbage.yrcPlayed, const Color(0xFF112233));

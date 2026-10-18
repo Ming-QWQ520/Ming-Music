@@ -1,9 +1,9 @@
 /// 主页面架构：手机/平板双端自适应导航 + Mini 播放条。
 ///
 /// 布局规范（需求）：
-///  - Mini 样式 = compact（紧凑极简）：悬浮条位于 NavigationBar 上方；
-///  - 其余样式（classic/overlay/wide）：播放条嵌入底部导航栏，
-///    位于「发现」与「我的」正中间，且不带任何控制键；
+///  - Mini 样式 = compact（紧凑极简）：嵌入底部导航栏「发现 ⇄ 我的」中间；
+///  - 其余样式（classic/overlay/wide）：悬浮于导航栏上方（维持之前的设计），
+///    背景与边框全透明；
 ///  - 平板（宽度 >= 600dp）：左侧 NavigationRail，右侧内容区底部 MiniPlayer；
 ///  - IndexedStack 保持各 Tab 状态（列表滚动位置等）。
 ///

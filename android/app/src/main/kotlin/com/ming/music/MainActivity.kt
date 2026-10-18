@@ -5,6 +5,8 @@ import android.content.Context
 import android.content.Intent
 import android.media.AudioDeviceInfo
 import android.media.AudioManager
+import android.media.MediaRoute2Info
+import android.media.MediaRouter2
 import android.media.MediaScannerConnection
 import android.net.Uri
 import android.os.Build
@@ -96,17 +98,24 @@ class MainActivity : AudioServiceActivity() {
                             result.success(false)
                         }
                     }
-                    // 打开外部链接（问题反馈等）
+                    // 打开外部链接（问题反馈等）。
+                    // 避坑：? 桓表达式与后续语句必须严格分离 —— 历史版本
+                    // `?: return@setMethodCallHandler\n result.success(false)` 中
+                    // result.success(false) 是孤立语句（url 非空时也会先回复一次），
+                    // 导致 Reply already submitted 崩溃（logcat 实证）。
                     "openUrl" -> {
-                        val url = call.argument<String>("url") ?: return@setMethodCallHandler
+                        val url = call.argument<String>("url")
+                        if (url.isNullOrBlank()) {
                             result.success(false)
-                        try {
-                            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
-                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                            })
-                            result.success(true)
-                        } catch (e: Exception) {
-                            result.success(false)
+                        } else {
+                            try {
+                                startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
+                                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                })
+                                result.success(true)
+                            } catch (e: Exception) {
+                                result.success(false)
+                            }
                         }
                     }
                     else -> result.notImplemented()
@@ -117,64 +126,123 @@ class MainActivity : AudioServiceActivity() {
     // ---------------------------------------------------------------- 输出路由
 
     /**
-     * 输出设备切换：just_audio 未暴露 ExoPlayer.setPreferredAudioDevice，
-     * 通过反射链 FlutterEngine → 插件注册表 → JustAudioPlugin →
-     * methodCallHandler.players → AudioPlayer.player 拿到 ExoPlayer 实例后调用。
-     * 任意一环失败返回 false（UI 回退为「跟随系统自动路由」）。
+     * 输出设备切换：
+     * ① 优先 MediaRouter2 系统路由（API 30+，App 级媒体输出，等价系统「媒体输出」面板）；
+     * ② 回退反射链定位 ExoPlayer.setPreferredAudioDevice（播放器级路由）。
+     * 两者均失败返回 false（UI 回退为「跟随系统自动路由」）。
      */
     private fun setPreferredOutput(mode: String, deviceId: Int?): Boolean {
-        return try {
-            val exo = findExoPlayer() ?: return false
-            val am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
-            val device: AudioDeviceInfo? = when {
-                mode == "default" -> null
-                mode == "speaker" -> am.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
-                    .firstOrNull { it.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER }
-                mode == "bluetooth" -> am.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
-                    .firstOrNull { isBluetoothType(it.type) && (deviceId == null || it.id == deviceId) }
-                else -> null
-            }
-            val m = exo.javaClass.getMethod("setPreferredAudioDevice", AudioDeviceInfo::class.java)
-            m.invoke(exo, device)
-            Log.i(TAG, "setPreferredOutput mode=$mode device=${device?.productName} ok")
-            true
-        } catch (t: Throwable) {
-            Log.w(TAG, "setPreferredOutput failed: $t")
-            false
+        val am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        // 目标 AudioDeviceInfo：null = 跟随系统自动（清除播放器级偏好）
+        val device: AudioDeviceInfo? = when {
+            mode == "speaker" -> am.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
+                .firstOrNull { it.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER }
+            mode == "bluetooth" -> am.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
+                .firstOrNull { isBluetoothType(it.type) && (deviceId == null || it.id == deviceId) }
+            else -> null
         }
+        // ① 播放器级路由（反射 ExoPlayer，最直接可靠）
+        val exo = findExoPlayer()
+        if (exo != null) {
+            try {
+                val m = exo.javaClass.getMethod("setPreferredAudioDevice", AudioDeviceInfo::class.java)
+                m.invoke(exo, device)
+                Log.i(TAG, "setPreferredOutput via ExoPlayer mode=$mode device=${device?.productName}")
+                return true
+            } catch (t: Throwable) {
+                Log.w(TAG, "ExoPlayer routing failed: $t")
+            }
+        }
+        // ② 系统级路由（MediaRouter2）：路由整个 App 的媒体输出。
+        // isSystemRoute() 为 API 31+，守卫取 S（用户设备 Android 12+）
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            try {
+                val router = MediaRouter2.getInstance(this)
+                val routes = router.routes
+                val target = routes.firstOrNull { r ->
+                    r.isSystemRoute && when (mode) {
+                        "speaker" -> r.type == MediaRoute2Info.TYPE_BUILTIN_SPEAKER
+                        "bluetooth" -> r.type == MediaRoute2Info.TYPE_BLUETOOTH_A2DP ||
+                                r.type == MediaRoute2Info.TYPE_BLE_HEADSET ||
+                                r.type == MediaRoute2Info.TYPE_BLE_SPEAKER
+                        else -> true
+                    } && (deviceId == null || r.id.contains(deviceId.toString()))
+                }
+                if (target != null) {
+                    router.transferTo(target)
+                    Log.i(TAG, "setPreferredOutput via MediaRouter2 mode=$mode route=${target.name}")
+                    return true
+                }
+                Log.w(TAG, "MediaRouter2 target route not found for mode=$mode")
+            } catch (t: Throwable) {
+                Log.w(TAG, "MediaRouter2 routing failed: $t")
+            }
+        }
+        Log.w(TAG, "setPreferredOutput all strategies failed mode=$mode")
+        return false
     }
 
-    /** 反射定位 just_audio 内部的 ExoPlayer（见 [setPreferredOutput]） */
+    /** 反射定位 just_audio 内部的 ExoPlayer（见 [setPreferredOutput]）。
+     *
+     * 不依赖固定字段名（just_audio 升级字段可能改名）：在插件对象图内
+     * 做有限深度遍历，找到第一个 androidx.media3.exoplayer.ExoPlayer 实例。
+     */
     private fun findExoPlayer(): Any? {
         // FlutterActivity.flutterEngine 为平台可空 getter：空则直接放弃路由
         val engine = flutterEngine ?: return null
-        // ① FlutterEngine.getPlugins() → FlutterEngineConnectionRegistry
-        val registry = engine.javaClass.getMethod("getPlugins").invoke(engine)
-        // ② registry.pluginMap: Map<Class<*>, FlutterPlugin>
-        val pluginMapField = registry.javaClass.getDeclaredField("pluginMap").apply {
-            isAccessible = true
+        return try {
+            val registry = engine.javaClass.getMethod("getPlugins").invoke(engine)
+            val pluginMapField = registry.javaClass.getDeclaredField("pluginMap").apply {
+                isAccessible = true
+            }
+            @Suppress("UNCHECKED_CAST")
+            val pluginMap = pluginMapField.get(registry) as Map<Class<*>, Any>
+            val jaPlugin = pluginMap.values.firstOrNull {
+                it.javaClass.name.contains("JustAudioPlugin")
+            } ?: return null
+            searchExoPlayer(jaPlugin, depth = 0)
+        } catch (t: Throwable) {
+            Log.w(TAG, "findExoPlayer failed: $t")
+            null
         }
-        @Suppress("UNCHECKED_CAST")
-        val pluginMap = pluginMapField.get(registry) as Map<Class<*>, Any>
-        val jaPlugin = pluginMap.values.firstOrNull {
-            it.javaClass.name == "com.ryanheise.just_audio.JustAudioPlugin"
-        } ?: return null
-        // ③ JustAudioPlugin.methodCallHandler → players: Map<String, AudioPlayer>
-        val handlerField = jaPlugin.javaClass.getDeclaredField("methodCallHandler").apply {
-            isAccessible = true
+    }
+
+    /** 在对象图中有限深度搜索 ExoPlayer 实例（字段名无关，版本鲁棒） */
+    private fun searchExoPlayer(obj: Any, depth: Int): Any? {
+        if (depth > 4) return null
+        if (isExoPlayerInstance(obj)) return obj
+        for (field in obj.javaClass.declaredFields) {
+            if (field.type.isPrimitive || field.type.name.startsWith("java.")) continue
+            try {
+                field.isAccessible = true
+                val v = field.get(obj) ?: continue
+                if (isExoPlayerInstance(v)) return v
+                // 遍历 Map / 集合容器（just_audio 的 players: Map<String, AudioPlayer>）
+                when (v) {
+                    is Map<*, *> -> for (item in v.values) {
+                        val hit = item?.let { searchExoPlayer(it, depth + 1) }
+                        if (hit != null) return hit
+                    }
+                    is Collection<*> -> for (item in v) {
+                        val hit = item?.let { searchExoPlayer(it, depth + 1) }
+                        if (hit != null) return hit
+                    }
+                    else -> {
+                        val hit = searchExoPlayer(v, depth + 1)
+                        if (hit != null) return hit
+                    }
+                }
+            } catch (_: Throwable) {
+                // 单个字段失败继续
+            }
         }
-        val handler = handlerField.get(jaPlugin) ?: return null
-        val playersField = handler.javaClass.getDeclaredField("players").apply {
-            isAccessible = true
-        }
-        @Suppress("UNCHECKED_CAST")
-        val players = playersField.get(handler) as Map<String, Any>
-        val audioPlayer = players.values.firstOrNull() ?: return null
-        // ④ AudioPlayer.player: ExoPlayer
-        val exoField = audioPlayer.javaClass.getDeclaredField("player").apply {
-            isAccessible = true
-        }
-        return exoField.get(audioPlayer)
+        return null
+    }
+
+    private fun isExoPlayerInstance(obj: Any): Boolean = try {
+        Class.forName("androidx.media3.exoplayer.ExoPlayer").isInstance(obj)
+    } catch (_: Throwable) {
+        false
     }
 
     /** 所有可用输出设备（蓝牙 + 本机扬声器），供媒体输出弹窗渲染 */

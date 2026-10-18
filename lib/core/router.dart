@@ -15,7 +15,9 @@
 ///  - `/local-music`         本地音乐；
 ///  - `/cloud-drive`         音乐云盘；
 ///  - `/recent-songs`        最近播放；
-///  - `/listen-rank`         听歌排行榜。
+///  - `/listen-rank`         听歌排行榜；
+///  - `/profile`             个人主页（Zephyr 对齐）；
+///  - `/listen`              一起听（实验性 Beta，局域网同步）。
 ///
 /// 通知栏点击 / Mini 播放条统一经 `openFullPlayer` 跳 `/player`，
 /// 全屏播放页使用 CustomTransitionPage（上滑进入 + 淡入），
@@ -41,6 +43,8 @@ import '../features/library/presentation/cloud_drive_page.dart';
 import '../features/library/presentation/local_music_page.dart';
 import '../features/library/presentation/recent_songs_page.dart';
 import '../features/library/presentation/listen_rank_page.dart';
+import '../features/library/presentation/profile_page.dart';
+import '../features/listen/presentation/listen_together_page.dart';
 import '../features/player/presentation/full_player_page.dart';
 import '../features/settings/presentation/settings_page.dart';
 import '../features/shell/presentation/main_scaffold.dart';
@@ -193,6 +197,18 @@ final GoRouter appRouter = GoRouter(
           name: 'listen-rank',
           builder: (BuildContext context, GoRouterState state) =>
               const ListenRankPage(),
+        ),
+        GoRoute(
+          path: 'profile',
+          name: 'profile',
+          builder: (BuildContext context, GoRouterState state) =>
+              const ProfilePage(),
+        ),
+        GoRoute(
+          path: 'listen',
+          name: 'listen-together',
+          builder: (BuildContext context, GoRouterState state) =>
+              const ListenTogetherPage(),
         ),
       ],
     ),

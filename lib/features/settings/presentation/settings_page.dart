@@ -1,10 +1,25 @@
-/// 设置页：主题 / 背景系统 / 液态玻璃 / 播放音质 / 关于。
+/// 设置页（kgka_Music_hl 风格分组重构）：
+///
+/// 分组（需求：重构设置项，进行合理分类）：
+///  - 账号：个人主页 / 登录状态 / 退出登录；
+///  - 外观：主题模式 / 液态玻璃 / 播放页背景；
+///  - 播放：播放音质 / 播放页自定义 / MV 标识开关（默认开启）；
+///  - Mini 播放条：样式选择（紧凑极简嵌入导航栏，其余悬浮上方）；
+///  - 缓存：封面缓存占用与清理；
+///  - 数据源 / 关于（仓库链接真实可点，需求：补全无实际作用功能）。
 library;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../../core/constants/app_constants.dart';
+import '../../../core/utils/platform_actions.dart';
+import '../../../core/widgets/cover_image.dart';
+import '../../auth/providers/auth_providers.dart';
+import '../../player/domain/np_settings.dart';
+import '../../player/presentation/np_settings_sheet.dart';
+import '../../player/providers/np_settings_providers.dart';
 import '../domain/settings_models.dart';
 import '../providers/settings_providers.dart';
 
@@ -19,6 +34,8 @@ class SettingsPage extends ConsumerWidget {
     final bool glassEnabled = ref.watch(glassEnabledProvider);
     final BackgroundConfig bg = ref.watch(backgroundProvider);
     final AudioQuality quality = ref.watch(audioQualityProvider);
+    final AuthState auth = ref.watch(authProvider);
+    final NpPlayerSettings np = ref.watch(npSettingsProvider);
 
     return Scaffold(
       appBar: AppBar(
@@ -31,6 +48,55 @@ class SettingsPage extends ConsumerWidget {
       body: ListView(
         padding: const EdgeInsets.fromLTRB(16, 4, 16, 32),
         children: <Widget>[
+          // ---------------- 账号 ----------------
+          _GroupCard(
+            title: '账号',
+            children: <Widget>[
+              ListTile(
+                contentPadding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
+                leading: const Icon(Icons.person_rounded, size: 22),
+                title: Text(
+                  auth.loggedIn
+                      ? (auth.profile?.nickname ?? '网易云用户')
+                      : '未登录',
+                  style: const TextStyle(fontSize: 15),
+                ),
+                subtitle: Text(
+                  auth.loggedIn
+                      ? '查看个人主页（VIP / 等级 / 听歌数据 / 签到）'
+                      : '登录后可使用喜欢、歌单、云盘',
+                  style: TextStyle(
+                      fontSize: 12, color: theme.colorScheme.onSurfaceVariant),
+                ),
+                trailing: Icon(Icons.chevron_right_rounded,
+                    size: 20, color: theme.colorScheme.onSurfaceVariant),
+                onTap: () => context.push('/profile'),
+              ),
+              if (auth.loggedIn)
+                ListTile(
+                  contentPadding:
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
+                  leading: Icon(Icons.logout_rounded,
+                      size: 21,
+                      color: AppConstants.brandColor.withValues(alpha: 0.9)),
+                  title: Text('退出登录',
+                      style: TextStyle(
+                          fontSize: 15,
+                          color: AppConstants.brandColor
+                              .withValues(alpha: 0.95))),
+                  subtitle: Text('退出当前网易云音乐账号',
+                      style: TextStyle(
+                          fontSize: 12,
+                          color: theme.colorScheme.onSurfaceVariant)),
+                  onTap: () => _confirmLogout(context, ref),
+                ),
+            ],
+          ),
+
+          const SizedBox(height: 16),
+
+          // ---------------- 外观 ----------------
           _GroupCard(
             title: '外观',
             children: <Widget>[
@@ -47,7 +113,9 @@ class SettingsPage extends ConsumerWidget {
               ),
               _RadioRow<GlassPref>(
                 label: '液态玻璃（Mini 播放条）',
-                subtitle: glassEnabled ? '当前设备已启用' : '当前设备性能不足，已自动降级为纯半透明',
+                subtitle: glassEnabled
+                    ? '当前设备已启用'
+                    : '当前设备性能不足，已自动降级为纯半透明',
                 groups: const <(GlassPref, String)>[
                   (GlassPref.auto, '自动'),
                   (GlassPref.on, '开启'),
@@ -121,8 +189,63 @@ class SettingsPage extends ConsumerWidget {
                 onChanged: (AudioQuality v) =>
                     ref.read(audioQualityProvider.notifier).set(v),
               ),
+              ListTile(
+                contentPadding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
+                leading: const Icon(Icons.tune_rounded, size: 22),
+                title: const Text('播放页自定义', style: TextStyle(fontSize: 15)),
+                subtitle: Text(
+                    '显示模式 / 封面 / 背景 / 歌词 / 红心动效',
+                    style: TextStyle(
+                        fontSize: 12,
+                        color: theme.colorScheme.onSurfaceVariant)),
+                trailing: Icon(Icons.chevron_right_rounded,
+                    size: 20, color: theme.colorScheme.onSurfaceVariant),
+                onTap: () => showNpSettingsSheet(context),
+              ),
+              SwitchListTile(
+                contentPadding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
+                secondary: const Icon(Icons.movie_outlined, size: 22),
+                title: const Text('MV 标识', style: TextStyle(fontSize: 15)),
+                subtitle: Text('歌曲名旁显示 MV 入口（默认开启）',
+                    style: TextStyle(
+                        fontSize: 12,
+                        color: theme.colorScheme.onSurfaceVariant)),
+                value: np.showMvBadge,
+                activeThumbColor: AppConstants.brandColor,
+                onChanged: (bool v) =>
+                    ref.read(npSettingsProvider.notifier).setShowMvBadge(v),
+              ),
             ],
           ),
+
+          const SizedBox(height: 16),
+
+          // ---------------- Mini 播放条 ----------------
+          _GroupCard(
+            title: 'Mini 播放条',
+            children: <Widget>[
+              _RadioRow<MiniPlayerStyle>(
+                label: '样式',
+                subtitle: '紧凑极简嵌入底部导航栏中间；其余样式悬浮导航栏上方',
+                groups: const <(MiniPlayerStyle, String)>[
+                  (MiniPlayerStyle.classic, '经典条'),
+                  (MiniPlayerStyle.overlay, '封面铺满'),
+                  (MiniPlayerStyle.compact, '紧凑极简'),
+                  (MiniPlayerStyle.wide, '宽幅双行'),
+                ],
+                value: np.miniStyle,
+                onChanged: (MiniPlayerStyle v) =>
+                    ref.read(npSettingsProvider.notifier).setMiniStyle(v),
+              ),
+            ],
+          ),
+
+          const SizedBox(height: 16),
+
+          // ---------------- 缓存 ----------------
+          const _CacheGroup(),
 
           const SizedBox(height: 16),
 
@@ -170,12 +293,102 @@ class SettingsPage extends ConsumerWidget {
                 title: const Text('项目仓库'),
                 subtitle: const Text(AppConstants.repoUrl),
                 trailing: const Icon(Icons.open_in_new_rounded, size: 18),
-                onTap: () {},
+                // 需求：补全无实际作用功能 —— 仓库入口真实打开浏览器
+                onTap: () async {
+                  final bool ok = await PlatformActions.openUrl(
+                      AppConstants.repoUrl);
+                  if (!context.mounted) return;
+                  if (!ok) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('无法打开浏览器')),
+                    );
+                  }
+                },
               ),
             ],
           ),
         ],
       ),
+    );
+  }
+
+  Future<void> _confirmLogout(BuildContext context, WidgetRef ref) async {
+    final bool? ok = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext ctx) => AlertDialog(
+        title: const Text('退出登录'),
+        content: const Text('确定退出当前网易云音乐账号吗？'),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('退出'),
+          ),
+        ],
+      ),
+    );
+    if (ok == true) {
+      await ref.read(authProvider.notifier).logout();
+    }
+  }
+}
+// ---------------------------------------------------------------- 缓存组
+
+class _CacheGroup extends ConsumerStatefulWidget {
+  const _CacheGroup();
+
+  @override
+  ConsumerState<_CacheGroup> createState() => _CacheGroupState();
+}
+
+class _CacheGroupState extends ConsumerState<_CacheGroup> {
+  String _sizeText = '计算中…';
+
+  @override
+  void initState() {
+    super.initState();
+    _refreshSize();
+  }
+
+  Future<void> _refreshSize() async {
+    final int bytes = await CoverImage.cacheSizeBytes();
+    if (!mounted) return;
+    setState(() => _sizeText = _fmt(bytes));
+  }
+
+  static String _fmt(int b) {
+    if (b <= 0) return '0 B';
+    if (b < 1024 * 1024) return '${(b / 1024).toStringAsFixed(0)} KB';
+    return '${(b / 1024 / 1024).toStringAsFixed(1)} MB';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return _GroupCard(
+      title: '缓存',
+      children: <Widget>[
+        ListTile(
+          contentPadding:
+              const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
+          leading: const Icon(Icons.image_outlined, size: 22),
+          title: const Text('封面缓存', style: TextStyle(fontSize: 15)),
+          subtitle: Text(_sizeText,
+              style: TextStyle(
+                  fontSize: 12,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant)),
+          trailing: const Icon(Icons.delete_outline_rounded, size: 20),
+          onTap: () async {
+            await CoverImage.clearCache();
+            _refreshSize();
+            if (!mounted) return;
+            ScaffoldMessenger.of(this.context)
+                .showSnackBar(const SnackBar(content: Text('封面缓存已清理')));
+          },
+        ),
+      ],
     );
   }
 }

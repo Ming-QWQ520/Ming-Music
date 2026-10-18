@@ -152,6 +152,96 @@ class NeteaseUserPlaylist {
   }
 }
 
+/// 用户详情（/user/detail 的 profile 段，对齐 Zephyr）
+class NeteaseUserDetail {
+  const NeteaseUserDetail({
+    this.signature = '',
+    this.createDays = 0,
+    this.gender = 0,
+    this.province = 0,
+    this.city = 0,
+    this.listenSongs = 0,
+  });
+
+  final String signature;
+
+  /// 注册至今天数（createTime 距今）
+  final int createDays;
+
+  /// 0 保密 1 男 2 女
+  final int gender;
+  final int province;
+  final int city;
+
+  /// 累计听歌首数
+  final int listenSongs;
+
+  static NeteaseUserDetail fromMap(Object? raw) {
+    if (raw is! Map<String, Object?>) return const NeteaseUserDetail();
+    final int createTimeMs = (raw['createTime'] as num?)?.toInt() ?? 0;
+    final int days = createTimeMs > 0
+        ? DateTime.now().difference(
+            DateTime.fromMillisecondsSinceEpoch(createTimeMs)).inDays
+        : 0;
+    return NeteaseUserDetail(
+      signature: (raw['signature'] as String?) ?? '',
+      createDays: days,
+      gender: (raw['gender'] as num?)?.toInt() ?? 0,
+      province: (raw['province'] as num?)?.toInt() ?? 0,
+      city: (raw['city'] as num?)?.toInt() ?? 0,
+      listenSongs: (raw['listenSongs'] as num?)?.toInt() ?? 0,
+    );
+  }
+
+  String get genderLabel => switch (gender) {
+        1 => '男',
+        2 => '女',
+        _ => '',
+      };
+}
+
+/// 云贝信息（/yunbei/info）
+class NeteaseYunbeiInfo {
+  const NeteaseYunbeiInfo({this.balance = 0, this.signed = false});
+
+  final int balance;
+  final bool signed;
+
+  static NeteaseYunbeiInfo fromMap(Map<String, Object?> j) {
+    final Object? data = j['data'] is Map<String, Object?> ? j['data'] : j;
+    final Map<String, Object?> m = data as Map<String, Object?>? ?? const <String, Object?>{};
+    final Object? user = m['userPoint'] is Map<String, Object?>
+        ? m['userPoint']
+        : m;
+    final Map<String, Object?> p = user as Map<String, Object?>? ?? const <String, Object?>{};
+    return NeteaseYunbeiInfo(
+      balance: (p['balance'] as num?)?.toInt() ?? 0,
+      signed: (m['mobileSign'] ?? m['pcSign'] ?? p['sign']) == true,
+    );
+  }
+}
+
+/// VIP 成长值（/vip/growthpoint）
+class NeteaseVipGrowth {
+  const NeteaseVipGrowth({this.growthPoint = 0, this.level = 0, this.levelName = ''});
+
+  final int growthPoint;
+  final int level;
+  final String levelName;
+
+  static NeteaseVipGrowth fromMap(Map<String, Object?> j) {
+    final Object? userLevel = j['userLevel'] ?? (j['data'] is Map<String, Object?>
+        ? (j['data'] as Map<String, Object?>)['userLevel']
+        : null);
+    final Map<String, Object?> m = userLevel as Map<String, Object?>? ?? const <String, Object?>{};
+    return NeteaseVipGrowth(
+      growthPoint: (m['growthPoint'] as num?)?.toInt() ?? 0,
+      level: (m['level'] as num?)?.toInt() ?? 0,
+      levelName: (m['levelName'] as String?) ?? '',
+    );
+  }
+}
+
 class NeteaseAuthRepository {
   NeteaseAuthRepository(this._api);
 
@@ -316,6 +406,97 @@ class NeteaseAuthRepository {
         .map(NeteaseUserPlaylist.fromMap)
         .where((NeteaseUserPlaylist p) => p.id != 0)
         .toList(growable: false);
+  }
+
+  // -------------------------------------------------------- profile detail
+
+  /// 用户详情（/user/detail）：对齐 Zephyr —— 补全 signature/createTime/
+  /// gender/city/province/backgroundUrl/listenSongs（login/status 之外的资料）
+  Future<NeteaseUserDetail> userDetail(int uid) async {
+    final Map<String, Object?> res = await _api.get(
+      '/user/detail',
+      <String, String>{'uid': '$uid'},
+      throwOnCode: false,
+    );
+    return NeteaseUserDetail.fromMap(apiPayload(res)['profile'] ?? apiPayload(res));
+  }
+
+  // -------------------------------------------------------- signin (Zephyr)
+
+  /// 每日签到（/daily_signin，type=0 安卓端）。重复签到服务端返回 -2
+  Future<int> dailySignin() async {
+    final Map<String, Object?> res =
+        await _api.get('/daily_signin', const <String, String>{'type': '0'});
+    return (res['code'] as num?)?.toInt() ?? 0;
+  }
+
+  /// 云贝签到（/yunbei/sign）
+  Future<int> yunbeiSign() async {
+    final Map<String, Object?> res = await _api.get(
+      '/yunbei/sign',
+      const <String, String>{'type': '0'},
+      throwOnCode: false,
+    );
+    return ((apiPayload(res)['code'] ?? res['code']) as num?)?.toInt() ?? 0;
+  }
+
+  /// 云贝余额与签到状态（/yunbei/info）
+  Future<NeteaseYunbeiInfo> yunbeiInfo() async {
+    final Map<String, Object?> res = await _api.get(
+      '/yunbei/info',
+      const <String, String>{},
+      throwOnCode: false,
+    );
+    return NeteaseYunbeiInfo.fromMap(apiPayload(res));
+  }
+
+  /// VIP 乐签打卡（/vip/sign）
+  Future<bool> vipSign() async {
+    final Map<String, Object?> res = await _api.get(
+      '/vip/sign',
+      const <String, String>{},
+      throwOnCode: false,
+    );
+    return ((apiPayload(res)['code'] ?? res['code']) as num?)?.toInt() == 200;
+  }
+
+  /// VIP 成长值（/vip/growthpoint）
+  Future<NeteaseVipGrowth> vipGrowthpoint() async {
+    final Map<String, Object?> res = await _api.get(
+      '/vip/growthpoint',
+      const <String, String>{},
+      throwOnCode: false,
+    );
+    return NeteaseVipGrowth.fromMap(apiPayload(res));
+  }
+
+  /// VIP 可领取任务列表（/vip/tasks）
+  Future<List<String>> vipTasks() async {
+    final Map<String, Object?> res = await _api.get(
+      '/vip/tasks',
+      const <String, String>{},
+      throwOnCode: false,
+    );
+    final Map<String, Object?> payload = apiPayload(res);
+    final Object? list = payload['data'] is Map<String, Object?>
+        ? (payload['data'] as Map<String, Object?>)['list']
+        : payload['list'];
+    if (list is! List<Object?>) return const <String>[];
+    return list
+        .whereType<Map<String, Object?>>()
+        .map((Map<String, Object?> t) => (t['id'] ?? '').toString())
+        .where((String id) => id.isNotEmpty)
+        .toList(growable: false);
+  }
+
+  /// 领取 VIP 成长值（/vip/growthpoint/get?ids=）
+  Future<bool> vipGrowthpointGet(String ids) async {
+    final Map<String, Object?> res = await _api.get(
+      '/vip/growthpoint/get',
+      <String, String>{'ids': ids},
+      throwOnCode: false,
+    );
+    return ((apiPayload(res)['code'] ?? res['code']) as num?)?.toInt() == 200;
   }
 
   // --------------------------------------------------------------- likes

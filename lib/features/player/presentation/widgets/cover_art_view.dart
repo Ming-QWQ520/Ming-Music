@@ -1,13 +1,13 @@
-/// 播放页封面视图：按 NpCoverStyle 渲染三种样式 ——
-///  - vinyl：黑胶唱片（VinylDisc，含唱针与旋转）；
+/// 播放页封面视图：按 NpCoverStyle 渲染两种样式 ——
 ///  - square：方形大图（默认无圆角，可设置开启圆角；Apple Music 风格）；
 ///  - circle：圆形大图。
+///（需求：黑胶样式已移除）
 ///
 /// 附加自定义：缩放（coverScale）与投影（coverShadow）。
 ///
 /// 方形样式动态（需求加大幅度）：
 ///  - 播放时封面保持完整尺寸（scale 1.0）；
-///  - 暂停时明显缩小（scale 0.90，约 10% 幅度，AnimatedScale 平滑过渡）；
+///  - 暂停时明显缩小（AnimatedScale 平滑过渡）；
 ///
 /// Hero（需求）：与 Mini 播放条同 tag —— 路由转场时封面从底部无缝放大。
 library;
@@ -17,7 +17,6 @@ import 'package:flutter/material.dart';
 import '../../../../core/widgets/cover_image.dart';
 import '../../domain/np_settings.dart';
 import 'mini_player.dart' show heroTagOf;
-import 'vinyl_disc.dart';
 
 class CoverArtView extends StatelessWidget {
   const CoverArtView({
@@ -54,14 +53,9 @@ class CoverArtView extends StatelessWidget {
     final double s = size * scale.clamp(0.70, 1.20);
 
     Widget child = switch (style) {
-      NpCoverStyle.vinyl => VinylDisc(
-          cover: cover,
-          playing: playing,
-          size: s,
-        ),
       NpCoverStyle.square => _FlatCover(
           cover: cover,
-          // 需求：播放时尺寸不变，暂停时明显缩小（幅度 10%）
+          // 需求：播放时尺寸不变，暂停时明显缩小
           size: s * 0.92,
           radius: squareRadius ? s * 0.055 : 0,
           shadow: shadow,
@@ -140,7 +134,7 @@ class _FlatCover extends StatelessWidget {
     );
 
     if (!shrinkOnPause) return content;
-    // 需求（加大幅度）：播放 scale 1.0 ↔ 暂停 scale 0.90（原 10px 固定值太小）
+    // 需求：暂停时明显缩小（播放 scale 1.0 ↔ 暂停 scale 0.90）
     return AnimatedScale(
       scale: playing ? 1.0 : 0.90,
       duration: const Duration(milliseconds: 300),
