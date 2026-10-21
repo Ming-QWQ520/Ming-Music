@@ -234,6 +234,7 @@ class PlayerNotifier extends Notifier<PlayerState> {
     });
 
     ref.onDispose(() {
+      _ready = false; // 销毁后到达的微任务/回调一律静默
       _playingSub?.cancel();
       _indexSub?.cancel();
       _processingSub?.cancel();
@@ -256,7 +257,11 @@ class PlayerNotifier extends Notifier<PlayerState> {
     ref.listen<AuthState>(authProvider, (AuthState? _, AuthState __) {
       _syncNotificationLike();
     });
-    _syncNotificationLike();
+    // ⚠️ build() 返回前 Riverpod 尚未写入 _state，此处任何 state 读取都会抛
+    // 「Tried to read the state of an uninitialized provider」（荣耀 LRA-AL00
+    // 每次启动必现的错误页根因）。首次同步延后到 build 完成后的微任务执行，
+    // 届时 state 已就绪；若期间 provider 被销毁，_ready 防护会静默跳过。
+    scheduleMicrotask(_syncNotificationLike);
 
     // ⚠️ 必须返回全新构造的初始值，绝不能 return state ——
     // 首次构建时 state 尚未初始化，读取即抛 StateError（2026-10 启动崩溃根因）。
@@ -269,7 +274,12 @@ class PlayerNotifier extends Notifier<PlayerState> {
   // ------------------------------------------------------------ 通知栏红心
 
   /// 将当前曲目的喜欢状态同步到通知栏（空心⇄实心）
+  ///
+  /// 仅在 build 完成后允许执行：build 期间（_ready=false）state 尚未初始化，
+  /// 读取即抛 StateError。authProvider 若在本 build 内首次初始化，其状态
+  /// 变更会同步触发 ref.listen 注册的 listener，此防护负责拦下该路径。
   void _syncNotificationLike() {
+    if (!_ready) return;
     final Track? track = state.currentTrack;
     final int? songId = track?.neteaseId;
     final bool liked = songId != null &&
