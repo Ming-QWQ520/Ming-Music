@@ -744,10 +744,18 @@ class _CoverHero extends StatelessWidget {
                       CircleAvatar(
                         radius: 12,
                         backgroundColor: Colors.white24,
-                        backgroundImage: (meta.creatorAvatarUrl != null &&
-                                meta.creatorAvatarUrl!.startsWith('http'))
-                            ? NetworkImage(meta.creatorAvatarUrl!)
-                            : null,
+                        backgroundImage:
+                            (meta.creatorAvatarUrl != null &&
+                                    meta.creatorAvatarUrl!.startsWith('http'))
+                                // 网易 CDN 对 Dart 默认 UA 返回 403（实测取证）——
+                                // 裸 NetworkImage 必须显式携带浏览器 UA（全库统一）
+                                ? NetworkImage(
+                                    meta.creatorAvatarUrl!,
+                                    headers: const <String, String>{
+                                      'User-Agent': CoverImage.kImageUserAgent,
+                                    },
+                                  )
+                                : null,
                         child: (meta.creatorAvatarUrl == null ||
                                 !meta.creatorAvatarUrl!.startsWith('http'))
                             ? const Icon(Icons.person_rounded,

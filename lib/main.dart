@@ -27,6 +27,7 @@ import 'package:shared_preferences_platform_interface/shared_preferences_platfor
 import 'app.dart';
 import 'core/constants/app_constants.dart';
 import 'core/utils/diag.dart';
+import 'core/widgets/cover_image.dart';
 import 'features/player/providers/player_providers.dart';
 import 'features/player/services/ming_audio_handler.dart';
 import 'features/settings/providers/settings_providers.dart';
@@ -39,6 +40,12 @@ Future<void> main() async {
   await Diag.init();
   Diag.milestone('binding ready');
   Diag.log('设备: ${Platform.operatingSystem} ${Platform.operatingSystemVersion}');
+
+  // 0.5) 全局 HTTP User-Agent 覆写（网易 CDN 403 的全局兑底）：
+  // 网易 CDN 对 Dart 默认 UA（Dart/x.x）风控 403 —— 任何遗漏 UA 的
+  // 直连请求（如裸 NetworkImage 头像）都会加载失败。全局覆写为浏览器
+  // UA 后全部放行；已显式设置过 headers 的请求不受影响。
+  HttpOverrides.global = _BrowserUaHttpOverrides();
 
   // 1) 沉浸式边到边布局（失败仅影响观感，不阻塞）
   try {
@@ -139,6 +146,17 @@ Future<void> main() async {
         }
       }();
     });
+  }
+}
+
+/// 全局 HTTP 客户端覆写：统一浏览器 UA（网易 CDN 403 兑底，见 main 步骤 0.5）。
+/// 仅改 User-Agent；证书校验等其余行为保持默认，不降低安全性。
+class _BrowserUaHttpOverrides extends HttpOverrides {
+  @override
+  HttpClient createHttpClient(SecurityContext? context) {
+    final HttpClient client = super.createHttpClient(context);
+    client.userAgent = CoverImage.kImageUserAgent;
+    return client;
   }
 }
 

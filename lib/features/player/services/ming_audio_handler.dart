@@ -335,7 +335,18 @@ class MingAudioHandler extends BaseAudioHandler with SeekHandler {
         bufferedPosition: _player.bufferedPosition,
         speed: _player.speed,
         queueIndex: event.currentIndex,
-        androidCompactActionIndices: const <int>[0, 2, 3],
+        // ⚠️ 不传 androidCompactActionIndices —— 通知栏崩溃修复（2026-10-22 荣耀实测）：
+        // audio_service 0.18.x 在 Android 侧把 MediaAction.custom（红心）分流进
+        // MediaSession，不渲染为通知栏按钮；通知栏按钮（nativeActions）实际只有
+        // 上一首/播放暂停/下一首 3 个。此前按「含红心 4 键」坐标系传 [0,2,3]，
+        // androidx MediaStyle inflate 时索引 3 越界（IndexOutOfBoundsException:
+        // Index: 3, Size: 3 → RemoteServiceException: Couldn't inflate
+        // contentViews）→ 通知一更新整个 App 被系统杀死。
+        // 不传时引擎自动取 min(3, 按钮数) = [0,1,2]：紧凑显示全部 3 键，恒安全。
+        // 红心保留在 controls 中：蓝牙耳机/Android Auto/系统媒体卡片经
+        // MediaSession 仍可见可点（customAction 路由已通）；通知栏内嵌红心
+        // 需 audio_service 0.19+（Android 侧直接把 custom 渲染为通知按钮），
+        // 已列入后续升级项。
       ),
     );
   }
