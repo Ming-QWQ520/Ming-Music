@@ -61,6 +61,13 @@
             </intent-filter>
         </activity>
 
+        <!-- 灰屏修复（2026-10）：Impeller OpenGLES 后端在部分老 GPU
+             （vivo/MTK + Android 12 实证灰屏）上存在渲染异常，回退 Skia。
+             Skia 为 Flutter 长期默认后端，兼容性最优。 -->
+        <meta-data
+            android:name="io.flutter.embedding.android.EnableImpeller"
+            android:value="false" />
+
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />

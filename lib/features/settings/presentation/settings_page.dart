@@ -15,6 +15,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../../core/constants/app_constants.dart';
 import '../../../core/utils/platform_actions.dart';
+import 'diag_page.dart';
 import '../../../core/widgets/cover_image.dart';
 import '../../auth/providers/auth_providers.dart';
 import '../../player/domain/np_settings.dart';
@@ -338,6 +339,17 @@ class SettingsPage extends ConsumerWidget {
                     );
                   }
                 },
+              ),
+              // 运行诊断：灰屏/异常现场自查入口（启动里程碑 + 全局异常落盘）
+              ListTile(
+                contentPadding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
+                title: const Text('运行诊断'),
+                subtitle: const Text('查看启动日志与错误记录'),
+                trailing: const Icon(Icons.chevron_right_rounded, size: 20),
+                onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(
+                  builder: (BuildContext context) => const DiagPage(),
+                )),
               ),
             ],
           ),
