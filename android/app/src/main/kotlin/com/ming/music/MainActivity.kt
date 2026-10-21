@@ -1,5 +1,6 @@
 package com.ming.music
 
+import android.app.AlertDialog
 import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
@@ -10,13 +11,20 @@ import android.media.MediaRouter2
 import android.media.MediaScannerConnection
 import android.net.Uri
 import android.os.Build
+import android.os.Bundle
 import android.os.Environment
+import android.os.Handler
+import android.os.Looper
 import android.provider.MediaStore
 import android.util.Log
 import com.ryanheise.audioservice.AudioServiceActivity
+import io.flutter.embedding.android.RenderMode
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 /**
  * 避坑指南 1（极度重要）：
@@ -33,6 +41,172 @@ class MainActivity : AudioServiceActivity() {
 
         /** just_audio 插件注册的方法通道名（输出路由反射的入口线索，仅日志用） */
         private const val JA_CHANNEL = "com.ryanheise.just_audio.methods"
+
+        // ---- 启动诊断（灰屏/首帧失败定位，机型适配测试用） ----
+        private const val COMPAT_PREFS = "ming_compat"
+        private const val KEY_TEXTURE = "render_mode_texture"
+        private const val WATCHDOG_MS = 15_000L
+
+        /** 首帧是否已上屏（onFlutterUiDisplayed 置位；静态避免重建丢失） */
+        private var firstFrameShown = false
+    }
+
+    /** 首帧看门狗句柄（onDestroy 取消，避免泄漏） */
+    private var watchdogHandler: Handler? = null
+
+    /**
+     * 首帧未上屏时用户可一键切换 TextureView 兼容渲染。
+     *
+     * FlutterActivity 默认用 SurfaceView 合成；个别 ROM（HarmonyOS/老麒麟
+     * 等）在 SurfaceView 合成路径上存在首帧无法上屏的兼容性问题，
+     * TextureView 是 Flutter 官方支持的替代渲染模式（RenderMode.TEXTURE），
+     * 仅在确认首帧失败后按需启用，不影响正常机型（仍为默认 SurfaceView）。
+     */
+    override fun getRenderMode(): RenderMode =
+        if (getSharedPreferences(COMPAT_PREFS, MODE_PRIVATE)
+                .getBoolean(KEY_TEXTURE, false)
+        ) {
+            // 注意：本版本引擎（3.47.7）枚举常量为小写 texture（二进制核对）
+            RenderMode.texture
+        } else {
+            super.getRenderMode()
+        }
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        try {
+            installNativeCrashCapture()
+            writeDeviceInfo()
+            scheduleFirstFrameWatchdog()
+        } catch (_: Throwable) {
+            // 诊断兜底自身绝不能影响启动
+        }
+    }
+
+    override fun onFlutterUiDisplayed() {
+        firstFrameShown = true
+        super.onFlutterUiDisplayed()
+    }
+
+    override fun onDestroy() {
+        watchdogHandler?.removeCallbacksAndMessages(null)
+        super.onDestroy()
+    }
+
+    // ---------------------------------------------------------------- 启动诊断
+
+    /**
+     * 原生全局未捕获异常捕获：Dart 层钩子看不到 Java/Kotlin 崩溃，
+     * 这里写入外部诊断目录 native_crash.log（Dart 侧 Diag.init 下次启动
+     * 读取收录；首帧失败时看门狗对话框也会直接展示）。
+     */
+    private fun installNativeCrashCapture() {
+        val previous = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { t, e ->
+            try {
+                val dir = getExternalFilesDir(null)
+                if (dir != null) {
+                    val ts = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(Date())
+                    File(dir, "native_crash.log").writeText(
+                        "time=$ts\nthread=${t.name}\n" + Log.getStackTraceString(e)
+                    )
+                }
+            } catch (_: Throwable) {
+            }
+            previous?.uncaughtException(t, e)
+        }
+    }
+
+    /** 设备信息落盘（device_info.txt）：用户求援时截图/取文件自证机型 */
+    private fun writeDeviceInfo() {
+        try {
+            val dir = getExternalFilesDir(null) ?: return
+            val versionName = try {
+                packageManager.getPackageInfo(packageName, 0).versionName ?: "?"
+            } catch (_: Exception) {
+                "?"
+            }
+            val mode = if (getSharedPreferences(COMPAT_PREFS, MODE_PRIVATE)
+                    .getBoolean(KEY_TEXTURE, false)
+                ) "texture" else "surface"
+            File(dir, "device_info.txt").writeText(
+                buildString {
+                    appendLine("model=${Build.MANUFACTURER} ${Build.MODEL}")
+                    appendLine("device=${Build.DEVICE} (${Build.PRODUCT})")
+                    appendLine("android=${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})")
+                    appendLine("appVersion=$versionName")
+                    appendLine("renderMode=$mode")
+                }
+            )
+        } catch (_: Throwable) {
+        }
+    }
+
+    /**
+     * 首帧看门狗：15 秒未上屏 → 弹出【原生】诊断对话框（不依赖 Flutter
+     * 渲染，任何首帧故障下都能弹出来），展示 Dart 诊断日志尾部 + 上次
+     * 原生崩溃，并提供「切换兼容渲染模式并重启」一键自愈入口。
+     */
+    private fun scheduleFirstFrameWatchdog() {
+        val handler = Handler(Looper.getMainLooper())
+        watchdogHandler = handler
+        handler.postDelayed({
+            try {
+                if (firstFrameShown) return@postDelayed
+                showWatchdogDialog(buildWatchdogReport())
+            } catch (_: Throwable) {
+            }
+        }, WATCHDOG_MS)
+    }
+
+    private fun buildWatchdogReport(): String = buildString {
+        appendLine("应用启动后 ${WATCHDOG_MS / 1000} 秒内未渲染出首帧（灰屏）。")
+        appendLine()
+        appendLine("机型: ${Build.MANUFACTURER} ${Build.MODEL}")
+        appendLine("系统: Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})")
+        val texture = getSharedPreferences(COMPAT_PREFS, MODE_PRIVATE)
+            .getBoolean(KEY_TEXTURE, false)
+        appendLine("渲染模式: ${if (texture) "texture（兼容）" else "surface（默认）"}")
+        appendLine()
+        val dir = getExternalFilesDir(null)
+        val diag = dir?.let { File(it, "diag.log") }
+        if (diag != null && diag.exists()) {
+            appendLine("---- Dart 诊断日志（末尾） ----")
+            val lines = diag.readLines().takeLast(14)
+            lines.forEach { appendLine(it) }
+            appendLine()
+        } else {
+            appendLine("（未找到 Dart 诊断日志 —— Dart 引擎可能从未启动）")
+            appendLine()
+        }
+        val crash = dir?.let { File(it, "native_crash.log") }
+        if (crash != null && crash.exists()) {
+            appendLine("---- 上次原生崩溃（头部） ----")
+            crash.readLines().take(6).forEach { appendLine(it) }
+        }
+        appendLine("完整日志: Android/data/$packageName/files/")
+    }
+
+    private fun showWatchdogDialog(report: String) {
+        val texture = getSharedPreferences(COMPAT_PREFS, MODE_PRIVATE)
+            .getBoolean(KEY_TEXTURE, false)
+        val builder = AlertDialog.Builder(this)
+            .setTitle("MingMusic 启动诊断")
+            .setMessage(report)
+            .setCancelable(true)
+            .setNegativeButton("关闭", null)
+        if (!texture) {
+            builder.setPositiveButton("切换兼容渲染并重启") { d, _ ->
+                d.dismiss()
+                try {
+                    getSharedPreferences(COMPAT_PREFS, MODE_PRIVATE)
+                        .edit().putBoolean(KEY_TEXTURE, true).commit()
+                } catch (_: Throwable) {
+                }
+                recreate()
+            }
+        }
+        builder.show()
     }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {

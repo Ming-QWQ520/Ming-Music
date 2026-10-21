@@ -68,6 +68,13 @@
             android:name="io.flutter.embedding.android.EnableImpeller"
             android:value="false" />
 
+        <!-- 双保险：若将来重新启用 Impeller（EnableImpeller 改 true），
+             强制使用 OpenGLES 后端 —— 老麒麟（Mali-G51）的 Vulkan 驱动
+             存在首帧无法上屏的兼容性问题，绝不使用 Vulkan 后端。 -->
+        <meta-data
+            android:name="io.flutter.embedding.android.ImpellerBackend"
+            android:value="opengles" />
+
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />

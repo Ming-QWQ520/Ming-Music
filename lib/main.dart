@@ -38,6 +38,7 @@ Future<void> main() async {
   Diag.installHooks();
   await Diag.init();
   Diag.milestone('binding ready');
+  Diag.log('设备: ${Platform.operatingSystem} ${Platform.operatingSystemVersion}');
 
   // 1) 沉浸式边到边布局（失败仅影响观感，不阻塞）
   try {
@@ -98,7 +99,18 @@ Future<void> main() async {
     ).timeout(const Duration(seconds: 8));
   } catch (e) {
     Diag.log('AudioService.init 失败，降级为裸内核: $e');
-    audioHandler = MingAudioHandler();
+    // 裸构造路径同样可能失败（如 just_audio 平台层初始化异常）——
+    // 该路径从未在部分机型上验证过，必须独立容错并留痕：
+    // 失败信息写入诊断文件（外部镜像可被用户直接取走），随后上抛
+    // 交由 PlatformDispatcher.onError 记录；屏幕停留启动背景时，
+    // 原生看门狗会弹出启动诊断对话框展示日志尾部（见 MainActivity）。
+    try {
+      audioHandler = MingAudioHandler();
+    } catch (e2, st2) {
+      Diag.log('裸内核构造也失败: $e2');
+      Diag.log('  stack(首5帧): ${st2.toString().split('\n').take(5).join(' | ')}');
+      rethrow;
+    }
   }
   Diag.milestone('audioHandler ready');
 
