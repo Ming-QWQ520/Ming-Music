@@ -51,14 +51,3 @@ class AppConstants {
   static const Color darkScaffold = Color(0xFF121212);
   static const Color darkSurface = Color(0xFF1E1E1E);
 }
-
-/// 播放页背景渐变预设（Dart 3 Record）
-typedef GradientPreset = ({String name, Color top, Color bottom});
-
-const List<GradientPreset> kGradientPresets = [
-  (name: '星夜紫', top: Color(0xFF1E1B4B), bottom: Color(0xFF7C3AED)),
-  (name: '深海蓝', top: Color(0xFF0C2A4A), bottom: Color(0xFF0EA5E9)),
-  (name: '暮霞粉', top: Color(0xFF4C0519), bottom: Color(0xFFFB7185)),
-  (name: '翡翠绿', top: Color(0xFF022C22), bottom: Color(0xFF2DD4A7)),
-  (name: '琥珀金', top: Color(0xFF451A03), bottom: Color(0xFFF5A623)),
-];

@@ -1,7 +1,9 @@
-/// 播放页自定义面板（参考 Zephyr-Music SettingsPanel）：
-///  - 显示：显示模式 / 隐藏控制栏；
-///  - 封面：样式 / 缩放 / 投影；
-///  - 背景：类型（复用全局背景配置）/ 模糊强度 / 变暗程度；
+/// 播放页自定义面板（参考 Zephyr-Music SettingsPanel；
+/// 需求：UI 排列优化 —— 每页按「样式类 → 数值类 → 开关类」从上到下排列，
+/// 数值滑杆紧跟其作用对象，说明文案统一 _HintText 风格）：
+///  - 显示：显示模式 / Mini 播放条样式；
+///  - 封面：样式 / 封面歌词 / 大小 / 投影 / MV 标识；
+///  - 背景：类型（流体/封面模糊/自定义图）/ 效果（模糊/变暗）；
 ///  - 歌词：字号 / 行距 / 对齐 / 翻译 / 非活跃淡出与模糊 / 逐字颜色。
 library;
 
@@ -130,7 +132,8 @@ class _DisplayPane extends ConsumerWidget {
           onChanged: (MiniPlayerStyle v) =>
               ref.read(npSettingsProvider.notifier).setMiniStyle(v),
         ),
-        const _HintText('经典条：深蓝玻璃长条悬浮导航栏上方；紧凑极简：仅封面圆环嵌入导航栏'),
+        const _HintText(
+            '经典条：无色玻璃长条悬浮导航栏上方；底板颜色/透明度在「设置 → Mini 播放条」中自定义'),
       ],
     );
   }
@@ -212,19 +215,13 @@ class _BackgroundPane extends ConsumerWidget {
           label: '类型',
           groups: const <(BackgroundType, String)>[
             (BackgroundType.blurCover, '封面模糊'),
-            (BackgroundType.gradient, '纯色渐变'),
+            (BackgroundType.fluid, '流体'),
             (BackgroundType.image, '自定义图'),
           ],
           value: bg.type,
           onChanged: (BackgroundType v) =>
               ref.read(backgroundProvider.notifier).setType(v),
         ),
-        if (bg.type == BackgroundType.gradient)
-          _GradientPicker(
-            selectedIndex: bg.gradientIndex,
-            onSelected: (int i) =>
-                ref.read(backgroundProvider.notifier).setGradientIndex(i),
-          ),
         if (bg.type == BackgroundType.image)
           Padding(
             padding: const EdgeInsets.fromLTRB(0, 4, 0, 14),
@@ -253,6 +250,7 @@ class _BackgroundPane extends ConsumerWidget {
         const _GroupTitle('背景效果'),
         _SliderRow(
           label: '模糊强度',
+          hint: '仅封面模糊背景生效（需求默认 25px）',
           value: (cfg.bgBlur - 4) / 36,
           display: '${cfg.bgBlur.round()}px',
           onChanged: (double v) =>
@@ -260,6 +258,7 @@ class _BackgroundPane extends ConsumerWidget {
         ),
         _SliderRow(
           label: '变暗程度',
+          hint: '封面模糊 / 流体 / 自定义图背景统一生效',
           value: cfg.bgDim / 100,
           display: '${cfg.bgDim.round()}%',
           onChanged: (double v) =>
@@ -583,6 +582,7 @@ class _SliderRow extends StatelessWidget {
     required this.value,
     required this.display,
     required this.onChanged,
+    this.hint,
   });
 
   final String label;
@@ -590,40 +590,63 @@ class _SliderRow extends StatelessWidget {
   final String display;
   final ValueChanged<double> onChanged;
 
+  /// 可选说明（需求：UI 排列优化 —— 滑杆的作用对象紧跟说明）
+  final String? hint;
+
   @override
   Widget build(BuildContext context) {
+    final Widget row = Row(
+      children: <Widget>[
+        SizedBox(
+          width: 110,
+          child: Text(
+            label,
+            style: TextStyle(
+                color: Colors.white.withValues(alpha: 0.86), fontSize: 14),
+          ),
+        ),
+        Expanded(
+          child: SliderTheme(
+            data: SliderTheme.of(context).copyWith(
+              trackHeight: 3,
+              overlayShape: const RoundSliderOverlayShape(overlayRadius: 14),
+            ),
+            child: Slider(
+              value: value.clamp(0.0, 1.0),
+              activeColor: AppConstants.brandColor,
+              onChanged: onChanged,
+            ),
+          ),
+        ),
+        SizedBox(
+          width: 52,
+          child: Text(
+            display,
+            textAlign: TextAlign.right,
+            style: TextStyle(
+                color: Colors.white.withValues(alpha: 0.5), fontSize: 11.5),
+          ),
+        ),
+      ],
+    );
+    if (hint == null) {
+      return Padding(
+        padding: const EdgeInsets.only(bottom: 8),
+        child: row,
+      );
+    }
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
-          SizedBox(
-            width: 110,
+          row,
+          Padding(
+            padding: const EdgeInsets.only(left: 110, top: 2),
             child: Text(
-              label,
+              hint!,
               style: TextStyle(
-                  color: Colors.white.withValues(alpha: 0.86), fontSize: 14),
-            ),
-          ),
-          Expanded(
-            child: SliderTheme(
-              data: SliderTheme.of(context).copyWith(
-                trackHeight: 3,
-                overlayShape: const RoundSliderOverlayShape(overlayRadius: 14),
-              ),
-              child: Slider(
-                value: value.clamp(0.0, 1.0),
-                activeColor: AppConstants.brandColor,
-                onChanged: onChanged,
-              ),
-            ),
-          ),
-          SizedBox(
-            width: 52,
-            child: Text(
-              display,
-              textAlign: TextAlign.right,
-              style: TextStyle(
-                  color: Colors.white.withValues(alpha: 0.5), fontSize: 11.5),
+                  color: Colors.white.withValues(alpha: 0.36), fontSize: 11),
             ),
           ),
         ],
@@ -691,54 +714,6 @@ class _ColorRow extends StatelessWidget {
             ),
           ),
         ],
-      ),
-    );
-  }
-}
-
-class _GradientPicker extends StatelessWidget {
-  const _GradientPicker({
-    required this.selectedIndex,
-    required this.onSelected,
-  });
-
-  final int selectedIndex;
-  final ValueChanged<int> onSelected;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 14),
-      child: SizedBox(
-        height: 40,
-        child: ListView.separated(
-          scrollDirection: Axis.horizontal,
-          itemCount: kGradientPresets.length,
-          separatorBuilder: (_, __) => const SizedBox(width: 10),
-          itemBuilder: (BuildContext ctx, int i) {
-            final GradientPreset p = kGradientPresets[i];
-            final bool active = i == selectedIndex;
-            return GestureDetector(
-              onTap: () => onSelected(i),
-              child: Container(
-                width: 64,
-                height: 40,
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                    colors: <Color>[p.top, p.bottom],
-                  ),
-                  borderRadius: BorderRadius.circular(10),
-                  border: Border.all(
-                    color: active ? Colors.white : Colors.white24,
-                    width: active ? 2 : 1,
-                  ),
-                ),
-              ),
-            );
-          },
-        ),
       ),
     );
   }

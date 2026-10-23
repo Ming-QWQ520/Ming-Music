@@ -36,4 +36,10 @@ class PrefsKeys {
 
   /// 应用图片背景（需求：除播放页外的全局图片背景）
   static const String appBackground = 'settings.appBackground';
+
+  /// 搜索历史（json 数组，最多 20 条；需求：搜索页显示历史记录）
+  static const String searchHistory = 'search.history';
+
+  /// 发现页「榜单精选」自定义勾选（json：ToplistConf.id 有序数组）
+  static const String discoverToplists = 'discover.toplists';
 }

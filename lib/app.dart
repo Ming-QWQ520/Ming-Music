@@ -52,10 +52,14 @@ class MingMusicApp extends ConsumerWidget {
 }
 
 /// 全局 Mini 播放条宿主：
-///  - 监听 go_router 当前路径：`/`（主骨架，Mini 已在导航栏内）与
-///    `/player`（全屏播放页本身）不重复显示；其余页面悬浮显示；
-///  - 悬浮条带半透明深色胶囊底 + 圆角（子页面无导航栏，透明条会与
-///    内容混色难以辨认），左下右 12px 边距，落在安全区之上。
+///  - 监听 go_router `routerDelegate`（而非 routeInformationProvider）：
+///    push 与 **pop 都必然回调**，当前路径取自 `currentConfiguration.uri`，
+///    彻底修复「子页面打开播放页再退出后 Mini 条消失」——旧实现依赖
+///    routeInformationProvider 的 location 通知，pop 回退在部分机型上
+///    不再触发监听，路径残留 `/player` 导致悬浮条再也不出现；
+///  - `/`（主骨架，Mini 已在导航栏内/悬浮位）与 `/player`（全屏播放页
+///    本身）不重复显示；其余页面统一显示；
+///  - 出现/消失带 MiniBarSwitcher 动画（上滑放大进场 / 下滑缩小退场）。
 class _GlobalMiniBarHost extends ConsumerStatefulWidget {
   const _GlobalMiniBarHost({required this.child});
 
@@ -69,7 +73,7 @@ class _GlobalMiniBarHostState extends ConsumerState<_GlobalMiniBarHost> {
   String _path = '/';
 
   void _onRouteChanged() {
-    final String next = appRouter.routeInformationProvider.value.uri.path;
+    final String next = appRouter.routerDelegate.currentConfiguration.uri.path;
     if (next == _path) return;
     setState(() => _path = next);
   }
@@ -77,18 +81,19 @@ class _GlobalMiniBarHostState extends ConsumerState<_GlobalMiniBarHost> {
   @override
   void initState() {
     super.initState();
-    appRouter.routeInformationProvider.addListener(_onRouteChanged);
-    _path = appRouter.routeInformationProvider.value.uri.path;
+    appRouter.routerDelegate.addListener(_onRouteChanged);
+    _path = appRouter.routerDelegate.currentConfiguration.uri.path;
   }
 
   @override
   void dispose() {
-    appRouter.routeInformationProvider.removeListener(_onRouteChanged);
+    appRouter.routerDelegate.removeListener(_onRouteChanged);
     super.dispose();
   }
 
   bool get _showFloat {
-    if (_path == '/' || _path.startsWith('/player')) return false;
+    if (_path.startsWith('/player')) return false;
+    if (_path == '/' || _path.isEmpty) return false;
     return true;
   }
 
@@ -118,17 +123,21 @@ class _GlobalMiniBarHostState extends ConsumerState<_GlobalMiniBarHost> {
       children: <Widget>[
         if (bg != null) bg,
         child,
-        // 全局悬浮 Mini 条（子页面专属；主骨架与播放页由各自层级负责）
-        if (_showFloat && hasQueue)
-          Positioned(
-            left: 12,
-            right: 12,
-            bottom: MediaQuery.paddingOf(context).bottom + 6,
-            child: Material(
-              color: Colors.transparent,
+        // 全局悬浮 Mini 条（子页面专属；主骨架与播放页由各自层级负责）。
+        // 需求：显隐一致性 —— 只要队列存在且不在播放页就显示，出现/消失
+        // 统一走 MiniBarSwitcher（上滑放大进场 / 下滑缩小退场）。
+        Positioned(
+          left: 12,
+          right: 12,
+          bottom: MediaQuery.paddingOf(context).bottom + 6,
+          child: Material(
+            color: Colors.transparent,
+            child: MiniBarSwitcher(
+              visible: _showFloat && hasQueue,
               child: const MiniPlayer(embedded: false),
             ),
           ),
+        ),
       ],
     );
   }

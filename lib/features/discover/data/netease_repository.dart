@@ -19,13 +19,22 @@ class ToplistConf {
   final int color;
 }
 
+/// 榜单入口（官方固定 id，已按 /toplist 实测校准）：
+/// 需求（搜索页热榜矩阵 + 发现页榜单精选自定义）：
+/// 搜索页顺序 = 热搜榜 + 以下 12 个；发现页默认勾选前 6 个。
 const List<ToplistConf> kToplists = <ToplistConf>[
-  ToplistConf(id: 19723756, name: '飙升榜', color: 0xFFE2483D),
   ToplistConf(id: 3778678, name: '热歌榜', color: 0xFFDF468B),
+  ToplistConf(id: 2809513713, name: '欧美热歌榜', color: 0xFF2E7CF6),
+  ToplistConf(id: 5059642708, name: '古风榜', color: 0xFF8F5BDB),
+  ToplistConf(id: 19723756, name: '飙升榜', color: 0xFFE2483D),
+  ToplistConf(id: 745956260, name: '韩语榜', color: 0xFF17B8A6),
   ToplistConf(id: 3779629, name: '新歌榜', color: 0xFFEB7524),
-  ToplistConf(id: 2884035, name: '原创榜', color: 0xFF8F5BDB),
-  ToplistConf(id: 71384707, name: '说唱榜', color: 0xFF2E7CF6),
-  ToplistConf(id: 745956260, name: 'ACG 榜', color: 0xFF27AE60),
+  ToplistConf(id: 991319590, name: '说唱榜', color: 0xFF6D4AFF),
+  ToplistConf(id: 2884035, name: '原创榜', color: 0xFFB252B8),
+  ToplistConf(id: 5059661515, name: '民谣榜', color: 0xFFC08B1D),
+  ToplistConf(id: 5059644681, name: '日语榜', color: 0xFFE0559C),
+  ToplistConf(id: 71385702, name: 'ACG 榜', color: 0xFF27AE60),
+  ToplistConf(id: 5059633707, name: '摇滚榜', color: 0xFF607D8B),
 ];
 
 class NeteaseRepository {
@@ -127,6 +136,77 @@ class NeteaseRepository {
         .map(PlaylistMeta.fromJson)
         .where((PlaylistMeta p) => p.id != 0)
         .toList(growable: false);
+  }
+
+  // ---------------------------------------------- 发现页（Zephyr 首页对齐）
+
+  /// 推荐新音乐（/personalized/newsong → result[]，每项 {song:{...}}）
+  Future<List<Song>> personalizedNewSongs({int limit = 12}) async {
+    final Map<String, Object?> res = await _api
+        .get('/personalized/newsong', <String, String>{'limit': '$limit'});
+    final Object? result = res['result'];
+    if (result is! List<Object?>) return const <Song>[];
+    final List<Song> out = <Song>[];
+    for (final Object? item in result) {
+      if (item is! Map<String, Object?>) continue;
+      final Object? song = item['song'];
+      if (song is! Map<String, Object?>) continue;
+      final Song s = Song.fromCloudJson(song);
+      if (s.id != 0) out.add(s);
+    }
+    return out;
+  }
+
+  /// 新歌速递（/top/song → data[]；type: 0全部 7华语 96欧美 8日本 16韩国）
+  Future<List<Song>> topSongs({int type = 0, int limit = 30}) async {
+    final Map<String, Object?> res = await _api.get(
+        '/top/song', <String, String>{'type': '$type', 'limit': '$limit'});
+    final Object? data = res['data'];
+    if (data is! List<Object?>) return const <Song>[];
+    return data
+        .whereType<Map<String, Object?>>()
+        .map(Song.fromCloudJson)
+        .where((Song s) => s.id != 0)
+        .toList(growable: false);
+  }
+
+  /// 每日推荐歌曲（/recommend/songs → data.dailySongs，需登录）
+  Future<List<Song>> recommendSongs() async {
+    final Map<String, Object?> res =
+        await _api.get('/recommend/songs', const <String, String>{});
+    final Object? data = res['data'];
+    final Object? songs =
+        (data is Map<String, Object?>) ? data['dailySongs'] : null;
+    return _songsFrom(songs);
+  }
+
+  /// 私人漫游/私人 FM（/personal_fm → data[]，需登录）
+  Future<List<Song>> personalFm() async {
+    final Map<String, Object?> res =
+        await _api.get('/personal_fm', const <String, String>{});
+    return _songsFrom(res['data']);
+  }
+
+  /// 每日推荐歌单（/recommend/resource → recommend[]，需登录；
+  /// 发现页「雷达歌单」入口数据源）
+  Future<List<PlaylistMeta>> recommendPlaylists() async {
+    final Map<String, Object?> res =
+        await _api.get('/recommend/resource', const <String, String>{});
+    final Object? recommend = res['recommend'];
+    if (recommend is! List<Object?>) return const <PlaylistMeta>[];
+    return recommend
+        .whereType<Map<String, Object?>>()
+        .map(PlaylistMeta.fromJson)
+        .where((PlaylistMeta p) => p.id != 0)
+        .toList(growable: false);
+  }
+
+  /// 榜单预览（/playlist/track/all，轻量只取前 N 行 —— 发现页榜单卡片
+  /// 与搜索页热榜列用；不触发全量 trackIds 补全请求）
+  Future<List<Song>> toplistPreview(int id, {int limit = 10}) async {
+    final Map<String, Object?> res = await _api.get('/playlist/track/all',
+        <String, String>{'id': '$id', 'limit': '$limit', 'offset': '0'});
+    return _songsFrom(res['songs']);
   }
 
   /// 歌单详情（榜单同构，亦复用此接口）。
@@ -469,6 +549,12 @@ class NeteaseRepository {
     if (code is int && code != 200) {
       throw ApiException('删除失败（$code）');
     }
+  }
+
+  /// 上传本地音乐到云盘（需求：音乐云盘增加上传本地音乐功能）。
+  /// 走 /cloud（multipart songFile），需登录 cookie；失败抛 ApiException。
+  Future<void> cloudUpload(String filePath, String fileName) async {
+    await _api.uploadCloudFile(filePath: filePath, fileName: fileName);
   }
 
   // -------------------------------------------------- 专辑 / 心动漫游

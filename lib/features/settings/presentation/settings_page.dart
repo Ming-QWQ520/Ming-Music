@@ -2,12 +2,14 @@
 ///
 /// 分组（需求：重构设置项，进行合理分类）：
 ///  - 账号：个人主页 / 登录状态 / 退出登录；
-///  - 外观：主题模式 / 液态玻璃 / 播放页背景；
+///  - 外观：主题模式 / 液态玻璃 / 应用图片背景 / 播放页背景；
 ///  - 播放：播放音质 / 播放页自定义 / MV 标识开关（默认开启）；
-///  - Mini 播放条：样式选择（紧凑极简嵌入导航栏，其余悬浮上方）；
+///  - Mini 播放条：样式选择 + 颜色/透明度自定义（需求：无色 65% 透明默认）；
 ///  - 缓存：歌曲音频缓存占用与清理（封面不再磁盘缓存）；
 ///  - 数据源 / 关于（仓库链接真实可点，需求：补全无实际作用功能）。
 library;
+
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -127,36 +129,80 @@ class SettingsPage extends ConsumerWidget {
                 onChanged: (GlassPref v) =>
                     ref.read(glassPrefProvider.notifier).set(v),
               ),
-              // 需求：应用图片背景（除播放页外的全局背景）
+              // 需求：应用图片背景（除播放页外的全局背景）。
+              // 修复「点击应用图片背景时无反应」：旧实现 value 依赖
+              // imagePath != null，未选图时打开开关立即回弹且无任何反馈；
+              // 现在开启且无图时自动拉起选图器（取消则保持关闭），
+              // 开关状态只由 enabled 驱动。
               SwitchListTile(
                 contentPadding:
                     const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
                 secondary: const Icon(Icons.wallpaper_rounded, size: 22),
                 title: const Text('应用图片背景', style: TextStyle(fontSize: 15)),
                 subtitle: Text(
-                    appBg.enabled && appBg.imagePath != null
-                        ? '已启用：除播放页外的所有页面显示自定义背景'
+                    appBg.enabled
+                        ? (appBg.imagePath != null
+                            ? '已启用：除播放页外的所有页面显示自定义背景'
+                            : '已开启，请选择背景图')
                         : '关闭时使用主题纯色底',
                     style: TextStyle(
                         fontSize: 12,
                         color: theme.colorScheme.onSurfaceVariant)),
-                value: appBg.enabled && appBg.imagePath != null,
+                value: appBg.enabled,
                 activeThumbColor: AppConstants.brandColor,
-                onChanged: (bool v) =>
-                    ref.read(appBackgroundProvider.notifier).setEnabled(v),
+                onChanged: (bool v) async {
+                  final AppBackgroundConfig cfg =
+                      ref.read(appBackgroundProvider);
+                  if (!v) {
+                    ref.read(appBackgroundProvider.notifier).setEnabled(false);
+                    return;
+                  }
+                  if (cfg.imagePath == null) {
+                    // 首次开启：直接选图（pickImage 成功后自动启用）
+                    await ref
+                        .read(appBackgroundProvider.notifier)
+                        .pickImage();
+                    if (!context.mounted) return;
+                    if (cfg.imagePath == null &&
+                        !ref.read(appBackgroundProvider).enabled) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('请选择一张背景图以启用')),
+                      );
+                    }
+                  } else {
+                    ref.read(appBackgroundProvider.notifier).setEnabled(true);
+                  }
+                },
               ),
-              if (appBg.enabled && appBg.imagePath != null)
+              if (appBg.enabled)
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
                   child: Row(
                     children: <Widget>[
+                      if (appBg.imagePath != null &&
+                          File(appBg.imagePath!).existsSync()) ...<Widget>[
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(8),
+                          child: Image.file(
+                            File(appBg.imagePath!),
+                            width: 46,
+                            height: 46,
+                            fit: BoxFit.cover,
+                            errorBuilder: (_, __, ___) =>
+                                const SizedBox(width: 46, height: 46),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                      ],
                       Expanded(
                         child: OutlinedButton.icon(
                           onPressed: () => ref
                               .read(appBackgroundProvider.notifier)
                               .pickImage(),
                           icon: const Icon(Icons.image_rounded, size: 18),
-                          label: const Text('选择背景图'),
+                          label: Text(appBg.imagePath == null
+                              ? '选择背景图'
+                              : '更换背景图'),
                         ),
                       ),
                       const SizedBox(width: 10),
@@ -172,19 +218,13 @@ class SettingsPage extends ConsumerWidget {
                 label: '播放页背景',
                 groups: const <(BackgroundType, String)>[
                   (BackgroundType.blurCover, '封面模糊'),
-                  (BackgroundType.gradient, '纯色渐变'),
+                  (BackgroundType.fluid, '流体'),
                   (BackgroundType.image, '自定义图片'),
                 ],
                 value: bg.type,
                 onChanged: (BackgroundType v) =>
                     ref.read(backgroundProvider.notifier).setType(v),
               ),
-              if (bg.type == BackgroundType.gradient)
-                _GradientPicker(
-                  selectedIndex: bg.gradientIndex,
-                  onSelected: (int i) =>
-                      ref.read(backgroundProvider.notifier).setGradientIndex(i),
-                ),
               if (bg.type == BackgroundType.image)
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
@@ -354,6 +394,18 @@ class SettingsPage extends ConsumerWidget {
                 value: np.miniStyle,
                 onChanged: (MiniPlayerStyle v) =>
                     ref.read(npSettingsProvider.notifier).setMiniStyle(v),
+              ),
+              // 需求：Mini 条无色 65% 透明，颜色可在设置自定义
+              _MiniColorRow(
+                value: np.miniColor,
+                onChanged: (int? argb) =>
+                    ref.read(npSettingsProvider.notifier).setMiniColor(argb),
+              ),
+              // 需求：透明度可在设置自定义（默认 65% 透明）
+              _MiniOpacityRow(
+                transparency: np.miniTransparency,
+                onChanged: (double v) =>
+                    ref.read(npSettingsProvider.notifier).setMiniTransparency(v),
               ),
             ],
           ),
@@ -670,54 +722,157 @@ class _ChoiceChip<T extends Object> extends StatelessWidget {
   }
 }
 
-class _GradientPicker extends StatelessWidget {
-  const _GradientPicker({
-    required this.selectedIndex,
-    required this.onSelected,
-  });
+// ---------------------------------------------------------------- Mini 条颜色/透明度
 
-  final int selectedIndex;
-  final ValueChanged<int> onSelected;
+/// Mini 条底色选择行（需求：无色默认 + 可自定义颜色）。
+/// 「无色」= 白色中性玻璃（miniColor = null）。
+class _MiniColorRow extends StatelessWidget {
+  const _MiniColorRow({required this.value, required this.onChanged});
+
+  final int? value;
+  final ValueChanged<int?> onChanged;
+
+  static const List<(int, String)> _presets = <(int, String)>[
+    (0xFF000000, '墨黑'),
+    (0xFFE2483D, '网易云红'),
+    (0xFFFF8A3D, '暖橙'),
+    (0xFFF5A623, '琥珀金'),
+    (0xFF27AE60, '翡翠绿'),
+    (0xFF17B8A6, '青碧'),
+    (0xFF2E7CF6, '海蓝'),
+    (0xFF7B4DFF, '星紫'),
+    (0xFFFF6FA5, '樱粉'),
+  ];
 
   @override
   Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Text('底板颜色',
+              style: TextStyle(
+                  fontSize: 14, color: theme.colorScheme.onSurface)),
+          const SizedBox(height: 8),
+          SizedBox(
+            height: 34,
+            child: ListView(
+              scrollDirection: Axis.horizontal,
+              children: <Widget>[
+                _swatch(
+                  context,
+                  color: null,
+                  label: '无色',
+                  selected: value == null,
+                ),
+                const SizedBox(width: 10),
+                for (final (int argb, String name) in _presets) ...<Widget>[
+                  _swatch(
+                    context,
+                    color: Color(argb),
+                    label: name,
+                    selected: value == argb,
+                  ),
+                  const SizedBox(width: 10),
+                ],
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _swatch(
+    BuildContext context, {
+    required Color? color,
+    required String label,
+    required bool selected,
+  }) {
+    final bool isColorless = color == null;
+    return GestureDetector(
+      onTap: () => onChanged(color?.toARGB32()),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 160),
+        padding: const EdgeInsets.symmetric(horizontal: 10),
+        decoration: BoxDecoration(
+          color: (color ?? Colors.white).withValues(alpha: selected ? 0.96 : 0.16),
+          borderRadius: BorderRadius.circular(17),
+          border: Border.all(
+            color: selected
+                ? AppConstants.brandColor
+                : Colors.white.withValues(alpha: 0.22),
+            width: selected ? 2 : 1,
+          ),
+        ),
+        height: 34,
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 12.5,
+                fontWeight: selected ? FontWeight.w700 : FontWeight.w400,
+                color: selected
+                    ? (isColorless ? Colors.black87 : Colors.white)
+                    : Theme.of(context).colorScheme.onSurface,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Mini 条透明度滑杆行（需求：默认 65% 透明，范围 20% - 95%）
+class _MiniOpacityRow extends StatelessWidget {
+  const _MiniOpacityRow({required this.transparency, required this.onChanged});
+
+  /// 透明度 0.20 - 0.95（越高越透）
+  final double transparency;
+  final ValueChanged<double> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
-      child: SizedBox(
-        height: 44,
-        child: ListView.separated(
-          scrollDirection: Axis.horizontal,
-          itemCount: kGradientPresets.length,
-          separatorBuilder: (_, __) => const SizedBox(width: 10),
-          itemBuilder: (BuildContext context, int index) {
-            final GradientPreset p = kGradientPresets[index];
-            final bool selected = index == selectedIndex;
-            return GestureDetector(
-              onTap: () => onSelected(index),
-              child: Container(
-                width: 74,
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(10),
-                  gradient: LinearGradient(
-                    colors: <Color>[p.top, p.bottom],
-                  ),
-                  border: selected
-                      ? Border.all(color: Colors.white, width: 2)
-                      : null,
-                ),
-                alignment: Alignment.center,
-                child: Text(
-                  p.name,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 11.5,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ),
-            );
-          },
-        ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Row(
+            children: <Widget>[
+              Text('底板透明度',
+                  style: TextStyle(
+                      fontSize: 14, color: theme.colorScheme.onSurface)),
+              const Spacer(),
+              Text('${(transparency * 100).round()}% 透明',
+                  style: TextStyle(
+                      fontSize: 12.5,
+                      color: theme.colorScheme.onSurfaceVariant)),
+            ],
+          ),
+          SliderTheme(
+            data: SliderTheme.of(context).copyWith(
+              trackHeight: 3,
+              thumbShape:
+                  const RoundSliderThumbShape(enabledThumbRadius: 8),
+              overlayShape:
+                  const RoundSliderOverlayShape(overlayRadius: 14),
+            ),
+            child: Slider(
+              value: transparency.clamp(0.20, 0.95),
+              min: 0.20,
+              max: 0.95,
+              activeColor: AppConstants.brandColor,
+              onChanged: onChanged,
+            ),
+          ),
+        ],
       ),
     );
   }
