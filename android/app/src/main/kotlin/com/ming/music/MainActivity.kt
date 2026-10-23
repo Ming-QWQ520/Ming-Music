@@ -7,7 +7,6 @@ import android.content.Intent
 import android.media.AudioAttributes
 import android.media.AudioDeviceInfo
 import android.media.AudioManager
-import android.media.AudioProductStrategy
 import android.media.MediaRoute2Info
 import android.media.MediaRouter2
 import android.media.MediaScannerConnection
@@ -368,19 +367,36 @@ class MainActivity : AudioServiceActivity() {
 
         // ① 策略级路由（主策略）：对 usage=MEDIA 的所有 AudioProductStrategy
         //    设置偏好设备；策略偏好立即作用于该策略的全部音轨（含播放中的）。
-        //    注意：数值 30 而非 VERSION_CODES.R —— compileSdk 兼容保险（同前例）。
+        //    ⚠️ 反射实现：AudioProductStrategy 在本项目 compileSdk(32) 的
+        //    android.jar 中不可直接引用（CI 实证 Unresolved reference），
+        //    反射绕开编译期依赖；运行时 API 29+ 设备均存在该类。
         if (Build.VERSION.SDK_INT >= 30) {
             try {
                 var ok = false
-                for (s in AudioProductStrategy.getAudioProductStrategies()) {
-                    val aa: AudioAttributes? = try { s.audioAttributes } catch (_: Throwable) { null }
+                val apsClass = Class.forName("android.media.AudioProductStrategy")
+                val strategies = apsClass
+                    .getMethod("getAudioProductStrategies")
+                    .invoke(null) as List<*>
+                val setPreferred = AudioManager::class.java.getMethod(
+                    "setPreferredDeviceForStrategy",
+                    apsClass,
+                    AudioDeviceInfo::class.java,
+                )
+                val getAttrs = apsClass.getMethod("getAudioAttributes")
+                for (s in strategies) {
+                    if (s == null) continue
+                    val aa = try {
+                        getAttrs.invoke(s) as? AudioAttributes
+                    } catch (_: Throwable) {
+                        null
+                    }
                     if (aa == null || aa.usage != AudioAttributes.USAGE_MEDIA) continue
                     try {
                         // device=null 清除偏好（交还系统自动路由）
-                        am.setPreferredDeviceForStrategy(s, device)
+                        setPreferred.invoke(am, s, device)
                         ok = true
                     } catch (t: Throwable) {
-                        Log.w(TAG, "strategy ${s.id} routing failed: $t")
+                        Log.w(TAG, "strategy routing failed: $t")
                     }
                 }
                 if (ok) {
