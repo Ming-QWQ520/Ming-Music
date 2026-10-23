@@ -1,10 +1,12 @@
 /// Mini 播放条（需求重构：样式预设只保留「经典条」与「紧凑极简」，
 /// 封面铺满/宽幅双行等其它样式全部移除；两种样式均带液态玻璃）：
 ///
-///  - classic 经典条（仿参考图）：深蓝液态玻璃圆角长条，悬浮导航栏上方 ——
+///  - classic 经典条：无色液态玻璃圆角长条，悬浮导航栏上方 ——
 ///    左圆形封面 + 单行「歌名 - 歌手」+ 进度圆环播放键 + 播放列表键；
 ///  - compact 紧凑极简：**嵌入底部导航栏「发现 ⇄ 我的」中间**（需求不变），
 ///    只显示歌曲封面，周围显示歌曲进度（圆环），点击主体进全屏；
+///  - 需求追加：底板无色 65% 透明，颜色/透明度可在设置自定义；
+///    出现时向上移动放大、消失时向下移动缩小（MiniBarSwitcher）；
 ///  - 进度：需求「无论任何样式都需显示进度」—— 经典条=播放键外圈圆环，
 ///    紧凑极简=封面周围圆环；
 ///  - `select` 只订阅 playing / currentTrack / hasQueue，进度环独立订阅；
@@ -25,6 +27,7 @@ import '../../../library/domain/track.dart';
 import '../../domain/np_settings.dart';
 import '../../../settings/providers/settings_providers.dart'
     show glassEnabledProvider;
+import '../../providers/np_settings_providers.dart';
 import '../../providers/player_providers.dart';
 import 'queue_sheet.dart';
 
@@ -112,6 +115,51 @@ class _RingPainter extends CustomPainter {
   @override
   bool shouldRepaint(_RingPainter oldDelegate) =>
       oldDelegate.progress != progress || oldDelegate.stroke != stroke;
+}
+
+// ---------------------------------------------------------------- 出入动画
+
+/// Mini 条统一出现/消失动画（需求：消失时向下移动缩小，出现时向上移动放大）：
+///  - 出现：从下方 1.35 倍高度处上滑 + 0.72 → 1.0 放大，easeOutCubic；
+///  - 消失：反向播放（下滑 + 缩小），easeInCubic；
+///  - AnimatedSwitcher 同时驱动新旧 child，退出动画期间旧条仍在移动，
+///    不会闪没。全局宿主（app.dart）与主骨架悬浮条共用。
+class MiniBarSwitcher extends StatelessWidget {
+  const MiniBarSwitcher({
+    super.key,
+    required this.visible,
+    required this.child,
+  });
+
+  /// false 时收起（向下缩小退出）；true 时展开（向上放大进入）
+  final bool visible;
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedSwitcher(
+      duration: const Duration(milliseconds: 360),
+      switchInCurve: Curves.easeOutCubic,
+      switchOutCurve: Curves.easeInCubic,
+      transitionBuilder: (Widget child, Animation<double> anim) {
+        // 进出共用一套插值：进入 0→1（上滑放大），退出 1→0（下滑缩小）
+        return SlideTransition(
+          position: Tween<Offset>(
+            begin: const Offset(0, 1.35),
+            end: Offset.zero,
+          ).animate(anim),
+          child: ScaleTransition(
+            scale: Tween<double>(begin: 0.72, end: 1).animate(anim),
+            child: child,
+          ),
+        );
+      },
+      child: visible
+          ? KeyedSubtree(key: const ValueKey<bool>(true), child: child)
+          : const SizedBox.shrink(key: ValueKey<bool>(false)),
+    );
+  }
 }
 
 // ---------------------------------------------------------------- 通用按钮
@@ -247,11 +295,11 @@ Widget _navAnimated(Widget child, Object key) => child
     .fadeIn(duration: 260.ms, curve: Curves.easeOut)
     .slideY(begin: 0.05, end: 0, duration: 260.ms, curve: Curves.easeOut);
 
-/// 经典条（需求重构：仿参考图 —— 深蓝色圆角长条 + 液态玻璃）：
+/// 经典条（需求重构：无色液态玻璃圆角长条，颜色/透明度可自定义）：
 ///  - 左侧圆形封面；
 ///  - 中间单行「歌名 - 歌手」；
 ///  - 右侧进度圆环播放键 + 播放列表键；
-///  - 底板：深蓝渐变液态玻璃（BackdropFilter 模糊 + 白描边高光），
+///  - 底板：液态玻璃（BackdropFilter 模糊 + 白描边高光），
 ///    性能红线允许（BackdropFilter 仅 Mini 条与底部 Sheet）。
 class _FloatClassic extends ConsumerWidget {
   const _FloatClassic();
@@ -264,7 +312,7 @@ class _FloatClassic extends ConsumerWidget {
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(14, 4, 14, 8),
-      child: _DeepBlueGlassPanel(
+      child: _GlassBarPanel(
         child: Row(
           children: <Widget>[
             // 左：圆形封面（Hero，点击进全屏）
@@ -306,42 +354,38 @@ class _FloatClassic extends ConsumerWidget {
   }
 }
 
-/// 深蓝液态玻璃面板（需求：经典条仿参考图深蓝色圆角长条 + 液态玻璃）。
-/// 玻璃关闭/低端机自动降级为不透明深蓝底。
-class _DeepBlueGlassPanel extends ConsumerWidget {
-  const _DeepBlueGlassPanel({required this.child});
+/// 无色液态玻璃面板（需求：不带颜色，65% 透明；颜色/透明度可在设置自定义）。
+/// 玻璃关闭/低端机自动降级为高不透明实色底。
+class _GlassBarPanel extends ConsumerWidget {
+  const _GlassBarPanel({required this.child});
 
   final Widget child;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final bool glass = ref.watch(glassEnabledProvider);
+    final NpPlayerSettings np = ref.watch(npSettingsProvider);
 
-    // 参考图观感：深蓝渐变圆角长条（顶部稍亮的蓝 → 深海蓝）
-    const List<Color> blueGradient = <Color>[
-      Color(0xFF2A3F72),
-      Color(0xFF18244A),
-    ];
+    // 需求：无色（白玻璃中性底）默认，可自定义底色；
+    // 填充不透明度 = 1 - 透明度（默认 65% 透明 → 0.35 alpha）
+    final Color tint = np.miniColor != null ? Color(np.miniColor!) : Colors.white;
+    final double fillAlpha = glass
+        ? (1.0 - np.miniTransparency).clamp(0.05, 0.85)
+        : 0.88; // 降级：高不透明实底保证可读
 
     final Widget content = Container(
       height: 58,
       padding: const EdgeInsets.fromLTRB(7, 7, 6, 7),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(29),
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: blueGradient
-              .map((Color c) => c.withValues(alpha: glass ? 0.82 : 1.0))
-              .toList(growable: false),
-        ),
+        color: tint.withValues(alpha: fillAlpha),
         border: Border.all(
-          color: Colors.white.withValues(alpha: glass ? 0.18 : 0.12),
+          color: Colors.white.withValues(alpha: 0.10 + fillAlpha * 0.16),
           width: 1,
         ),
         boxShadow: <BoxShadow>[
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.35),
+            color: Colors.black.withValues(alpha: 0.20 + fillAlpha * 0.16),
             blurRadius: 18,
             offset: const Offset(0, 6),
           ),

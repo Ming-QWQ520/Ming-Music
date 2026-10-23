@@ -1,8 +1,8 @@
 /// 设置域模型：背景系统配置 / 液态玻璃偏好 / 网易云音质等级。
 library;
 
-/// 背景系统类型
-enum BackgroundType { blurCover, gradient, image }
+/// 背景系统类型（需求：播放页去除纯色渐变，改为流体背景）
+enum BackgroundType { blurCover, fluid, image }
 
 /// 背景系统配置（持久化到 SharedPreferences）
 class BackgroundConfig {
@@ -25,7 +25,7 @@ class BackgroundConfig {
   /// 用于 AnimatedSwitcher 的 ValueKey：任一维度变化即触发平滑过渡
   Object get identityKey => switch (type) {
         BackgroundType.blurCover => 'blurCover',
-        BackgroundType.gradient => 'gradient-$gradientIndex',
+        BackgroundType.fluid => 'fluid',
         BackgroundType.image => 'image-${imagePath ?? 'none'}',
       };
 
@@ -51,10 +51,12 @@ class BackgroundConfig {
   factory BackgroundConfig.fromMap(Map<Object?, Object?> map) {
     final String typeName = map['type'] as String? ?? 'blurCover';
     return BackgroundConfig(
-      type: BackgroundType.values.firstWhere(
-        (BackgroundType t) => t.name == typeName,
-        orElse: () => BackgroundType.blurCover,
-      ),
+      // 需求：纯色渐变已移除 —— 历史 gradient 值统一迁移为流体背景
+      type: switch (typeName) {
+        'blurCover' => BackgroundType.blurCover,
+        'image' => BackgroundType.image,
+        _ => BackgroundType.fluid,
+      },
       gradientIndex: map['gradientIndex'] as int? ?? 0,
       imagePath: map['imagePath'] as String?,
     );

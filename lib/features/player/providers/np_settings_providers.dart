@@ -64,6 +64,14 @@ class NpSettingsNotifier extends Notifier<NpPlayerSettings> {
   void setMiniStyle(MiniPlayerStyle style) =>
       _commit(state.copyWith(miniStyle: style));
 
+  /// Mini 条底色（需求：设置中可自定义颜色；null = 无色）
+  void setMiniColor(int? argb) =>
+      _commit(state.copyWith(miniColor: argb, clearMiniColor: argb == null));
+
+  /// Mini 条透明度（需求：设置中可自定义；0.20-0.95，默认 0.65）
+  void setMiniTransparency(double v) =>
+      _commit(state.copyWith(miniTransparency: v.clamp(0.20, 0.95)));
+
   /// 播放页始终亮屏（需求：设置中可开启）
   void setPlayerKeepScreenOn(bool on) =>
       _commit(state.copyWith(playerKeepScreenOn: on));

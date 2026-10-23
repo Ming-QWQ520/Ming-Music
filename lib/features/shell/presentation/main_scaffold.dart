@@ -145,7 +145,11 @@ class _MainScaffoldState extends ConsumerState<MainScaffold> {
                       child: IndexedStack(
                           index: tab, children: MainScaffold._pages),
                     ),
-                    const MiniPlayer(),
+                    // 需求：平板 Mini 条同样带 上滑放大/下滑缩小 出入动画
+                    MiniBarSwitcher(
+                      visible: ref.watch(hasQueueProvider),
+                      child: const MiniPlayer(),
+                    ),
                   ],
                 ),
               ),
@@ -184,7 +188,12 @@ class _MainScaffoldState extends ConsumerState<MainScaffold> {
         bottomNavigationBar: Column(
           mainAxisSize: MainAxisSize.min,
           children: <Widget>[
-            if (!navEmbedded) const MiniPlayer(embedded: false),
+            // 需求：悬浮 Mini 条（经典条）出现/消失带 上滑放大/下滑缩小 动画，
+            // 与全局宿主（子页面）共用 MiniBarSwitcher，显隐规则一致
+            MiniBarSwitcher(
+              visible: !navEmbedded && hasQueue,
+              child: const MiniPlayer(embedded: false),
+            ),
             navBar,
           ],
         ),

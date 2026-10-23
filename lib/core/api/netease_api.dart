@@ -193,6 +193,98 @@ class NeteaseApi {
     return jsonDecode(text);
   }
 
+  /// 云盘上传本地音乐（需求：音乐云盘增加上传本地音乐功能）。
+  ///
+  /// 走 api-enhanced `/cloud` 路由：multipart/form-data，字段名 `songFile`
+  /// （与官方文档 avatar/playlist 封面上传同套路）。cookie 以 query 透传
+  /// （服务端从 query/body 读取）。上传耗时与文件体积正相关：
+  ///  - 超时放宽到 5 分钟，不参与统一 1 次重试（避免重复上传）；
+  ///  - 成功返回 {code:200, privateCloud:{...}}，失败抛 ApiException。
+  Future<Map<String, Object?>> uploadCloudFile({
+    required String filePath,
+    required String fileName,
+  }) async {
+    final String? cookie = await effectiveCookie;
+    if (cookie == null || cookie.isEmpty) {
+      throw ApiException('云盘上传需要登录后使用');
+    }
+    if (!_userCookieExists) {
+      throw ApiException('云盘上传需要登录后使用');
+    }
+
+    final File file = File(filePath);
+    if (!file.existsSync()) {
+      throw ApiException('本地文件不存在：$fileName');
+    }
+    final List<int> bytes = await file.readAsBytes();
+
+    final StringBuffer query = StringBuffer('timestamp=')
+      ..write(DateTime.now().millisecondsSinceEpoch)
+      ..write('&cookie=')
+      ..write(Uri.encodeQueryComponent(cookie));
+    final Uri uri = Uri.parse('$baseUrl/cloud?$query');
+
+    final String boundary =
+        'ming${DateTime.now().millisecondsSinceEpoch.toRadixString(16)}';
+    final HttpClientRequest request = await _client.postUrl(uri);
+    request.headers.set(HttpHeaders.contentTypeHeader,
+        'multipart/form-data; boundary=$boundary');
+    request.headers.set(HttpHeaders.acceptHeader, 'application/json');
+
+    final StringBuffer head = StringBuffer()
+      ..write('--$boundary\r\n')
+      ..write('Content-Disposition: form-data; name="songFile"; filename="')
+      ..write(fileName.replaceAll('"', ''))
+      ..write('"\r\n')
+      ..write('Content-Type: ${_audioMime(fileName)}\r\n\r\n');
+    request.add(utf8.encode(head.toString()));
+    request.add(bytes);
+    request.add(utf8.encode('\r\n--$boundary--\r\n'));
+
+    final HttpClientResponse response =
+        await request.close().timeout(const Duration(minutes: 5));
+    final String text = await response
+        .transform(utf8.decoder)
+        .join()
+        .timeout(const Duration(minutes: 1));
+    if (response.statusCode != 200) {
+      throw ApiException('上传失败 HTTP ${response.statusCode}',
+          code: response.statusCode);
+    }
+    final Object? decoded = jsonDecode(text);
+    if (decoded is! Map<String, Object?>) {
+      throw ApiException('上传响应格式异常');
+    }
+    final Object? code = decoded['code'];
+    if (code is int && code != 200) {
+      throw ApiException('上传失败（$code）：请检查文件大小与格式');
+    }
+    final Object? body = decoded['body'];
+    if (body is Map<String, Object?>) {
+      final Object? bodyCode = body['code'];
+      if (bodyCode is int && bodyCode != 200) {
+        throw ApiException('上传失败（$bodyCode）：请检查文件大小与格式');
+      }
+    }
+    return decoded;
+  }
+
+  /// 当前是否有登录 cookie（云盘上传等强登录接口的前置校验）
+  bool get _userCookieExists => _userCookie != null;
+
+  /// 按扩展名猜 MIME（云盘上传 multipart Content-Type 用）
+  static String _audioMime(String fileName) {
+    final String lower = fileName.toLowerCase();
+    if (lower.endsWith('.flac')) return 'audio/flac';
+    if (lower.endsWith('.m4a') || lower.endsWith('.aac')) {
+      return 'audio/mp4a-latm';
+    }
+    if (lower.endsWith('.wav')) return 'audio/wav';
+    if (lower.endsWith('.ogg')) return 'audio/ogg';
+    if (lower.endsWith('.ape')) return 'audio/x-ape';
+    return 'audio/mpeg';
+  }
+
   /// 游客 cookie（MUSIC_U）：内存 → 磁盘 → 远程获取。
   /// 获取失败不阻塞请求（多数浏览接口匿名可用）。
   Future<String?> _anonymousCookie() async {

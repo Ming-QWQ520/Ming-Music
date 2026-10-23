@@ -15,8 +15,6 @@ import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../../../core/constants/app_constants.dart';
-
 /// 本地存储键名由 core/storage/prefs_keys.dart 统一管理
 /// （import 供本文件使用，export 供下游使用）
 import '../../../core/storage/prefs_keys.dart';
@@ -62,13 +60,6 @@ class BackgroundNotifier extends Notifier<BackgroundConfig> {
   }
 
   void setType(BackgroundType type) => _commit(state.copyWith(type: type));
-
-  void setGradientIndex(int index) {
-    _commit(state.copyWith(
-      type: BackgroundType.gradient,
-      gradientIndex: index.clamp(0, kGradientPresets.length - 1),
-    ));
-  }
 
   /// 从相册选择本地图片并持久化（temp 文件会被系统回收，必须拷贝）
   Future<void> pickImage() async {
