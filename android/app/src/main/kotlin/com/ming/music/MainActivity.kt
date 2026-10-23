@@ -361,7 +361,9 @@ class MainActivity : AudioServiceActivity() {
         }
         // ② 系统级 A2DP 路由（Android 10 实测生效；API 33+ 系统弃用且可能无效，
         //    此时仅保留策略①③）。speaker=关 A2DP 回落扬声器，bluetooth=开 A2DP。
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISI && mode != "default") {
+        // 注意：数值 33 而非 VERSION_CODES.TIRAMISI —— compileSdk 由
+        // flutter.compileSdkVersion 决定，CI 环境可能低于 33 无该常量
+        if (Build.VERSION.SDK_INT < 33 && mode != "default") {
             try {
                 @Suppress("DEPRECATION")
                 am.setBluetoothA2dpOn(mode == "bluetooth")
