@@ -243,3 +243,129 @@ class PreloadNextNotifier extends Notifier<bool> {
     _prefs.setBool(PrefsKeys.preloadNext, on);
   }
 }
+
+// ---------------------------------------------------------------- LRU 缓存上限
+
+/// LRU 缓存容量上限（字节）：需求「默认最大缓存 3GB，可在缓存音乐页
+/// 自行更改最大缓存，也可关闭此功能（关闭走确认弹窗）」。
+/// 纯持久化状态；与 SongCacheService 的同步由 player 层
+/// cacheConfigSyncProvider 统一执行（避免循环依赖）。
+final NotifierProvider<CacheLimitNotifier, int> cacheLimitProvider =
+    NotifierProvider<CacheLimitNotifier, int>(CacheLimitNotifier.new);
+
+class CacheLimitNotifier extends Notifier<int> {
+  late SharedPreferences _prefs;
+
+  @override
+  int build() {
+    _prefs = ref.watch(sharedPreferencesProvider);
+    final int saved = _prefs.getInt(PrefsKeys.cacheMaxBytes) ?? 0;
+    if (saved > 0) return saved;
+    return 3 * 1024 * 1024 * 1024; // 默认 3GB（需求）
+  }
+
+  void set(int bytes) {
+    // 下限 512MB，防止误设极小值导致频繁清理
+    final int v = bytes < 512 * 1024 * 1024 ? 512 * 1024 * 1024 : bytes;
+    state = v;
+    _prefs.setInt(PrefsKeys.cacheMaxBytes, v);
+  }
+}
+
+// ---------------------------------------------------------------- 应用图片背景
+
+/// 应用图片背景配置（需求：除播放页面外的全局图片背景）：
+/// enabled=false 时所有页面回退主题纯色底。
+class AppBackgroundConfig {
+  const AppBackgroundConfig({this.enabled = false, this.imagePath});
+
+  static const AppBackgroundConfig defaults = AppBackgroundConfig();
+
+  final bool enabled;
+  final String? imagePath;
+
+  Object get identityKey => '$enabled-${imagePath ?? 'none'}';
+
+  Map<String, Object?> toMap() => <String, Object?>{
+        'enabled': enabled,
+        'imagePath': imagePath,
+      };
+
+  AppBackgroundConfig copyWith({bool? enabled, String? imagePath}) {
+    return AppBackgroundConfig(
+      enabled: enabled ?? this.enabled,
+      imagePath: imagePath ?? this.imagePath,
+    );
+  }
+
+  static AppBackgroundConfig fromMap(Map<Object?, Object?> map) {
+    return AppBackgroundConfig(
+      enabled: map['enabled'] == true,
+      imagePath: map['imagePath'] as String?,
+    );
+  }
+}
+
+final NotifierProvider<AppBackgroundNotifier, AppBackgroundConfig>
+    appBackgroundProvider =
+    NotifierProvider<AppBackgroundNotifier, AppBackgroundConfig>(
+        AppBackgroundNotifier.new);
+
+class AppBackgroundNotifier extends Notifier<AppBackgroundConfig> {
+  late SharedPreferences _prefs;
+
+  @override
+  AppBackgroundConfig build() {
+    _prefs = ref.watch(sharedPreferencesProvider);
+    final String? raw = _prefs.getString(PrefsKeys.appBackground);
+    if (raw != null) {
+      try {
+        final Object? decoded = jsonDecode(raw);
+        if (decoded is Map<String, Object?>) {
+          return AppBackgroundConfig.fromMap(decoded);
+        }
+      } catch (_) {
+        // 脏数据 → 默认
+      }
+    }
+    return AppBackgroundConfig.defaults;
+  }
+
+  void _commit(AppBackgroundConfig next) {
+    state = next;
+    _prefs.setString(PrefsKeys.appBackground, jsonEncode(next.toMap()));
+  }
+
+  /// 从相册选择图片并持久化（temp 文件会被系统回收，必须拷贝）
+  Future<void> pickImage() async {
+    final XFile? picked = await ImagePicker()
+        .pickImage(source: ImageSource.gallery, imageQuality: 85);
+    if (picked == null) return;
+    final Directory docs = await getApplicationDocumentsDirectory();
+    final Directory bgDir = Directory('${docs.path}/app_backgrounds');
+    if (!bgDir.existsSync()) bgDir.createSync(recursive: true);
+    final String target =
+        '${bgDir.path}/app_bg_${DateTime.now().millisecondsSinceEpoch}.jpg';
+    await File(picked.path).copy(target);
+    // 清理旧图避免空间膨胀
+    final String? old = state.imagePath;
+    if (old != null && File(old).existsSync()) {
+      try {
+        File(old).deleteSync();
+      } catch (_) {}
+    }
+    _commit(AppBackgroundConfig(enabled: true, imagePath: target));
+  }
+
+  void setEnabled(bool on) => _commit(state.copyWith(enabled: on));
+
+  void clear() {
+    final String? old = state.imagePath;
+    if (old != null && File(old).existsSync()) {
+      try {
+        File(old).deleteSync();
+      } catch (_) {}
+    }
+    _commit(AppBackgroundConfig.defaults);
+  }
+}

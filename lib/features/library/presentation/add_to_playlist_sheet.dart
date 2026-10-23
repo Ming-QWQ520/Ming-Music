@@ -13,7 +13,7 @@ import '../../auth/data/netease_auth_repository.dart' show NeteaseUserPlaylist;
 import '../../auth/presentation/login_sheet.dart';
 import '../../auth/providers/auth_providers.dart';
 import '../../discover/data/netease_providers.dart';
-
+import '../../../core/widgets/sheet_host.dart' show showMingSheet;
 
 /// 打开「添加至歌单」弹窗。返回操作结果（关闭弹窗后 toast）。
 Future<void> showAddToPlaylistSheet(
@@ -35,10 +35,9 @@ Future<void> showAddToPlaylistSheet(
     );
     return;
   }
-  await showModalBottomSheet<void>(
-    context: context,
+  await showMingSheet<void>(
+    context,
     isScrollControlled: true,
-    backgroundColor: Colors.transparent,
     builder: (BuildContext ctx) => _AddToPlaylistSheet(trackIds: trackIds),
   );
 }
@@ -214,7 +213,8 @@ class _AddToPlaylistSheetState extends ConsumerState<_AddToPlaylistSheet> {
                               width: 44,
                               height: 44,
                               decoration: BoxDecoration(
-                                color: theme.colorScheme.surfaceContainerHighest,
+                                color:
+                                    theme.colorScheme.surfaceContainerHighest,
                                 borderRadius: BorderRadius.circular(8),
                               ),
                               child: _creating
@@ -250,8 +250,9 @@ class _AddToPlaylistSheetState extends ConsumerState<_AddToPlaylistSheet> {
                                           strokeWidth: 2),
                                     )
                                   : null,
-                              onTap:
-                                  _busyId == null ? () => _addTo(p.id, p.name) : null,
+                              onTap: _busyId == null
+                                  ? () => _addTo(p.id, p.name)
+                                  : null,
                             ),
                         ],
                       ),

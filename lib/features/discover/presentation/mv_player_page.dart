@@ -27,7 +27,8 @@ Future<void> openMvPlayer(
 }
 
 class MvPlayerPage extends ConsumerStatefulWidget {
-  const MvPlayerPage({super.key, required this.mvId, required this.fallbackTitle});
+  const MvPlayerPage(
+      {super.key, required this.mvId, required this.fallbackTitle});
 
   final int mvId;
   final String fallbackTitle;
@@ -59,8 +60,7 @@ class _MvPlayerPageState extends ConsumerState<MvPlayerPage> {
     try {
       // 详情与地址并行：标题/播放量 + 直链（闭环两接口缺一不可）
       final repo = ref.read(neteaseRepositoryProvider);
-      final results =
-          await Future.wait<Object?>(<Future<Object?>>[
+      final results = await Future.wait<Object?>(<Future<Object?>>[
         repo.mvDetail(widget.mvId),
         repo.mvUrl(widget.mvId),
       ]);
@@ -179,7 +179,8 @@ class _MvPlayerPageState extends ConsumerState<MvPlayerPage> {
                         ),
                       ),
                       Icon(Icons.play_arrow_rounded,
-                          size: 15, color: Colors.white.withValues(alpha: 0.55)),
+                          size: 15,
+                          color: Colors.white.withValues(alpha: 0.55)),
                       const SizedBox(width: 2),
                       Text(
                         '${_formatCount(_playCount)}次播放',
@@ -283,8 +284,10 @@ class _MvPlayerPageState extends ConsumerState<MvPlayerPage> {
               child: SliderTheme(
                 data: SliderTheme.of(context).copyWith(
                   trackHeight: 2.5,
-                  thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
-                  overlayShape: const RoundSliderOverlayShape(overlayRadius: 12),
+                  thumbShape:
+                      const RoundSliderThumbShape(enabledThumbRadius: 6),
+                  overlayShape:
+                      const RoundSliderOverlayShape(overlayRadius: 12),
                 ),
                 child: Slider(
                   value: progress.clamp(0.0, 1.0),

@@ -156,8 +156,8 @@ class QueuePersistence {
         }
       }
       if (tracks.isEmpty) return null;
-      final int index =
-          ((decoded['index'] as num?)?.toInt() ?? 0).clamp(0, tracks.length - 1);
+      final int index = ((decoded['index'] as num?)?.toInt() ?? 0)
+          .clamp(0, tracks.length - 1);
       return (
         queue: tracks,
         index: index,
@@ -199,11 +199,13 @@ class QueuePersistence {
     if (tracks.isEmpty) return loadHistory();
     final List<QueueSnapshot> current = List<QueueSnapshot>.of(loadHistory())
       ..removeWhere((QueueSnapshot s) => s.sameContent(title, tracks));
-    current.insert(0, QueueSnapshot(
-      title: title,
-      tracks: tracks,
-      savedAt: DateTime.now(),
-    ));
+    current.insert(
+        0,
+        QueueSnapshot(
+          title: title,
+          tracks: tracks,
+          savedAt: DateTime.now(),
+        ));
     while (current.length > maxHistory) {
       current.removeLast();
     }
@@ -238,8 +240,8 @@ class QueuePersistence {
     try {
       final Object? decoded = jsonDecode(json);
       if (decoded is! Map<String, Object?>) return const <int, int>{};
-      return decoded.map((String k, Object? v) => MapEntry<int, int>(
-          int.tryParse(k) ?? 0, (v as num?)?.toInt() ?? 0));
+      return decoded.map((String k, Object? v) =>
+          MapEntry<int, int>(int.tryParse(k) ?? 0, (v as num?)?.toInt() ?? 0));
     } catch (e) {
       debugPrint('loadPlayStats failed: $e');
       return const <int, int>{};
@@ -253,8 +255,7 @@ class QueuePersistence {
       stats[neteaseId] = (stats[neteaseId] ?? 0) + 1;
       // jsonEncode 不支持 int 键：转字符串键
       final String json = jsonEncode(<String, int>{
-        for (final MapEntry<int, int> e in stats.entries)
-          '${e.key}': e.value,
+        for (final MapEntry<int, int> e in stats.entries) '${e.key}': e.value,
       });
       await _prefs.setString(PrefsKeys.playStats, json);
     } catch (e) {

@@ -232,7 +232,9 @@ String normalizeNeteaseUrl(String? url) {
     final Uri u = Uri.parse(url);
     // 仅对已知网易 CDN 域名改写，避免误伤第三方 http 资源
     const List<String> hosts = <String>[
-      'music.126.net', 'music.163.com', '126.net',
+      'music.126.net',
+      'music.163.com',
+      '126.net',
     ];
     for (final String h in hosts) {
       if (u.host.endsWith(h)) return 'https://${url.substring(7)}';

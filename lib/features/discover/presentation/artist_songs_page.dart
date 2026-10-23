@@ -34,9 +34,8 @@ class _ArtistSongsPageState extends ConsumerState<ArtistSongsPage> {
   @override
   void initState() {
     super.initState();
-    _future = ref
-        .read(neteaseRepositoryProvider)
-        .artistTopSongs(widget.artistId);
+    _future =
+        ref.read(neteaseRepositoryProvider).artistTopSongs(widget.artistId);
   }
 
   @override
@@ -84,8 +83,8 @@ class _ArtistSongsPageState extends ConsumerState<ArtistSongsPage> {
                             fontSize: 16,
                             fontStyle: FontStyle.italic,
                             fontWeight: FontWeight.w800,
-                            color: AppConstants.brandColor
-                                .withValues(alpha: 0.85),
+                            color:
+                                AppConstants.brandColor.withValues(alpha: 0.85),
                           ),
                         ),
                       ),
@@ -137,8 +136,7 @@ class _ArtistSongsPageState extends ConsumerState<ArtistSongsPage> {
                     : null,
                 onTap: () => _play(s),
                 // 需求：所有歌曲长按弹出统一操作菜单
-                onLongPress: () =>
-                    showSongActionsSheet(context, s.toTrack()),
+                onLongPress: () => showSongActionsSheet(context, s.toTrack()),
               );
             },
           );
@@ -159,8 +157,8 @@ class _ArtistSongsPageState extends ConsumerState<ArtistSongsPage> {
             .showSnackBar(SnackBar(content: Text(error)));
       }
     } else {
-      await notifier.playSongs(<Track>[song.toTrack()],
-          queueTitle: widget.artistName);
+      await notifier
+          .playSongs(<Track>[song.toTrack()], queueTitle: widget.artistName);
     }
   }
 }

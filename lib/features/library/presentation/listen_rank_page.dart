@@ -157,10 +157,10 @@ class _ListenRankPageState extends ConsumerState<ListenRankPage> {
           song: s,
           trackIndex: index + 1,
           onPlay: () => ref.read(playerProvider.notifier).playSongs(
-                <Track>[for (final PlayRecordSong x in items) x.song.toTrack()],
-                startIndex: index,
-                queueTitle: _week ? '听歌排行 · 最近一周' : '听歌排行 · 所有时间',
-              ),
+            <Track>[for (final PlayRecordSong x in items) x.song.toTrack()],
+            startIndex: index,
+            queueTitle: _week ? '听歌排行 · 最近一周' : '听歌排行 · 所有时间',
+          ),
           onMore: () => showSongActionsSheet(context, s.toTrack()),
           onLongPress: () => showSongActionsSheet(context, s.toTrack()),
           trailing: Padding(

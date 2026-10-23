@@ -89,9 +89,7 @@ class _CloudDrivePageState extends ConsumerState<CloudDrivePage> {
     if (ok != true) return;
     setState(() => _deletingId = item.song.id);
     try {
-      await ref
-          .read(neteaseRepositoryProvider)
-          .cloudDelete(item.song.id);
+      await ref.read(neteaseRepositoryProvider).cloudDelete(item.song.id);
       if (!mounted) return;
       ScaffoldMessenger.of(context)
           .showSnackBar(const SnackBar(content: Text('已删除')));

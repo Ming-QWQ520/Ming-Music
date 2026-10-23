@@ -13,11 +13,22 @@ class AppTheme {
 
   static const Color seedColor = AppConstants.brandColor;
 
-  static ThemeData light() => _base(Brightness.light);
+  /// 未启用图片背景时的页面底色（亮/暗）
+  static const Color lightScaffold = Color(0xFFF6F5FB);
+  static const Color darkScaffoldFallback = Color(0xFF121212);
 
-  static ThemeData dark() => _base(Brightness.dark);
+  /// [transparentScaffold]：需求「全局图片背景（除播放页外）」启用时，
+  /// 页面底色透明化以透出 builder 层的背景图；未启用时保持实色底。
+  static ThemeData light({bool transparentScaffold = false}) =>
+      _base(Brightness.light, transparentScaffold: transparentScaffold);
 
-  static ThemeData _base(Brightness brightness) {
+  static ThemeData dark({bool transparentScaffold = false}) =>
+      _base(Brightness.dark, transparentScaffold: transparentScaffold);
+
+  static ThemeData _base(
+    Brightness brightness, {
+    bool transparentScaffold = false,
+  }) {
     final ColorScheme scheme = ColorScheme.fromSeed(
       seedColor: seedColor,
       brightness: brightness,
@@ -27,8 +38,9 @@ class AppTheme {
     return ThemeData(
       useMaterial3: true,
       colorScheme: scheme,
-      scaffoldBackgroundColor:
-          isDark ? const Color(0xFF121212) : const Color(0xFFF6F5FB),
+      scaffoldBackgroundColor: transparentScaffold
+          ? Colors.transparent
+          : (isDark ? darkScaffoldFallback : lightScaffold),
       appBarTheme: AppBarTheme(
         backgroundColor: Colors.transparent,
         surfaceTintColor: Colors.transparent,

@@ -48,8 +48,7 @@ class _LikedSongsPageState extends ConsumerState<LikedSongsPage> {
       final List<Song> out = <Song>[];
       // song/detail 一次最多 ~1000 id，按 200 分块稳妥
       for (int i = 0; i < ids.length; i += 200) {
-        final List<int> chunk =
-            ids.sublist(i, (i + 200).clamp(0, ids.length));
+        final List<int> chunk = ids.sublist(i, (i + 200).clamp(0, ids.length));
         out.addAll(
             await ref.read(neteaseRepositoryProvider).songDetails(chunk));
       }
@@ -163,9 +162,7 @@ class _LikedSongsPageState extends ConsumerState<LikedSongsPage> {
     if (songs.isEmpty) {
       return Center(
         child: Text(
-          auth.likedIds.isEmpty
-              ? '还没有喜欢的歌曲\n在播放页点击红心即可喜欢'
-              : '加载失败，下拉重试',
+          auth.likedIds.isEmpty ? '还没有喜欢的歌曲\n在播放页点击红心即可喜欢' : '加载失败，下拉重试',
           textAlign: TextAlign.center,
           style: TextStyle(
             color: Theme.of(context).colorScheme.onSurfaceVariant,
@@ -202,7 +199,8 @@ class _LikedSongsPageState extends ConsumerState<LikedSongsPage> {
             song: songs[index],
             onPlay: () => _playAll(index),
             onMore: () => showSongActionsSheet(context, songs[index].toTrack()),
-            onLongPress: () => showSongActionsSheet(context, songs[index].toTrack()),
+            onLongPress: () =>
+                showSongActionsSheet(context, songs[index].toTrack()),
           ),
         ),
         const SliverToBoxAdapter(child: SizedBox(height: 24)),

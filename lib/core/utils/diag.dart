@@ -120,8 +120,7 @@ class Diag {
   static String get sessionLog => _lines.join('\n');
 
   /// 三段合并（设置页展示用）：上次启动 + 上次原生崩溃 + 本次启动
-  static String get combinedLog =>
-      '===== 上次启动 =====\n$_lastRun\n'
+  static String get combinedLog => '===== 上次启动 =====\n$_lastRun\n'
       '===== 上次原生崩溃（如有） =====\n'
       '${_lastNativeCrash.isEmpty ? '（无）' : _lastNativeCrash}\n'
       '===== 本次启动 =====\n${_lines.join('\n')}';
@@ -193,8 +192,11 @@ class Diag {
 
   static String _firstFrames(StackTrace? st, int n) {
     if (st == null) return '<null>';
-    final List<String> lines =
-        st.toString().split('\n').where((String l) => l.trim().isNotEmpty).toList();
+    final List<String> lines = st
+        .toString()
+        .split('\n')
+        .where((String l) => l.trim().isNotEmpty)
+        .toList();
     return lines.take(n).join(' | ');
   }
 }
@@ -225,7 +227,8 @@ class _DiagErrorPage extends StatelessWidget {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: <Widget>[
-                const Icon(Icons.error_outline, color: Color(0xFFE57373), size: 48),
+                const Icon(Icons.error_outline,
+                    color: Color(0xFFE57373), size: 48),
                 const SizedBox(height: 16),
                 const Text(
                   '页面出现了一点问题',
@@ -279,7 +282,9 @@ class _DiagErrorPage extends StatelessWidget {
                   onPressed: () async {
                     try {
                       await Clipboard.setData(
-                        ClipboardData(text: 'MingMusic 诊断\n$summary\n${Diag.reportForCopy}'),
+                        ClipboardData(
+                            text:
+                                'MingMusic 诊断\n$summary\n${Diag.reportForCopy}'),
                       );
                     } catch (_) {}
                   },

@@ -110,8 +110,7 @@ final Provider<ParsedLyrics> currentLyricsProvider =
       // 翻译/音译对 yrc 与 lrc 两种形态都解析（修复英文歌无中文翻译：
       // 此前 yrc 分支提前 return 丢弃 tlyric）
       Map<int, String> translationsOf() {
-        if (data.translationText == null ||
-            data.translationText!.isEmpty) {
+        if (data.translationText == null || data.translationText!.isEmpty) {
           return const <int, String>{};
         }
         final Map<int, String> out = <int, String>{};
@@ -122,8 +121,7 @@ final Provider<ParsedLyrics> currentLyricsProvider =
       }
 
       Map<int, String> romanizationsOf() {
-        if (data.romanizationText == null ||
-            data.romanizationText!.isEmpty) {
+        if (data.romanizationText == null || data.romanizationText!.isEmpty) {
           return const <int, String>{};
         }
         final Map<int, String> out = <int, String>{};

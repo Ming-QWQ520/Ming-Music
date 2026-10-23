@@ -20,6 +20,8 @@ import 'package:just_audio/just_audio.dart' show AudioPlayer;
 import '../../../../core/constants/app_constants.dart';
 import '../../../../core/utils/platform_actions.dart';
 import '../../providers/player_providers.dart';
+import '../../../../core/widgets/sheet_host.dart'
+    show GlassSheet, showMingSheet;
 
 /// 输出模式：auto = 跟随系统（连接蓝牙自动切蓝牙）；speaker = 强制扬声器；
 /// bluetooth = 强制蓝牙（deviceId 定位具体设备）。
@@ -31,10 +33,9 @@ final StateProvider<AudioOutputMode> audioOutputModeProvider =
 
 /// 打开媒体输出弹窗
 Future<void> showMediaOutputSheet(BuildContext context) {
-  return showModalBottomSheet<void>(
-    context: context,
+  return showMingSheet<void>(
+    context,
     isScrollControlled: true,
-    backgroundColor: Colors.transparent,
     builder: (BuildContext context) => const _MediaOutputSheet(),
   );
 }
@@ -70,8 +71,9 @@ class _MediaOutputSheetState extends ConsumerState<_MediaOutputSheet> {
     super.dispose();
   }
 
-  List<Map<String, Object?>> get _btDevices =>
-      _devices.where((Map<String, Object?> d) => d['bluetooth'] == true).toList();
+  List<Map<String, Object?>> get _btDevices => _devices
+      .where((Map<String, Object?> d) => d['bluetooth'] == true)
+      .toList();
 
   Future<void> _refreshDevices({bool silent = false}) async {
     final List<Map<String, Object?>> devices =
@@ -161,13 +163,9 @@ class _MediaOutputSheetState extends ConsumerState<_MediaOutputSheet> {
     final List<Map<String, Object?>> bt = _btDevices;
     final bool hasBt = bt.isNotEmpty;
 
-    return Container(
-      constraints: BoxConstraints(
-          maxHeight: MediaQuery.sizeOf(context).height * 0.72),
-      decoration: const BoxDecoration(
-        color: AppConstants.darkSurface,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
-      ),
+    // 液态玻璃弹窗底板（需求）
+    return GlassSheet(
+      maxHeight: MediaQuery.sizeOf(context).height * 0.72,
       child: SafeArea(
         child: SingleChildScrollView(
           padding: const EdgeInsets.fromLTRB(20, 10, 20, 16),
@@ -188,8 +186,7 @@ class _MediaOutputSheetState extends ConsumerState<_MediaOutputSheet> {
               const SizedBox(height: 14),
               Text('输出设备',
                   style: TextStyle(
-                      fontSize: 13,
-                      color: theme.colorScheme.onSurfaceVariant)),
+                      fontSize: 13, color: theme.colorScheme.onSurfaceVariant)),
               const SizedBox(height: 4),
               if (_switching)
                 const Padding(
@@ -262,8 +259,7 @@ class _MediaOutputSheetState extends ConsumerState<_MediaOutputSheet> {
               // ---------- 蓝牙设备 ----------
               Text('蓝牙设备',
                   style: TextStyle(
-                      fontSize: 13,
-                      color: theme.colorScheme.onSurfaceVariant)),
+                      fontSize: 13, color: theme.colorScheme.onSurfaceVariant)),
               const SizedBox(height: 4),
               if (bt.isEmpty)
                 Padding(

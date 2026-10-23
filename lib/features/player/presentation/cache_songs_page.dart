@@ -12,6 +12,8 @@ import '../../../core/constants/app_constants.dart';
 import '../../../core/widgets/cover_image.dart';
 import '../../library/domain/track.dart';
 import '../providers/cache_providers.dart';
+import '../../settings/providers/settings_providers.dart'
+    show listenCacheProvider, cacheLimitProvider;
 import '../providers/player_providers.dart';
 import '../services/song_cache.dart';
 
@@ -22,6 +24,8 @@ class CacheSongsPage extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final ThemeData theme = Theme.of(context);
     final AsyncValue<List<CacheEntry>> async = ref.watch(cacheEntriesProvider);
+    final bool listenCache = ref.watch(listenCacheProvider);
+    final int cacheLimit = ref.watch(cacheLimitProvider);
 
     final int totalBytes = (async.valueOrNull ?? const <CacheEntry>[])
         .fold<int>(0, (int a, CacheEntry e) => a + e.sizeBytes);
@@ -43,6 +47,9 @@ class CacheSongsPage extends ConsumerWidget {
       ),
       body: Column(
         children: <Widget>[
+          // 需求：LRU 缓存上限设置 —— 默认 3GB，可自行更改；
+          // 缓存总开关关闭时弹确认弹窗（颜文字文案）
+          _CacheLimitPanel(listenCache: listenCache),
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 6, 16, 4),
             child: Row(
@@ -52,8 +59,8 @@ class CacheSongsPage extends ConsumerWidget {
                 const SizedBox(width: 5),
                 Expanded(
                   child: Text(
-                    '${async.valueOrNull?.length ?? 0} 首 · 共 ${_fmtSize(totalBytes)}，'
-                    '已缓存歌曲离线也能播放',
+                    '${async.valueOrNull?.length ?? 0} 首 · 共 ${_fmtSize(totalBytes)}'
+                    ' · 上限 ${_fmtSize(cacheLimit)}，已缓存歌曲离线也能播放',
                     style: TextStyle(
                       fontSize: 11.5,
                       color: theme.colorScheme.onSurfaceVariant,
@@ -95,15 +102,16 @@ class CacheSongsPage extends ConsumerWidget {
                         const SizedBox(height: 4),
                         Text('播放过的歌曲会自动缓存到此处',
                             style: TextStyle(
-                                color:
-                                    theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.7),
+                                color: theme.colorScheme.onSurfaceVariant
+                                    .withValues(alpha: 0.7),
                                 fontSize: 12)),
                       ],
                     ),
                   );
                 }
                 return RefreshIndicator(
-                  onRefresh: () async => ref.refresh(cacheEntriesProvider.future),
+                  onRefresh: () async =>
+                      ref.refresh(cacheEntriesProvider.future),
                   child: ListView.builder(
                     physics: const AlwaysScrollableScrollPhysics(),
                     padding: const EdgeInsets.only(bottom: 24),
@@ -125,7 +133,8 @@ class CacheSongsPage extends ConsumerWidget {
     );
   }
 
-  Future<void> _remove(BuildContext context, WidgetRef ref, CacheEntry e) async {
+  Future<void> _remove(
+      BuildContext context, WidgetRef ref, CacheEntry e) async {
     await ref.read(songCacheProvider).removeEntry(e.key);
     ref.invalidate(cacheEntriesProvider);
     ref.invalidate(cachedSongIdsProvider);
@@ -163,7 +172,9 @@ class CacheSongsPage extends ConsumerWidget {
   static String _fmtSize(int b) {
     if (b <= 0) return '0 B';
     if (b < 1024 * 1024) return '${(b / 1024).toStringAsFixed(0)} KB';
-    if (b < 1024 * 1024 * 1024) return '${(b / 1024 / 1024).toStringAsFixed(1)} MB';
+    if (b < 1024 * 1024 * 1024) {
+      return '${(b / 1024 / 1024).toStringAsFixed(1)} MB';
+    }
     return '${(b / 1024 / 1024 / 1024).toStringAsFixed(2)} GB';
   }
 }
@@ -197,17 +208,19 @@ class _CacheRow extends ConsumerWidget {
         );
         Navigator.of(context).pop();
         await ref.read(playerProvider.notifier).playSongs(
-              <Track>[track],
-              queueTitle: '缓存音乐',
-            );
+          <Track>[track],
+          queueTitle: '缓存音乐',
+        );
       },
       onLongPress: onDelete,
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
         child: Row(
           children: <Widget>[
-            CoverImage(src: entry.cover.isEmpty ? null : entry.cover,
-                size: 46, radius: 8),
+            CoverImage(
+                src: entry.cover.isEmpty ? null : entry.cover,
+                size: 46,
+                radius: 8),
             const SizedBox(width: 12),
             Expanded(
               child: Column(
@@ -262,5 +275,119 @@ class _CacheRow extends ConsumerWidget {
     if (b <= 0) return '0 B';
     if (b < 1024 * 1024) return '${(b / 1024).toStringAsFixed(0)} KB';
     return '${(b / 1024 / 1024).toStringAsFixed(1)} MB';
+  }
+}
+
+/// 缓存上限设置面板（需求：LRU 默认 3GB，可自行更改；可关闭缓存，
+/// 关闭时弹确认弹窗 —— 关闭后没网不能听歌了哦）
+class _CacheLimitPanel extends ConsumerWidget {
+  const _CacheLimitPanel({required this.listenCache});
+
+  final bool listenCache;
+
+  /// 滑杆范围：0.5GB - 10GB
+  static const double _kMinGb = 0.5;
+  static const double _kMaxGb = 10;
+
+  static String _fmtGb(double gb) => gb == gb.roundToDouble()
+      ? '${gb.toInt()} GB'
+      : '${gb.toStringAsFixed(1)} GB';
+
+  Future<void> _toggle(BuildContext context, WidgetRef ref, bool v) async {
+    if (v) {
+      ref.read(listenCacheProvider.notifier).set(true);
+      return;
+    }
+    final bool? confirm = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext ctx) => AlertDialog(
+        title: const Text('关闭边听边缓存'),
+        content: const Text('关闭后没网不能听歌了哦(๑`^´๑)，真的要关吗'),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text("算了(●'◡'●)"),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+                backgroundColor: AppConstants.brandColor),
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('关闭╥_╥'),
+          ),
+        ],
+      ),
+    );
+    if (confirm == true) {
+      ref.read(listenCacheProvider.notifier).set(false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final int cacheLimit = ref.watch(cacheLimitProvider);
+    final double gb =
+        (cacheLimit / (1024 * 1024 * 1024)).clamp(_kMinGb, _kMaxGb);
+
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 10, 16, 0),
+      padding: const EdgeInsets.fromLTRB(14, 10, 14, 4),
+      decoration: BoxDecoration(
+        color: Theme.of(context)
+            .colorScheme
+            .surfaceContainerHighest
+            .withValues(alpha: 0.35),
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Row(
+            children: <Widget>[
+              Expanded(
+                child: Text('最大缓存容量',
+                    style: const TextStyle(
+                        fontSize: 14.5, fontWeight: FontWeight.w600)),
+              ),
+              Text(_fmtGb(gb),
+                  style: TextStyle(
+                      fontSize: 12.5,
+                      color: AppConstants.brandColor,
+                      fontWeight: FontWeight.w700)),
+            ],
+          ),
+          SliderTheme(
+            data: SliderTheme.of(context).copyWith(
+              trackHeight: 3,
+              overlayShape: const RoundSliderOverlayShape(overlayRadius: 14),
+            ),
+            child: Slider(
+              value: ((gb - _kMinGb) / (_kMaxGb - _kMinGb)).clamp(0.0, 1.0),
+              activeColor: AppConstants.brandColor,
+              onChanged: listenCache
+                  ? (double v) {
+                      final double next = _kMinGb + v * (_kMaxGb - _kMinGb);
+                      // 步进 0.5GB
+                      final double stepped = (next * 2).roundToDouble() / 2;
+                      ref.read(cacheLimitProvider.notifier).set(
+                            (stepped * 1024 * 1024 * 1024).round(),
+                          );
+                    }
+                  : null,
+            ),
+          ),
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            dense: true,
+            visualDensity: VisualDensity.compact,
+            title: const Text('边听边缓存', style: TextStyle(fontSize: 14)),
+            subtitle: Text(listenCache ? '播放的歌曲自动缓存，离线可听' : '已关闭：无网将无法播放未缓存歌曲',
+                style: const TextStyle(fontSize: 11.5)),
+            value: listenCache,
+            activeThumbColor: AppConstants.brandColor,
+            onChanged: (bool v) => _toggle(context, ref, v),
+          ),
+        ],
+      ),
+    );
   }
 }

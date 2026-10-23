@@ -193,14 +193,13 @@ class CommentsController extends FamilyAsyncNotifier<CommentPage?, String> {
 
   /// 删除自己的评论（t=0，对齐 Zephyr deleteComment）。返回错误文案（null 成功）
   Future<String?> delete(CommentItem comment) async {
-    final (int code, String msg) = await ref
-        .read(commentsRepositoryProvider)
-        .action(
-          t: 0,
-          songId: subjectId,
-          commentId: comment.commentId,
-          subjectType: subjectType,
-        );
+    final (int code, String msg) =
+        await ref.read(commentsRepositoryProvider).action(
+              t: 0,
+              songId: subjectId,
+              commentId: comment.commentId,
+              subjectType: subjectType,
+            );
     if (code != 200) return _errorMessage(code, msg);
     // 本地移除 + 计数减一
     final CommentPage? page = state.value;

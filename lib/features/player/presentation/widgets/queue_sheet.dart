@@ -12,6 +12,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/constants/app_constants.dart';
+import '../../../../core/widgets/sheet_host.dart'
+    show GlassSheet, showMingSheet;
 import '../../../library/domain/track.dart';
 import '../../../library/presentation/add_to_playlist_sheet.dart';
 import '../../../discover/presentation/widgets/song_tile.dart' show VipBadge;
@@ -21,11 +23,15 @@ import '../../providers/player_providers.dart';
 import '../../services/queue_persistence.dart' show QueueSnapshot;
 
 /// 打开播放列表弹窗
+///
+/// 崩溃修复（logcat 实证 `Navigator.of` 空指针）：统一走 [showMingSheet]
+/// —— 优先取全局 rootNavigatorKey，不再依赖 context 向上查 Navigator
+///（播放页个别浮层的 context 不在 Navigator 之下，旧实现必炸）。
 Future<void> showQueueSheet(BuildContext context) {
-  return showModalBottomSheet<void>(
-    context: context,
+  return showMingSheet<void>(
+    context,
     isScrollControlled: true,
-    backgroundColor: Colors.transparent,
+    barrierLabel: '播放列表',
     builder: (BuildContext context) => const _QueueSheet(),
   );
 }
@@ -67,14 +73,9 @@ class _QueueSheetState extends ConsumerState<_QueueSheet> {
     final int count = state.queue.length;
     final double maxH = MediaQuery.sizeOf(context).height * 0.72;
 
-    return Container(
-      constraints: BoxConstraints(maxHeight: maxH),
-      decoration: const BoxDecoration(
-        color: AppConstants.darkSurface,
-        borderRadius: BorderRadius.vertical(
-          top: Radius.circular(22),
-        ),
-      ),
+    // 液态玻璃弹窗底板（需求）
+    return GlassSheet(
+      maxHeight: maxH,
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: <Widget>[
@@ -204,14 +205,21 @@ class _CurrentPaneState extends ConsumerState<_CurrentPane> {
   /// 播放列表滚动控制（需求：打开时定位到当前播放歌曲）
   final ScrollController _scroll = ScrollController();
 
-  /// 单行估算高度（_QueueRow：vertical padding 10×2 + 文本行 ≈ 41px）
-  static const double _rowH = 44;
+  /// 当前播放行锚点（需求修复：定位失效 —— 旧实现用固定行高估算，
+  /// 实际行高随 VIP 徽标/换行变化导致误差；改用 GlobalKey 锚点 +
+  /// Scrollable.ensureVisible 精确滚动）
+  final GlobalKey _currentRowKey = GlobalKey();
+
+  /// 定位重试计数（打开弹窗首帧 PageView 可能尚未布出列表，
+  /// 锚点未就绪时逐帧重试）
+  int _locateTries = 0;
 
   @override
   void initState() {
     super.initState();
     // 需求：打开播放列表时定位到当前播放歌曲 —— 当前歌曲上方显示两首
-    WidgetsBinding.instance.addPostFrameCallback((_) => _locate(animate: false));
+    WidgetsBinding.instance
+        .addPostFrameCallback((_) => _locate(animate: false));
   }
 
   @override
@@ -222,21 +230,27 @@ class _CurrentPaneState extends ConsumerState<_CurrentPane> {
 
   /// 滚动到当前播放歌曲：使其上方保留两行可见（近似居中偏上）
   void _locate({bool animate = true}) {
-    final PlayerState ps = widget.state;
-    if (!ps.hasQueue) return;
+    if (!widget.state.hasQueue) return;
+    _locateTries = 0;
+    _locateTick(animate);
+  }
+
+  void _locateTick(bool animate) {
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted || !_scroll.hasClients) return;
-      final double max = _scroll.position.maxScrollExtent;
-      final double target =
-          ((ps.index - 2) * _rowH).clamp(0.0, max);
-      if ((target - _scroll.offset).abs() < 1) return;
-      if (animate) {
-        _scroll.animateTo(target,
-            duration: const Duration(milliseconds: 320),
-            curve: Curves.easeOutCubic);
-      } else {
-        _scroll.jumpTo(target);
+      if (!mounted) return;
+      final BuildContext? ctx = _currentRowKey.currentContext;
+      if (ctx == null) {
+        // 列表尚未布局（PageView 懒加载/首帧）：重试最多 6 帧
+        if (_locateTries++ < 6) _locateTick(animate);
+        return;
       }
+      Scrollable.ensureVisible(
+        ctx,
+        duration: animate ? const Duration(milliseconds: 320) : Duration.zero,
+        curve: Curves.easeOutCubic,
+        // 当前歌曲上方保留两行（与需求一致）
+        alignment: 0.3,
+      );
     });
   }
 
@@ -280,9 +294,11 @@ class _CurrentPaneState extends ConsumerState<_CurrentPane> {
                 scrollController: _scroll,
                 padding: const EdgeInsets.only(bottom: 16),
                 itemCount: count,
-                onReorderItem: (int oldIndex, int newIndex) =>
-                    ref.read(playerProvider.notifier).reorderQueue(oldIndex, newIndex),
-                proxyDecorator: (Widget child, int index, Animation<double> anim) {
+                onReorderItem: (int oldIndex, int newIndex) => ref
+                    .read(playerProvider.notifier)
+                    .reorderQueue(oldIndex, newIndex),
+                proxyDecorator:
+                    (Widget child, int index, Animation<double> anim) {
                   return AnimatedBuilder(
                     animation: anim,
                     builder: (BuildContext ctx, Widget? w) => Material(
@@ -298,7 +314,8 @@ class _CurrentPaneState extends ConsumerState<_CurrentPane> {
                 itemBuilder: (BuildContext context, int index) {
                   final Track t = state.queue[index];
                   final bool current = index == state.index;
-                  return _QueueRow(
+                  // 当前播放行挂锚点 key（定位用）；非当前行保持原样
+                  final Widget row = _QueueRow(
                     key: ValueKey<String>('${t.id}_$index'),
                     track: t,
                     current: current,
@@ -308,10 +325,16 @@ class _CurrentPaneState extends ConsumerState<_CurrentPane> {
                       Navigator.of(context).pop();
                       await ref.read(playerProvider.notifier).playAt(index);
                     },
-                    onRemove: () =>
-                        ref.read(playerProvider.notifier).removeFromQueue(index),
-                    onAddTo: () =>
-                        showAddToPlaylistSheet(context, ref, <int>[t.neteaseId ?? 0]),
+                    onRemove: () => ref
+                        .read(playerProvider.notifier)
+                        .removeFromQueue(index),
+                    onAddTo: () => showAddToPlaylistSheet(
+                        context, ref, <int>[t.neteaseId ?? 0]),
+                  );
+                  if (!current) return row;
+                  return KeyedSubtree(
+                    key: _currentRowKey,
+                    child: row,
                   );
                 },
               ),
@@ -427,9 +450,7 @@ class _EqBarsPainter extends CustomPainter {
       if (playing) {
         // 三根条纹按相位错开正弦跳动
         f = 0.30 +
-            0.70 *
-                (0.5 +
-                    0.5 * math.sin((phase + i * 0.28) * 2 * math.pi));
+            0.70 * (0.5 + 0.5 * math.sin((phase + i * 0.28) * 2 * math.pi));
       } else {
         f = 0.32;
       }
@@ -506,8 +527,7 @@ class _HistoryPane extends StatelessWidget {
               subtitle: Text(
                 '${snap.tracks.length} 首 · ${_formatTime(snap.savedAt)}',
                 style: TextStyle(
-                    fontSize: 11.5,
-                    color: theme.colorScheme.onSurfaceVariant),
+                    fontSize: 11.5, color: theme.colorScheme.onSurfaceVariant),
               ),
               trailing: Row(
                 mainAxisSize: MainAxisSize.min,
@@ -521,8 +541,7 @@ class _HistoryPane extends StatelessWidget {
                   IconButton(
                     tooltip: '删除',
                     icon: Icon(Icons.close_rounded,
-                        size: 18,
-                        color: theme.colorScheme.onSurfaceVariant),
+                        size: 18, color: theme.colorScheme.onSurfaceVariant),
                     onPressed: () => onDelete(index),
                   ),
                 ],
@@ -531,9 +550,8 @@ class _HistoryPane extends StatelessWidget {
             ),
             AnimatedCrossFade(
               duration: const Duration(milliseconds: 180),
-              crossFadeState: isOpen
-                  ? CrossFadeState.showSecond
-                  : CrossFadeState.showFirst,
+              crossFadeState:
+                  isOpen ? CrossFadeState.showSecond : CrossFadeState.showFirst,
               firstChild: const SizedBox(width: double.infinity),
               secondChild: Container(
                 constraints: const BoxConstraints(maxHeight: 220),
@@ -624,8 +642,8 @@ class _QueueRow extends ConsumerWidget {
     final Color titleColor = current
         ? AppConstants.brandColor
         : theme.colorScheme.onSurface.withValues(alpha: dim ? 0.38 : 1.0);
-    final Color artistColor = theme.colorScheme.onSurfaceVariant
-        .withValues(alpha: dim ? 0.38 : 1.0);
+    final Color artistColor =
+        theme.colorScheme.onSurfaceVariant.withValues(alpha: dim ? 0.38 : 1.0);
 
     final Widget row = InkWell(
       onTap: onTap,
@@ -690,8 +708,8 @@ class _QueueRow extends ConsumerWidget {
                 icon: Icon(
                   Icons.close_rounded,
                   size: 17,
-                  color: theme.colorScheme.onSurfaceVariant
-                      .withValues(alpha: 0.8),
+                  color:
+                      theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.8),
                 ),
                 onPressed: onRemove,
               ),

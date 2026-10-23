@@ -7,8 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/api/netease_models.dart' show SongUrlInfo;
 import '../../../core/utils/platform_actions.dart';
 import '../../discover/data/netease_providers.dart';
-import '../../settings/domain/settings_models.dart'
-    show AudioQualityX;
+import '../../settings/domain/settings_models.dart' show AudioQualityX;
 import '../../settings/providers/settings_providers.dart'
     show audioQualityProvider;
 import '../domain/track.dart';

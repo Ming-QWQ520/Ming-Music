@@ -59,9 +59,12 @@ class PlatformActions {
   /// 本地音乐扫描（MediaStore 音频库）
   static Future<List<Map<String, Object?>>> localAudioFiles() async {
     try {
-      final Object? raw = await _channel.invokeMethod<Object?>('getLocalAudioFiles');
+      final Object? raw =
+          await _channel.invokeMethod<Object?>('getLocalAudioFiles');
       if (raw is! List<Object?>) return const <Map<String, Object?>>[];
-      return raw.whereType<Map<Object?, Object?>>().map((Map<Object?, Object?> m) {
+      return raw
+          .whereType<Map<Object?, Object?>>()
+          .map((Map<Object?, Object?> m) {
         return <String, Object?>{
           for (final MapEntry<Object?, Object?> e in m.entries)
             '${e.key}': e.value,
@@ -78,7 +81,9 @@ class PlatformActions {
       final Object? raw =
           await _channel.invokeMethod<Object?>('getMediaDevices');
       if (raw is! List<Object?>) return const <Map<String, Object?>>[];
-      return raw.whereType<Map<Object?, Object?>>().map((Map<Object?, Object?> m) {
+      return raw
+          .whereType<Map<Object?, Object?>>()
+          .map((Map<Object?, Object?> m) {
         return <String, Object?>{
           for (final MapEntry<Object?, Object?> e in m.entries)
             '${e.key}': e.value,
@@ -170,7 +175,8 @@ class PlatformActions {
         final HttpClient client = HttpClient()
           ..connectionTimeout = const Duration(seconds: 15);
         final HttpClientRequest req = await client.getUrl(Uri.parse(url));
-        req.headers.set(HttpHeaders.userAgentHeader, CoverImage.kImageUserAgent);
+        req.headers
+            .set(HttpHeaders.userAgentHeader, CoverImage.kImageUserAgent);
         final HttpClientResponse resp = await req.close().timeout(
               const Duration(seconds: 60),
             );

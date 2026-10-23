@@ -37,8 +37,7 @@ import '../../comments/providers/comments_providers.dart'
     show songCommentCountProvider;
 import '../../library/data/download_service.dart';
 import '../../library/domain/track.dart';
-import '../../settings/domain/settings_models.dart'
-    show AudioQuality;
+import '../../settings/domain/settings_models.dart' show AudioQuality;
 import '../../settings/providers/settings_providers.dart'
     show audioQualityProvider;
 import '../domain/np_settings.dart';
@@ -48,7 +47,7 @@ import '../providers/lyrics_providers.dart'
 import '../providers/np_settings_providers.dart';
 import '../providers/player_providers.dart';
 import 'player_more_sheet.dart';
-import 'widgets/cover_art_view.dart';
+import 'widgets/cover_art_view.dart' show CoverArtView, kSquareCoverRadiusRatio;
 import 'widgets/cover_viewer.dart';
 import 'widgets/karaoke_lyrics_view.dart';
 import 'widgets/media_output_sheet.dart';
@@ -89,6 +88,7 @@ class _FullPlayerPageState extends ConsumerState<FullPlayerPage> {
     unawaited(PlatformActions.keepScreenOn(false));
     super.dispose();
   }
+
   /// 手机端封面/歌词切换：null = 跟随显示模式（both 默认封面）
   bool? _paneOverride;
 
@@ -236,7 +236,8 @@ class _PhoneBodyState extends ConsumerState<_PhoneBody> {
 
     return Column(
       children: <Widget>[
-        const _TopBar(),
+        // 需求：封面页顶部显示播放来源、歌词页显示歌手（随视图切换）
+        _TopBar(showLyrics: widget.showLyrics),
         Expanded(
           child: _PlayerStackLayout(
             showLyrics: widget.showLyrics,
@@ -329,8 +330,8 @@ class _PlayerStackLayoutState extends ConsumerState<_PlayerStackLayout> {
                           NpCoverLyricsMode.one => 60.0,
                           NpCoverLyricsMode.two => 102.0,
                         };
-                        final double maxCover =
-                            (cons.maxHeight - reserve).clamp(0.0, cons.maxHeight);
+                        final double maxCover = (cons.maxHeight - reserve)
+                            .clamp(0.0, cons.maxHeight);
                         final double size =
                             widget.coverSize.clamp(0.0, maxCover).toDouble();
                         return _CoverSwipeArea(
@@ -458,9 +459,8 @@ class _CoverSwipeAreaState extends ConsumerState<_CoverSwipeArea>
     final int len = ps.queue.length;
     final bool backward = dx > 0; // 右滑 → 上一首
     _dir = backward ? 1 : -1;
-    final int neighborIndex = backward
-        ? (ps.index - 1 + len) % len
-        : (ps.index + 1) % len;
+    final int neighborIndex =
+        backward ? (ps.index - 1 + len) % len : (ps.index + 1) % len;
     final String? outCover = ps.currentTrack?.cover;
     final String? inCover = ps.queue[neighborIndex].cover;
     setState(() {
@@ -561,8 +561,7 @@ class _CoverSwipeAreaState extends ConsumerState<_CoverSwipeArea>
                         if (isSwitch)
                           Transform.translate(
                             offset: Offset(
-                                ui.lerpDouble(
-                                    -_dir * side, 0.0,
+                                ui.lerpDouble(-_dir * side, 0.0,
                                     Curves.easeOutCubic.transform(t))!,
                                 0),
                             child: _FrozenCover(
@@ -587,7 +586,6 @@ class _CoverSwipeAreaState extends ConsumerState<_CoverSwipeArea>
                         size: widget.size,
                         scale: widget.cfg.coverScale,
                         shadow: widget.cfg.coverShadow,
-                        squareRadius: widget.cfg.squareCoverRadius,
                         onLongPress: track?.cover == null
                             ? null
                             : () => showCoverViewer(
@@ -618,6 +616,8 @@ class _CoverSwipeAreaState extends ConsumerState<_CoverSwipeArea>
 
 /// 过渡态的静态封面（不做 Hero/暂停缩放/长按，纯画面）：
 /// 与 CoverArtView 相同的投影观感，图像走 CoverImage 内存缓存即时渲染。
+/// 圆角随 coverStyle（需求修复：方形圆角设置下，滑动回弹/切歌过渡
+/// 不再一瞬间变回无圆角方形 —— 旧实现未读圆角设置）。
 class _FrozenCover extends StatelessWidget {
   const _FrozenCover({
     required this.cover,
@@ -631,10 +631,9 @@ class _FrozenCover extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final double radius = switch (style) {
-      NpCoverStyle.square => 0,
-      NpCoverStyle.circle => size / 2,
-    };
+    // 与 CoverArtView 同一圆角比例（需求：方形圆角为默认样式）
+    final double radius =
+        style == NpCoverStyle.rounded ? size * kSquareCoverRadiusRatio : 0;
     return Container(
       width: size,
       height: size,
@@ -689,7 +688,6 @@ class _TabletBody extends ConsumerWidget {
               size: 300,
               scale: cfg.coverScale,
               shadow: cfg.coverShadow,
-              squareRadius: cfg.squareCoverRadius,
               onLongPress: track?.cover == null
                   ? null
                   : () => showCoverViewer(
@@ -712,7 +710,7 @@ class _TabletBody extends ConsumerWidget {
       case NpDisplayMode.both:
         return Column(
           children: <Widget>[
-            const _TopBar(),
+            _TopBar(showLyrics: false),
             Expanded(
               child: Row(
                 children: <Widget>[
@@ -732,7 +730,7 @@ class _TabletBody extends ConsumerWidget {
       case NpDisplayMode.lyrics:
         return Column(
           children: <Widget>[
-            const _TopBar(),
+            _TopBar(showLyrics: true),
             Expanded(
               child: const KaraokeLyricsView(),
             ),
@@ -741,7 +739,7 @@ class _TabletBody extends ConsumerWidget {
       case NpDisplayMode.cover:
         return Column(
           children: <Widget>[
-            const _TopBar(),
+            _TopBar(showLyrics: false),
             Expanded(child: coverColumn),
           ],
         );
@@ -751,9 +749,15 @@ class _TabletBody extends ConsumerWidget {
 
 // ---------------------------------------------------------------- 顶部栏
 
-/// 仿网易云顶栏：仅 收起 + 居中歌手名
+/// 仿网易云顶栏：收起 + 居中显示（需求：封面页时显示歌曲播放来源）
+///  - 封面页：显示「播放来源」（队列名，如歌单名/缓存音乐），
+///    无来源时回退歌手名；
+///  - 歌词页：保持显示歌手名（对齐网易云歌词页习惯）。
 class _TopBar extends ConsumerWidget {
-  const _TopBar();
+  const _TopBar({this.showLyrics = false});
+
+  /// 当前是否处于歌词视图（决定顶部显示来源还是歌手）
+  final bool showLyrics;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -761,10 +765,18 @@ class _TopBar extends ConsumerWidget {
         ref.watch(playerProvider.select((PlayerState s) => s.currentTrack));
     final String? title =
         ref.watch(playerProvider.select((PlayerState s) => s.queueTitle));
-    // 仿网易云：顶栏居中显示歌手名，无曲目时回退队列名
-    final String center = (track?.artist.isNotEmpty ?? false)
-        ? track!.artist
-        : (title ?? 'MingMusic');
+    // 需求：封面页时顶部显示的歌曲歌手改成「歌曲播放来源」——
+    // 来源 = 当前播放队列名（歌单名/缓存音乐/搜索播放等），
+    // 无队列来源时回退歌手名；歌词页保持歌手名。
+    final String center = showLyrics
+        ? ((track?.artist.isNotEmpty ?? false)
+            ? track!.artist
+            : (title ?? 'MingMusic'))
+        : ((title != null && title.isNotEmpty)
+            ? title
+            : ((track?.artist.isNotEmpty ?? false)
+                ? track!.artist
+                : 'MingMusic'));
 
     return SizedBox(
       height: 52,
@@ -879,13 +891,13 @@ class _InfoSectionState extends ConsumerState<_InfoSection> {
         ? 0
         : ref.watch(songCommentCountProvider(songId)).value ?? 0;
     final bool liked = (songId ?? 0) > 0 &&
-        ref.watch(authProvider
-            .select((AuthState s) => s.likedIds.contains(songId)));
+        ref.watch(
+            authProvider.select((AuthState s) => s.likedIds.contains(songId)));
 
     return Padding(
       // 需求：底部区域呼吸感修复 —— 信息区与进度条不再挤在一起；
-      // 本批需求「进度条和以上控件还需向上移动」：上/下边距再度收紧
-      padding: const EdgeInsets.fromLTRB(24, 6, 12, 4),
+      // 本批需求「继续上移进度条与上方信息」：上/下边距再度收紧
+      padding: const EdgeInsets.fromLTRB(24, 3, 12, 2),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: <Widget>[
@@ -909,7 +921,8 @@ class _InfoSectionState extends ConsumerState<_InfoSection> {
                         ),
                       ),
                     ),
-                    if (vip) ...<Widget>[ // 需求：VIP 样式 —— 透明背景 + 白字 + 白色圆角描边
+                    if (vip) ...<Widget>[
+                      // 需求：VIP 样式 —— 透明背景 + 白字 + 白色圆角描边
                       const SizedBox(width: 7),
                       Container(
                         padding: const EdgeInsets.symmetric(
@@ -1082,9 +1095,8 @@ class _PlayerIconButtonState extends State<_PlayerIconButton> {
       onTapUp: (_) => setState(() => _press = false),
       onTapCancel: () => setState(() => _press = false),
       child: MouseRegion(
-        cursor: widget.onTap == null
-            ? MouseCursor.defer
-            : SystemMouseCursors.click,
+        cursor:
+            widget.onTap == null ? MouseCursor.defer : SystemMouseCursors.click,
         onEnter: (_) => setState(() => _hover = true),
         onExit: (_) => setState(() {
           _hover = false;
@@ -1178,14 +1190,20 @@ class _HeartBurstPainter extends CustomPainter {
     final Path p = Path()
       ..moveTo(size.width / 2, size.height / 2 + s * 0.32)
       ..cubicTo(
-        size.width / 2 - s * 1.1, size.height / 2 - s * 0.45,
-        size.width / 2 - s * 0.34, size.height / 2 - s * 1.05,
-        size.width / 2, size.height / 2 - s * 0.42,
+        size.width / 2 - s * 1.1,
+        size.height / 2 - s * 0.45,
+        size.width / 2 - s * 0.34,
+        size.height / 2 - s * 1.05,
+        size.width / 2,
+        size.height / 2 - s * 0.42,
       )
       ..cubicTo(
-        size.width / 2 + s * 0.34, size.height / 2 - s * 1.05,
-        size.width / 2 + s * 1.1, size.height / 2 - s * 0.45,
-        size.width / 2, size.height / 2 + s * 0.32,
+        size.width / 2 + s * 0.34,
+        size.height / 2 - s * 1.05,
+        size.width / 2 + s * 1.1,
+        size.height / 2 - s * 0.45,
+        size.width / 2,
+        size.height / 2 + s * 0.32,
       );
     canvas.drawPath(p, heart);
   }
@@ -1208,13 +1226,13 @@ class _MvPill extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
-      onTap: () => context.push(
-          '/mv/$mvId?title=${Uri.encodeComponent(title)}'),
+      onTap: () =>
+          context.push('/mv/$mvId?title=${Uri.encodeComponent(title)}'),
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
         decoration: BoxDecoration(
-          border: Border.all(
-              color: Colors.white.withValues(alpha: 0.4), width: 1),
+          border:
+              Border.all(color: Colors.white.withValues(alpha: 0.4), width: 1),
           borderRadius: BorderRadius.circular(5),
         ),
         child: Text(
@@ -1428,7 +1446,8 @@ class _KaraokeTextState extends ConsumerState<_KaraokeText>
     super.initState();
     _ticker = createTicker((Duration _) {
       if (mounted) setState(() {});
-    })..start();
+    })
+      ..start();
   }
 
   @override
@@ -1528,8 +1547,7 @@ class _KaraokeTextState extends ConsumerState<_KaraokeText>
             maxLines: 1,
             softWrap: false,
             overflow: TextOverflow.clip,
-            style: style.copyWith(
-                color: Colors.white.withValues(alpha: 0.4)),
+            style: style.copyWith(color: Colors.white.withValues(alpha: 0.4)),
           ),
           // 已唱层：白色，按已唱像素宽度揭示
           ClipRect(
@@ -1569,10 +1587,9 @@ class _ProgressSection extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     // 需求：进度区与上下区块拉开呼吸距离；
-    // 本批需求「进度条和以上控件向上移动」：纵向留白 10 → 6，
-    // 整个底部浮层上收
+    // 本批需求「继续上移进度条与上方信息」：纵向留白 6 → 2
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
       child: PlayerProgressBar(
         // 仿网易云：进度行中央为音质标签（可点击弹音质选择）
         centerLabel: const _QualityButton(),
@@ -1595,8 +1612,8 @@ class _QualityButton extends ConsumerWidget {
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(10),
-          border: Border.all(
-              color: Colors.white.withValues(alpha: 0.25), width: 1),
+          border:
+              Border.all(color: Colors.white.withValues(alpha: 0.25), width: 1),
         ),
         child: Text(
           switch (quality) {
@@ -1629,8 +1646,8 @@ class _ControlBar extends ConsumerWidget {
         s.processing == AppProcessingState.buffering));
 
     return Padding(
-      // 需求：控制键与上方音质标签行拉开间距；本批上移收紧 12 → 8
-      padding: const EdgeInsets.fromLTRB(10, 8, 10, 0),
+      // 需求：控制键与上方音质标签行拉开间距；本批继续上移收紧 8 → 4
+      padding: const EdgeInsets.fromLTRB(10, 4, 10, 0),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceEvenly,
         children: <Widget>[
@@ -1694,8 +1711,8 @@ class _RingPlayButton extends StatelessWidget {
               )
             : AnimatedSwitcher(
                 duration: const Duration(milliseconds: 200),
-                transitionBuilder:
-                    (Widget child, Animation<double> anim) => ScaleTransition(
+                transitionBuilder: (Widget child, Animation<double> anim) =>
+                    ScaleTransition(
                   scale: anim,
                   child: child,
                 ),
@@ -1837,6 +1854,7 @@ class _BottomStrip extends ConsumerWidget {
     final Color tint = Colors.white.withValues(alpha: 0.75);
 
     final Map<String, Widget> builders = <String, Widget>{
+      'volume': const _VolumeStripButton(),
       'output': _StripButton(
         icon: Icons.sensors_rounded,
         label: '媒体输出',
@@ -1868,7 +1886,9 @@ class _BottomStrip extends ConsumerWidget {
         icon: Icons.mode_comment_outlined,
         label: '评论',
         color: tint,
-        onTap: track == null ? null : () => context.push('/comments', extra: track),
+        onTap: track == null
+            ? null
+            : () => context.push('/comments', extra: track),
       ),
       'settings': _StripButton(
         icon: Icons.settings_outlined,
@@ -1878,22 +1898,35 @@ class _BottomStrip extends ConsumerWidget {
       ),
     };
 
+    // 需求：音量条独占模式 —— 勾选「音量条」后底部只保留
+    // 音量条 + 设置键（音量条在设置键左侧，Expanded 拉伸）。
+    if (cfg.stripButtons.contains('volume')) {
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(24, 2, 18, 18),
+        child: Row(
+          children: <Widget>[
+            const Expanded(child: _VolumeStripButton()),
+            const SizedBox(width: 6),
+            builders['settings']!,
+          ],
+        ),
+      );
+    }
+
     final List<Widget> buttons = <Widget>[
       for (final String id in cfg.stripButtons)
-        if (builders[id] != null) builders[id]!,
+        if (builders[id] != null && id != 'volume') builders[id]!,
     ];
 
     return Padding(
-      // 需求：底部控件位置上移（太靠近底部显得很奇怪）；本批再度上收
-      // （底边距 14 → 6、上边距 4 → 2），整层浮层更紧凑，
-      // 进度条与其上方控件随之上移
+      // 需求：底部控件位置继续上移（进度条太靠下导致拖动被手势区
+      // 干扰）—— 底边距 6 → 18，整层浮层明显抬高，进度条与上方
+      // 控件随之上移
       padding: EdgeInsets.fromLTRB(
-          math.max(34.0 - buttons.length * 4, 16), 2, 34, 6),
+          math.max(34.0 - buttons.length * 4, 16), 2, 34, 18),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: buttons.isEmpty
-            ? <Widget>[const SizedBox.shrink()]
-            : buttons,
+        children: buttons.isEmpty ? <Widget>[const SizedBox.shrink()] : buttons,
       ),
     );
   }
@@ -1979,6 +2012,157 @@ class _StripButton extends StatelessWidget {
               : Icon(icon, size: 23, color: c),
         ),
       ),
+    );
+  }
+}
+
+/// 音量条底部按键（需求：与进度条样式一致的自绘圆角条）：
+///  - 静音图标 + 音量条（双层圆角条：底条白 25%，已调白 90%，同高度）；
+///  - 拖动时条平滑变粗（与 PlayerProgressBar 手感一致）；
+///  - 左侧静音/取消静音切换键。
+class _VolumeStripButton extends ConsumerStatefulWidget {
+  const _VolumeStripButton();
+
+  @override
+  ConsumerState<_VolumeStripButton> createState() => _VolumeStripButtonState();
+}
+
+class _VolumeStripButtonState extends ConsumerState<_VolumeStripButton> {
+  double _volume = 1.0;
+  bool _dragging = false;
+  double? _restoreVolume;
+
+  static const double _kRestHeight = 4;
+  static const double _kDragHeight = 8;
+
+  @override
+  void initState() {
+    super.initState();
+    _volume = ref.read(audioHandlerProvider).player.volume;
+  }
+
+  void _apply(double v) {
+    setState(() => _volume = v.clamp(0.0, 1.0));
+    ref.read(audioHandlerProvider).player.setVolume(_volume);
+  }
+
+  void _toggleMute() {
+    if (_volume > 0) {
+      _restoreVolume = _volume;
+      _apply(0);
+    } else {
+      _apply(_restoreVolume ?? 1.0);
+    }
+  }
+
+  IconData get _icon => _volume <= 0
+      ? Icons.volume_off_rounded
+      : _volume < 0.5
+          ? Icons.volume_down_rounded
+          : Icons.volume_up_rounded;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: <Widget>[
+        GestureDetector(
+          onTap: _toggleMute,
+          behavior: HitTestBehavior.opaque,
+          child: Padding(
+            padding: const EdgeInsets.all(6),
+            child: Icon(_icon,
+                size: 22, color: Colors.white.withValues(alpha: 0.75)),
+          ),
+        ),
+        const SizedBox(width: 2),
+        Expanded(
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTapDown: (TapDownDetails d) =>
+                _applyFromBox(context, d.globalPosition.dx),
+            onHorizontalDragStart: (DragStartDetails d) {
+              setState(() => _dragging = true);
+              _applyFromBox(context, d.globalPosition.dx);
+            },
+            onHorizontalDragUpdate: (DragUpdateDetails d) =>
+                _applyFromBox(context, d.globalPosition.dx),
+            onHorizontalDragEnd: (_) => setState(() => _dragging = false),
+            child: TweenAnimationBuilder<double>(
+              tween:
+                  Tween<double>(end: _dragging ? _kDragHeight : _kRestHeight),
+              duration: const Duration(milliseconds: 180),
+              curve: Curves.easeOutCubic,
+              builder: (BuildContext ctx, double h, _) {
+                return SizedBox(
+                  height: 26,
+                  child: Center(
+                    child: _VolumeBar(
+                      value: _volume,
+                      height: h,
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  void _applyFromBox(BuildContext ctx, double globalDx) {
+    final RenderBox? box = ctx.findRenderObject() as RenderBox?;
+    if (box == null || !box.hasSize) return;
+    // 排除左侧图标宽度（图标 22 + padding 12 + gap 2 ≈ 36）
+    const double leading = 36;
+    final double w = math.max(1.0, box.size.width - leading);
+    final double v =
+        ((globalDx - box.globalToLocal(Offset.zero).dx) - leading) / w;
+    _apply(v);
+  }
+}
+
+/// 音量条本体（双层圆角条，观感与 PlayerProgressBar 完全一致）
+class _VolumeBar extends StatelessWidget {
+  const _VolumeBar({required this.value, required this.height});
+
+  final double value;
+  final double height;
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (BuildContext ctx, BoxConstraints cons) {
+        final double w = cons.maxWidth;
+        final double filled = (w * value.clamp(0.0, 1.0));
+        return SizedBox(
+          width: w,
+          height: height,
+          child: Stack(
+            alignment: Alignment.centerLeft,
+            children: <Widget>[
+              // 总条（底）
+              Container(
+                width: w,
+                height: height,
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.25),
+                  borderRadius: BorderRadius.circular(height / 2),
+                ),
+              ),
+              // 当前进度条（与总条同高同大，Apple Music 观感）
+              Container(
+                width: math.max(height, filled),
+                height: height,
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.9),
+                  borderRadius: BorderRadius.circular(height / 2),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 }

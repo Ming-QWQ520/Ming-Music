@@ -13,6 +13,7 @@
 library;
 
 import 'dart:async';
+import 'dart:ui' show ImageFilter;
 
 import 'package:audio_service/audio_service.dart';
 import 'package:flutter/material.dart';
@@ -27,6 +28,7 @@ import '../../player/domain/np_settings.dart';
 import '../../player/presentation/widgets/mini_player.dart';
 import '../../player/providers/np_settings_providers.dart';
 import '../../player/providers/player_providers.dart';
+import '../../settings/providers/settings_providers.dart';
 
 /// 当前 Tab
 final NotifierProvider<TabNotifier, int> selectedTabProvider =
@@ -102,8 +104,8 @@ class _MainScaffoldState extends ConsumerState<MainScaffold> {
   @override
   Widget build(BuildContext context) {
     final int tab = ref.watch(selectedTabProvider);
-    final MiniPlayerStyle miniStyle = ref.watch(
-        npSettingsProvider.select((NpPlayerSettings s) => s.miniStyle));
+    final MiniPlayerStyle miniStyle = ref
+        .watch(npSettingsProvider.select((NpPlayerSettings s) => s.miniStyle));
 
     return LayoutBuilder(
       builder: (BuildContext context, BoxConstraints constraints) {
@@ -127,29 +129,29 @@ class _MainScaffoldState extends ConsumerState<MainScaffold> {
         _handleExitIntent();
       },
       child: Scaffold(
-      body: SafeArea(
-        child: Row(
-          children: <Widget>[
-            _RailNav(
-              selectedIndex: tab,
-              onSelect: (int i) =>
-                  ref.read(selectedTabProvider.notifier).select(i),
-            ),
-            const VerticalDivider(width: 1),
-            Expanded(
-              child: Column(
-                children: <Widget>[
-                  Expanded(
-                    child: IndexedStack(
-                        index: tab, children: MainScaffold._pages),
-                  ),
-                  const MiniPlayer(),
-                ],
+        body: SafeArea(
+          child: Row(
+            children: <Widget>[
+              _RailNav(
+                selectedIndex: tab,
+                onSelect: (int i) =>
+                    ref.read(selectedTabProvider.notifier).select(i),
               ),
-            ),
-          ],
+              const VerticalDivider(width: 1),
+              Expanded(
+                child: Column(
+                  children: <Widget>[
+                    Expanded(
+                      child: IndexedStack(
+                          index: tab, children: MainScaffold._pages),
+                    ),
+                    const MiniPlayer(),
+                  ],
+                ),
+              ),
+            ],
+          ),
         ),
-      ),
       ),
     );
   }
@@ -178,14 +180,14 @@ class _MainScaffoldState extends ConsumerState<MainScaffold> {
         _handleExitIntent();
       },
       child: Scaffold(
-      body: IndexedStack(index: tab, children: MainScaffold._pages),
-      bottomNavigationBar: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: <Widget>[
-          if (!navEmbedded) const MiniPlayer(embedded: false),
-          navBar,
-        ],
-      ),
+        body: IndexedStack(index: tab, children: MainScaffold._pages),
+        bottomNavigationBar: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            if (!navEmbedded) const MiniPlayer(embedded: false),
+            navBar,
+          ],
+        ),
       ),
     );
   }
@@ -225,8 +227,8 @@ class _CenterNavBar extends StatelessWidget {
             children: <Widget>[
               AnimatedSwitcher(
                 duration: const Duration(milliseconds: 180),
-                transitionBuilder:
-                    (Widget child, Animation<double> anim) => ScaleTransition(
+                transitionBuilder: (Widget child, Animation<double> anim) =>
+                    ScaleTransition(
                   scale: anim,
                   child: child,
                 ),
@@ -253,23 +255,70 @@ class _CenterNavBar extends StatelessWidget {
     }
 
     return Container(
-      // 全透明：Mini 播放条与导航背景融为一体（需求：非极简样式透明）
-      color: Colors.transparent,
+      // 液态玻璃导航栏（需求：全面重构 UI 液态玻璃风）：半透明深底 +
+      // BackdropFilter 模糊 + 顶部高光描边；玻璃关闭/低端机降级实色。
       height: _height + MediaQuery.paddingOf(context).bottom,
       padding: EdgeInsets.only(bottom: MediaQuery.paddingOf(context).bottom),
-      child: Row(
-        children: <Widget>[
-          item(0, Icons.explore_outlined, Icons.explore_rounded, '发现'),
-          // 中央槽位：Mini 播放条（无边框透明，点击进播放页）
-          SizedBox(
-            width: 150,
-            height: _height,
-            child: Center(
-              child: center ?? const SizedBox.shrink(),
+      child: _GlassNavBarSurface(
+        child: Row(
+          children: <Widget>[
+            item(0, Icons.explore_outlined, Icons.explore_rounded, '发现'),
+            // 中央槽位：Mini 播放条（无边框透明，点击进播放页）
+            SizedBox(
+              width: 150,
+              height: _height,
+              child: Center(
+                child: center ?? const SizedBox.shrink(),
+              ),
+            ),
+            item(1, Icons.person_outline_rounded, Icons.person_rounded, '我的'),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// 导航栏玻璃底板：BackdropFilter 模糊 + 半透明深色渐变 + 顶描边高光。
+/// 玻璃关闭/低端机（Android < 12）自动降级为不透明深色底。
+class _GlassNavBarSurface extends ConsumerWidget {
+  const _GlassNavBarSurface({required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final bool glass = ref.watch(glassEnabledProvider);
+    final Brightness brightness = Theme.of(context).brightness;
+    final Color fallback = brightness == Brightness.dark
+        ? const Color(0xF714101B)
+        : const Color(0xF7F2F1F8);
+
+    if (!glass) {
+      return Container(color: fallback, child: child);
+    }
+    return ClipRect(
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 22, sigmaY: 22),
+        child: Container(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: <Color>[
+                Colors.white.withValues(alpha: 0.10),
+                Colors.white.withValues(alpha: 0.04),
+              ],
+            ),
+            border: Border(
+              top: BorderSide(
+                color: Colors.white.withValues(alpha: 0.14),
+                width: 0.8,
+              ),
             ),
           ),
-          item(1, Icons.person_outline_rounded, Icons.person_rounded, '我的'),
-        ],
+          child: child,
+        ),
       ),
     );
   }

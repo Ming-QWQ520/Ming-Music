@@ -30,4 +30,10 @@ class PrefsKeys {
 
   /// 预加载下一首（默认开启）
   static const String preloadNext = 'player.preloadNext';
+
+  /// LRU 缓存容量上限（字节；需求：默认 3GB，缓存音乐页可改）
+  static const String cacheMaxBytes = 'player.cacheMaxBytes';
+
+  /// 应用图片背景（需求：除播放页外的全局图片背景）
+  static const String appBackground = 'settings.appBackground';
 }
