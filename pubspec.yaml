@@ -1,0 +1,57 @@
+name: ming_music
+description: "MingMusic - 基于网易云 API 的在线音乐播放器 (Flutter + Riverpod + MD3)."
+publish_to: "none"
+version: 1.1.0+2
+
+environment:
+  sdk: ^3.6.0
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_localizations:
+    sdk: flutter
+
+  # 国际化资源 (zh/en)
+  intl: any
+
+  # --- 状态管理 ---
+  flutter_riverpod: ^2.6.1
+
+  # --- 路由管理 ---
+  go_router: ^14.8.1
+
+  # --- 动效库（列表/迷你条/弹层入场等统一动效） ---
+  flutter_animate: ^4.5.2
+
+  # --- 系统级音频焦点管理 ---
+  audio_session: ^0.2.4
+
+  # --- 音频引擎 ---
+  just_audio: ^0.10.3        # 播放内核
+  audio_service: ^0.18.18    # 后台播放 / 通知栏 / 锁屏控制
+  video_player: ^2.9.2       # MV 播放页（/mv/url 直链视频）
+
+  # --- 本地存储 ---
+  shared_preferences: ^2.5.3
+  # 平台接口：main.dart 启动容错注入 InMemorySharedPreferencesStore 用
+  shared_preferences_platform_interface: ^2.4.2
+  path_provider: ^2.1.5      # 通知栏封面缓存 / 背景图片持久化
+
+  # --- 网络与缓存 ---
+  crypto: ^3.0.6              # 封面磁盘缓存文件名 md5（纯 Dart）
+
+  # --- 设备能力 ---
+  image_picker: ^1.1.2       # 自定义背景选图
+  device_info_plus: ^11.3.0  # 低端机自动降级液态玻璃 (Android SDK 版本判定)
+  permission_handler: ^11.4.0 # Android 13+ 通知权限
+
+  cupertino_icons: ^1.0.8
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^5.0.0
+
+flutter:
+  uses-material-design: true
