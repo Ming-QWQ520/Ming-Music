@@ -117,27 +117,40 @@ class _PlayerProgressBarState extends ConsumerState<PlayerProgressBar> {
                     onTap: () => ref
                         .read(playerProvider.notifier)
                         .seek(Duration(milliseconds: chorusMs)),
-                    // 命中区放宽到 34x30，白点本体 9px
-                    child: SizedBox(
-                      width: 34,
-                      height: 30,
-                      child: Center(
-                        child: Container(
-                          width: 9,
-                          height: 9,
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            color: Colors.white,
-                            border: Border.all(
-                              color: Colors.black.withValues(alpha: 0.35),
-                              width: 1,
-                            ),
-                            boxShadow: <BoxShadow>[
-                              BoxShadow(
-                                color: Colors.black.withValues(alpha: 0.4),
-                                blurRadius: 4,
+                    // 长按气泡提示（与底部功能条同规范）
+                    child: Tooltip(
+                      message: '高潮点 ${Duration(milliseconds: chorusMs).clock}',
+                      triggerMode: TooltipTriggerMode.longPress,
+                      preferBelow: false,
+                      verticalOffset: 24,
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: 0.14),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      textStyle: const TextStyle(
+                          fontSize: 11.5, color: Colors.white),
+                      // 命中区放宽到 34x30，白点本体 9px
+                      child: SizedBox(
+                        width: 34,
+                        height: 30,
+                        child: Center(
+                          child: Container(
+                            width: 9,
+                            height: 9,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: Colors.white,
+                              border: Border.all(
+                                color: Colors.black.withValues(alpha: 0.35),
+                                width: 1,
                               ),
-                            ],
+                              boxShadow: <BoxShadow>[
+                                BoxShadow(
+                                  color: Colors.black.withValues(alpha: 0.4),
+                                  blurRadius: 4,
+                                ),
+                              ],
+                            ),
                           ),
                         ),
                       ),
