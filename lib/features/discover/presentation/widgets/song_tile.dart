@@ -1,7 +1,7 @@
 /// 歌曲条目组件：封面/序号 + 标题 + VIP 徽章 + 副标题。
 /// 需求：所有歌曲支持长按弹出统一操作菜单（onLongPress）；
-/// 需求「无缓存暗淡」：未缓存歌曲整行暗淡（歌名/歌手/VIP/封面），
-/// 正在播放行保持红色高亮不受暗淡影响。
+/// 需求修正「无缓存暗淡」：仅无网且未缓存时整行暗淡（歌名/歌手/VIP/封面），
+/// 有网一律正常；正在播放行保持红色高亮不受暗淡影响。
 library;
 
 import 'package:flutter/material.dart';
@@ -11,7 +11,7 @@ import '../../../../core/api/netease_models.dart';
 import '../../../../core/constants/app_constants.dart';
 import '../../../../core/widgets/cover_image.dart';
 import '../../../player/providers/cache_providers.dart'
-    show cachedSongIdsProvider;
+    show cachedSongIdsProvider, networkAvailableProvider;
 
 /// VIP 徽标（需求：透明背景 + 白色 VIP 字体 + 白色带圆角长方形描边）
 class VipBadge extends StatelessWidget {
@@ -81,11 +81,18 @@ class SongTile extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final ThemeData theme = Theme.of(context);
-    // 需求：未缓存歌曲整行暗淡（歌名/歌手/VIP/封面 同规则 alpha 0.38）
+    // 需求修正：暗淡仅发生在「无网且未缓存」—— 有网时歌曲一律正常
+    // 显示（此前按缓存状态着色导致有网也整列发灰）；无网时未缓存歌曲
+    // 整行暗淡（歌名/歌手/VIP/封面 同规则 alpha 0.38）
     final Set<int> cachedIds =
         ref.watch(cachedSongIdsProvider).valueOrNull ?? const <int>{};
+    final bool online = ref.watch(networkAvailableProvider
+        .select((AsyncValue<bool> v) => v.valueOrNull ?? true));
     final int? songId = song.id > 0 ? song.id : null;
-    final bool normal = playing || songId == null || cachedIds.contains(songId);
+    final bool normal = playing ||
+        songId == null ||
+        online ||
+        cachedIds.contains(songId);
     final Color titleColor = playing
         ? AppConstants.brandColor
         : normal

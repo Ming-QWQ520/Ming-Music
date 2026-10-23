@@ -196,33 +196,33 @@ class _SearchPageState extends ConsumerState<SearchPage> {
       itemCount: _results.length,
       itemBuilder: (BuildContext context, int index) {
         final Song s = _results[index];
-        // 需求：搜索页增加滑动快捷操作 —— 左滑 = 添加至下一首播放；
-        // 右滑 = 添加至歌单（与歌单详情页同规则）
+        // 需求调整：滑动方向对调 —— 左滑 = 添加至歌单；右滑 = 下一首播放
+        // （与歌单详情页同规则）
         return Dismissible(
           key: ValueKey<String>('search_${s.id}'),
           confirmDismiss: (DismissDirection dir) async {
             if (dir == DismissDirection.startToEnd) {
-              await showAddToPlaylistSheet(context, ref, <int>[s.id]);
-            } else {
               final String? err =
                   await ref.read(playerProvider.notifier).insertNext(s.toTrack());
               if (!context.mounted) return false;
               ScaffoldMessenger.of(context).showSnackBar(SnackBar(
                 content: Text(err ?? '已添加至下一首播放：${s.name}'),
               ));
+            } else {
+              await showAddToPlaylistSheet(context, ref, <int>[s.id]);
             }
             return false; // 动作后回弹，不移除行
           },
           background: _SearchSwipeBg(
-            color: const Color(0xFF3D7BFF),
-            icon: Icons.playlist_add_rounded,
-            label: '添加到歌单',
-            alignRight: false,
-          ),
-          secondaryBackground: _SearchSwipeBg(
             color: AppConstants.brandColor,
             icon: Icons.low_priority_rounded,
             label: '下一首播放',
+            alignRight: false,
+          ),
+          secondaryBackground: _SearchSwipeBg(
+            color: const Color(0xFF3D7BFF),
+            icon: Icons.playlist_add_rounded,
+            label: '添加到歌单',
             alignRight: true,
           ),
           child: SongTile(

@@ -15,6 +15,8 @@ import '../../../../core/constants/app_constants.dart';
 import '../../../library/domain/track.dart';
 import '../../../library/presentation/add_to_playlist_sheet.dart';
 import '../../../discover/presentation/widgets/song_tile.dart' show VipBadge;
+import '../../providers/cache_providers.dart'
+    show cachedSongIdsProvider, networkAvailableProvider;
 import '../../providers/player_providers.dart';
 import '../../services/queue_persistence.dart' show QueueSnapshot;
 
@@ -610,8 +612,20 @@ class _QueueRow extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final ThemeData theme = Theme.of(context);
-    final Color titleColor =
-        current ? AppConstants.brandColor : theme.colorScheme.onSurface;
+    // 需求：无网时播放歌单中未缓存歌曲暗淡（有网一律正常；当前播放行
+    // 保持红色高亮不受暗淡影响）
+    final int? nid = track.neteaseId;
+    final bool online = ref.watch(networkAvailableProvider
+        .select((AsyncValue<bool> v) => v.valueOrNull ?? true));
+    final bool cached = nid == null ||
+        (ref.watch(cachedSongIdsProvider).valueOrNull ?? const <int>{})
+            .contains(nid);
+    final bool dim = !current && !online && !cached;
+    final Color titleColor = current
+        ? AppConstants.brandColor
+        : theme.colorScheme.onSurface.withValues(alpha: dim ? 0.38 : 1.0);
+    final Color artistColor = theme.colorScheme.onSurfaceVariant
+        .withValues(alpha: dim ? 0.38 : 1.0);
 
     final Widget row = InkWell(
       onTap: onTap,
@@ -626,9 +640,9 @@ class _QueueRow extends ConsumerWidget {
               child: current ? _EqBars(playing: playing) : null,
             ),
             const SizedBox(width: 8),
-            // ② VIP 标识（是才显示）
+            // ② VIP 标识（是才显示；无网未缓存同规则暗淡）
             if (track.isVipOnly) ...<Widget>[
-              const VipBadge(height: 13),
+              Opacity(opacity: dim ? 0.38 : 1.0, child: VipBadge(height: 13)),
               const SizedBox(width: 6),
             ],
             // ③ 「歌名 - 歌手」：歌手紧靠歌名，左右各一空格（单行 ellipsis）
@@ -654,7 +668,7 @@ class _QueueRow extends ConsumerWidget {
                     TextSpan(
                       text: track.artist,
                       style: TextStyle(
-                        color: theme.colorScheme.onSurfaceVariant,
+                        color: artistColor,
                         fontSize: 13.5,
                       ),
                     ),

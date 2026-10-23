@@ -1046,8 +1046,8 @@ class _BarIcon extends StatelessWidget {
 // ---------------------------------------------------------------- 歌曲行
 
 /// 歌单歌曲行（封面缩略图 + 标题 + VIP 标签 + 歌手-专辑），
-/// 需求：右滑添加至歌单 / 左滑添加至下一首播放（移除改由长按菜单承载）；
-/// 未缓存歌曲整行暗淡（歌名/歌手/VIP/封面 同规则）。
+/// 需求调整：左滑添加至歌单 / 右滑下一首播放（移除改由长按菜单承载）；
+/// 仅无网且未缓存时整行暗淡（有网一律正常）。
 class _SwipeSongRow extends ConsumerWidget {
   const _SwipeSongRow({
     super.key,
@@ -1067,10 +1067,10 @@ class _SwipeSongRow extends ConsumerWidget {
   final VoidCallback onPlay;
   final VoidCallback onMore;
 
-  /// 右滑：添加至歌单
+  /// 左滑：添加至歌单
   final VoidCallback onAddTo;
 
-  /// 需求：左滑 = 添加至下一首播放
+  /// 右滑 = 添加至下一首播放
   final Future<void> Function() onAddNext;
 
   /// 需求：所有歌曲长按弹出统一操作菜单
@@ -1079,12 +1079,15 @@ class _SwipeSongRow extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final ThemeData theme = Theme.of(context);
-    // 需求：未缓存歌曲整行暗淡 —— 歌名/歌手/VIP 徽标同规则着色
-    // （已缓存或正在播放正常显示，未缓存统一 alpha 0.38 暗淡）
+    // 需求修正：暗淡仅发生在「无网且未缓存」—— 有网时歌曲一律正常
+    // 显示；无网时未缓存歌曲整行暗淡（歌名/歌手/VIP/封面 同规则
+    // alpha 0.38；已缓存或正在播放正常显示）
     final Set<int> cachedIds =
         ref.watch(cachedSongIdsProvider).valueOrNull ?? const <int>{};
+    final bool online = ref.watch(networkAvailableProvider
+        .select((AsyncValue<bool> v) => v.valueOrNull ?? true));
     final bool cached = cachedIds.contains(song.id);
-    final bool normal = playingNow || cached;
+    final bool normal = playingNow || cached || online;
     final Color titleColor = playingNow
         ? AppConstants.brandColor
         : normal
@@ -1168,28 +1171,28 @@ class _SwipeSongRow extends ConsumerWidget {
       ),
     );
 
-    // 需求：滑动动作重做 —— 右滑 = 添加至歌单；左滑 = 添加至下一首播放。
-    // 旧「右滑移除」移除（移除仍可在长按菜单中使用），不再真正滑走。
+    // 需求调整：滑动方向对调 —— 左滑 = 添加至歌单；右滑 = 下一首播放。
+    // （旧「右滑移除」已移除，移除仍可在长按菜单中使用，不真正滑走）
     final Widget swipeable = Dismissible(
       key: ValueKey<String>('row_${song.id}_$index'),
       confirmDismiss: (DismissDirection dir) async {
         if (dir == DismissDirection.startToEnd) {
-          onAddTo(); // 右滑：添加至歌单
+          await onAddNext(); // 右滑：下一首播放
         } else {
-          await onAddNext(); // 左滑：下一首播放
+          onAddTo(); // 左滑：添加至歌单
         }
         return false; // 动作完成后回弹，不移除行
       },
       background: _SwipeBg(
-        color: const Color(0xFF3D7BFF),
-        icon: Icons.playlist_add_rounded,
-        label: '添加到歌单',
-        alignRight: false,
-      ),
-      secondaryBackground: _SwipeBg(
         color: AppConstants.brandColor,
         icon: Icons.low_priority_rounded,
         label: '下一首播放',
+        alignRight: false,
+      ),
+      secondaryBackground: _SwipeBg(
+        color: const Color(0xFF3D7BFF),
+        icon: Icons.playlist_add_rounded,
+        label: '添加到歌单',
         alignRight: true,
       ),
       child: row,
