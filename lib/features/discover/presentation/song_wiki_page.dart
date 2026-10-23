@@ -66,16 +66,13 @@ class SongWikiPage extends ConsumerWidget {
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
-                      fontSize: 22,
-                      fontWeight: FontWeight.w800,
-                      height: 1.25)),
+                      fontSize: 22, fontWeight: FontWeight.w800, height: 1.25)),
               const SizedBox(height: 4),
               Text(artist,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
-                      fontSize: 14,
-                      color: theme.colorScheme.onSurfaceVariant)),
+                      fontSize: 14, color: theme.colorScheme.onSurfaceVariant)),
             ],
           ),
           const SizedBox(height: 16),
@@ -113,8 +110,7 @@ class SongWikiPage extends ConsumerWidget {
                       if (hasFirst) const SizedBox(height: 10),
                       _MemoryCell(
                         label: '累计播放',
-                        main:
-                            '${formatCount(wiki.totalPlayCount)} 次',
+                        main: '${formatCount(wiki.totalPlayCount)} 次',
                         sub: wiki.totalPlayText,
                       ),
                     ],
@@ -199,8 +195,7 @@ class _MemoryCell extends StatelessWidget {
         children: <Widget>[
           Text(label,
               style: TextStyle(
-                  fontSize: 11,
-                  color: theme.colorScheme.onSurfaceVariant)),
+                  fontSize: 11, color: theme.colorScheme.onSurfaceVariant)),
           const SizedBox(height: 4),
           // 需求「首次聆听显示补全」：主值不再单行截断（日期+时段可能较长），
           // 允许自动换行完整展示；desc 补充描述（超越百分比等）补全显示
@@ -249,8 +244,7 @@ class _SectionCard extends StatelessWidget {
       width: double.infinity,
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color:
-            theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
+        color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
         borderRadius: BorderRadius.circular(16),
       ),
       child: Column(
@@ -299,8 +293,7 @@ class _MvCard extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final ThemeData theme = Theme.of(context);
-    final AsyncValue<MvDetail> async =
-        ref.watch(mvDetailProvider(mvId));
+    final AsyncValue<MvDetail> async = ref.watch(mvDetailProvider(mvId));
 
     return Material(
       color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
@@ -343,8 +336,7 @@ class _MvCard extends ConsumerWidget {
                         SizedBox(width: 5),
                         Text('MV',
                             style: TextStyle(
-                                fontSize: 14.5,
-                                fontWeight: FontWeight.w700)),
+                                fontSize: 14.5, fontWeight: FontWeight.w700)),
                       ],
                     ),
                     const SizedBox(height: 4),
@@ -424,8 +416,7 @@ class _WikiGroupRow extends StatelessWidget {
           width: 66,
           child: Text(group.title,
               style: TextStyle(
-                  fontSize: 12.5,
-                  color: theme.colorScheme.onSurfaceVariant)),
+                  fontSize: 12.5, color: theme.colorScheme.onSurfaceVariant)),
         ),
         Expanded(
           child: Wrap(
@@ -441,8 +432,7 @@ class _WikiGroupRow extends StatelessWidget {
                         .withValues(alpha: 0.6),
                     borderRadius: BorderRadius.circular(8),
                   ),
-                  child: Text(item,
-                      style: const TextStyle(fontSize: 12)),
+                  child: Text(item, style: const TextStyle(fontSize: 12)),
                 ),
             ],
           ),
@@ -521,8 +511,7 @@ class _ArtistCardState extends ConsumerState<_ArtistCard> {
               Text(
                 '${info.musicSize}首 · ${info.albumSize}专辑',
                 style: TextStyle(
-                    fontSize: 11.5,
-                    color: theme.colorScheme.onSurfaceVariant),
+                    fontSize: 11.5, color: theme.colorScheme.onSurfaceVariant),
               ),
             ],
           ),
@@ -598,8 +587,8 @@ class _HotCommentCardState extends ConsumerState<_HotCommentCard> {
                   style: TextStyle(
                       fontSize: 13,
                       height: 1.5,
-                      color: theme.colorScheme.onSurface
-                          .withValues(alpha: 0.85)),
+                      color:
+                          theme.colorScheme.onSurface.withValues(alpha: 0.85)),
                 ),
         );
       },
@@ -670,8 +659,7 @@ class _SimiSongsCardState extends ConsumerState<_SimiSongsCard> {
                           child: CircularProgressIndicator(strokeWidth: 2),
                         )
                       : Icon(Icons.play_circle_outline_rounded,
-                          size: 22,
-                          color: theme.colorScheme.onSurfaceVariant),
+                          size: 22, color: theme.colorScheme.onSurfaceVariant),
                   onTap: () => _play(s),
                 ),
             ],
@@ -684,9 +672,8 @@ class _SimiSongsCardState extends ConsumerState<_SimiSongsCard> {
   Future<void> _play(Song song) async {
     if (_busy.contains(song.id)) return;
     setState(() => _busy.add(song.id));
-    final String? error = await ref
-        .read(playerProvider.notifier)
-        .playSimilarNext(song.toTrack());
+    final String? error =
+        await ref.read(playerProvider.notifier).playSimilarNext(song.toTrack());
     if (!mounted) return;
     setState(() => _busy.remove(song.id));
     if (error == null) {
@@ -718,7 +705,8 @@ class _SimiPlaylistsCardState extends ConsumerState<_SimiPlaylistsCard> {
     _future = ref
         .read(neteaseRepositoryProvider)
         .simiPlaylists(widget.songId)
-        .then((List<PlaylistMeta> list) => list.take(6).toList(growable: false));
+        .then(
+            (List<PlaylistMeta> list) => list.take(6).toList(growable: false));
   }
 
   @override

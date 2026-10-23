@@ -60,8 +60,7 @@ class CacheEntry {
   final String cover;
 
   /// 元信息缺失时以「歌曲 id」兕底显示
-  String get displayTitle =>
-      title.isEmpty ? '歌曲 $songId' : title;
+  String get displayTitle => title.isEmpty ? '歌曲 $songId' : title;
   String get displayArtist => artist.isEmpty ? '元信息未记录' : artist;
 }
 
@@ -74,8 +73,20 @@ class SongCacheService {
   /// 单文件下载并发上限（避免预加载+连播打满带宽）
   static const int _maxConcurrent = 2;
 
-  /// 缓存总容量上限：超过后按最后使用时间从旧到新清理
-  static const int _maxTotalBytes = 1536 * 1024 * 1024; // 1.5GB
+  /// 默认缓存总容量上限（需求：默认 3GB，可在缓存音乐页自行修改/关闭）
+  static const int kDefaultMaxBytes = 3 * 1024 * 1024 * 1024; // 3GB
+
+  /// LRU 容量上限（可变：需求「可在缓存音乐页面自行更改最大缓存，
+  /// 也可关闭此功能」）；关闭缓存时本服务不再接收新下载。
+  int _maxTotalBytes = kDefaultMaxBytes;
+
+  int get maxTotalBytes => _maxTotalBytes;
+
+  /// 更新容量上限（立即触发一次 LRU 收敛，超出部分从旧到新清理）
+  void setMaxBytes(int bytes) {
+    _maxTotalBytes = bytes <= 0 ? kDefaultMaxBytes : bytes;
+    unawaited(_pruneIfNeeded());
+  }
 
   final HttpClient _http = HttpClient()
     ..userAgent = 'MingMusic/1.1'
@@ -136,7 +147,8 @@ class SongCacheService {
     }
   }
 
-  Future<void> _writeMeta(Directory dir, Map<String, Map<String, Object?>> meta) async {
+  Future<void> _writeMeta(
+      Directory dir, Map<String, Map<String, Object?>> meta) async {
     try {
       final File f = File(_metaPath(dir));
       await f.writeAsString(jsonEncode(meta), flush: true);
@@ -164,7 +176,8 @@ class SongCacheService {
         'title': title,
         'artist': artist,
         'cover': cover,
-        'at': (old['at'] as num?)?.toInt() ?? DateTime.now().millisecondsSinceEpoch,
+        'at': (old['at'] as num?)?.toInt() ??
+            DateTime.now().millisecondsSinceEpoch,
       };
       await _writeMeta(dir, meta);
     } catch (_) {}
@@ -280,7 +293,8 @@ class SongCacheService {
           path: e.path,
           sizeBytes: e.lengthSync(),
           cachedAt: DateTime.fromMillisecondsSinceEpoch(
-              (m['at'] as num?)?.toInt() ?? e.lastModifiedSync().millisecondsSinceEpoch),
+              (m['at'] as num?)?.toInt() ??
+                  e.lastModifiedSync().millisecondsSinceEpoch),
           title: (m['title'] as String?) ?? '',
           artist: (m['artist'] as String?) ?? '',
           cover: (m['cover'] as String?) ?? '',
@@ -297,6 +311,8 @@ class SongCacheService {
   /// 返回 true = 已完整落盘；false = 失败/被并发限制跳过。
   Future<bool> download(int songId, String level, String url) async {
     if (url.isEmpty) return false;
+    // 需求：缓存功能关闭时不写入新缓存（已缓存文件保留可播）
+    if (!_enabled) return false;
     final String key = keyFor(songId, level);
     final Future<bool>? existing = _inflight[key];
     if (existing != null) return existing;
@@ -309,6 +325,14 @@ class SongCacheService {
       _inflight.remove(key);
     }
   }
+
+  /// 缓存功能总开关（需求：可关闭；关闭时不再新增缓存，
+  /// 已缓存歌曲仍可离线播放）
+  bool _enabled = true;
+
+  bool get enabled => _enabled;
+
+  void setEnabled(bool on) => _enabled = on;
 
   Future<bool> _downloadGuarded(String key, String url) async {
     await _acquireSlot();
@@ -391,6 +415,7 @@ class SongCacheService {
   }
 
   /// LRU 容量收敛：超出上限时按最后修改时间从旧到新删除
+  ///（上限可在缓存音乐页调整；需求默认 3GB）
   Future<void> _pruneIfNeeded() async {
     final Directory? dir = _dir;
     if (dir == null || !dir.existsSync()) return;
@@ -411,8 +436,8 @@ class SongCacheService {
         } catch (_) {}
       }
       if (total <= _maxTotalBytes) return;
-      files.sort((_CacheMeta a, _CacheMeta b) =>
-          a.lastUsedAt.compareTo(b.lastUsedAt));
+      files.sort(
+          (_CacheMeta a, _CacheMeta b) => a.lastUsedAt.compareTo(b.lastUsedAt));
       for (final _CacheMeta m in files) {
         if (total <= _maxTotalBytes) break;
         try {

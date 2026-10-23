@@ -40,6 +40,8 @@ class SettingsPage extends ConsumerWidget {
     final NpPlayerSettings np = ref.watch(npSettingsProvider);
     final bool listenCache = ref.watch(listenCacheProvider);
     final bool preloadNext = ref.watch(preloadNextProvider);
+    // 需求：应用图片背景（除播放页外）
+    final AppBackgroundConfig appBg = ref.watch(appBackgroundProvider);
 
     return Scaffold(
       appBar: AppBar(
@@ -61,9 +63,7 @@ class SettingsPage extends ConsumerWidget {
                     const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
                 leading: const Icon(Icons.person_rounded, size: 22),
                 title: Text(
-                  auth.loggedIn
-                      ? (auth.profile?.nickname ?? '网易云用户')
-                      : '未登录',
+                  auth.loggedIn ? (auth.profile?.nickname ?? '网易云用户') : '未登录',
                   style: const TextStyle(fontSize: 15),
                 ),
                 subtitle: Text(
@@ -87,8 +87,8 @@ class SettingsPage extends ConsumerWidget {
                   title: Text('退出登录',
                       style: TextStyle(
                           fontSize: 15,
-                          color: AppConstants.brandColor
-                              .withValues(alpha: 0.95))),
+                          color:
+                              AppConstants.brandColor.withValues(alpha: 0.95))),
                   subtitle: Text('退出当前网易云音乐账号',
                       style: TextStyle(
                           fontSize: 12,
@@ -116,10 +116,8 @@ class SettingsPage extends ConsumerWidget {
                     ref.read(themeModeProvider.notifier).set(v),
               ),
               _RadioRow<GlassPref>(
-                label: '液态玻璃（Mini 播放条）',
-                subtitle: glassEnabled
-                    ? '当前设备已启用'
-                    : '当前设备性能不足，已自动降级为纯半透明',
+                label: '液态玻璃',
+                subtitle: glassEnabled ? '当前设备已启用' : '当前设备性能不足，已自动降级为纯半透明',
                 groups: const <(GlassPref, String)>[
                   (GlassPref.auto, '自动'),
                   (GlassPref.on, '开启'),
@@ -129,6 +127,47 @@ class SettingsPage extends ConsumerWidget {
                 onChanged: (GlassPref v) =>
                     ref.read(glassPrefProvider.notifier).set(v),
               ),
+              // 需求：应用图片背景（除播放页外的全局背景）
+              SwitchListTile(
+                contentPadding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
+                secondary: const Icon(Icons.wallpaper_rounded, size: 22),
+                title: const Text('应用图片背景', style: TextStyle(fontSize: 15)),
+                subtitle: Text(
+                    appBg.enabled && appBg.imagePath != null
+                        ? '已启用：除播放页外的所有页面显示自定义背景'
+                        : '关闭时使用主题纯色底',
+                    style: TextStyle(
+                        fontSize: 12,
+                        color: theme.colorScheme.onSurfaceVariant)),
+                value: appBg.enabled && appBg.imagePath != null,
+                activeThumbColor: AppConstants.brandColor,
+                onChanged: (bool v) =>
+                    ref.read(appBackgroundProvider.notifier).setEnabled(v),
+              ),
+              if (appBg.enabled && appBg.imagePath != null)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
+                  child: Row(
+                    children: <Widget>[
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: () => ref
+                              .read(appBackgroundProvider.notifier)
+                              .pickImage(),
+                          icon: const Icon(Icons.image_rounded, size: 18),
+                          label: const Text('选择背景图'),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      TextButton(
+                        onPressed: () =>
+                            ref.read(appBackgroundProvider.notifier).clear(),
+                        child: const Text('清除'),
+                      ),
+                    ],
+                  ),
+                ),
               _RadioRow<BackgroundType>(
                 label: '播放页背景',
                 groups: const <(BackgroundType, String)>[
@@ -198,8 +237,7 @@ class SettingsPage extends ConsumerWidget {
                     const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
                 leading: const Icon(Icons.tune_rounded, size: 22),
                 title: const Text('播放页自定义', style: TextStyle(fontSize: 15)),
-                subtitle: Text(
-                    '显示模式 / 封面 / 背景 / 歌词 / 红心动效',
+                subtitle: Text('显示模式 / 封面 / 背景 / 歌词 / 红心动效',
                     style: TextStyle(
                         fontSize: 12,
                         color: theme.colorScheme.onSurfaceVariant)),
@@ -235,8 +273,35 @@ class SettingsPage extends ConsumerWidget {
                         color: theme.colorScheme.onSurfaceVariant)),
                 value: listenCache,
                 activeThumbColor: AppConstants.brandColor,
-                onChanged: (bool v) =>
-                    ref.read(listenCacheProvider.notifier).set(v),
+                // 需求：关闭时弹确认弹窗（颜文字文案），防止误关
+                onChanged: (bool v) async {
+                  if (v) {
+                    ref.read(listenCacheProvider.notifier).set(true);
+                    return;
+                  }
+                  final bool? confirm = await showDialog<bool>(
+                    context: context,
+                    builder: (BuildContext ctx) => AlertDialog(
+                      title: const Text('关闭边听边缓存'),
+                      content: const Text('关闭后没网不能听歌了哦(๑`^´๑)，真的要关吗'),
+                      actions: <Widget>[
+                        TextButton(
+                          onPressed: () => Navigator.of(ctx).pop(false),
+                          child: const Text("算了(●'◡'●)"),
+                        ),
+                        FilledButton(
+                          style: FilledButton.styleFrom(
+                              backgroundColor: AppConstants.brandColor),
+                          onPressed: () => Navigator.of(ctx).pop(true),
+                          child: const Text('关闭╥_╥'),
+                        ),
+                      ],
+                    ),
+                  );
+                  if (confirm == true) {
+                    ref.read(listenCacheProvider.notifier).set(false);
+                  }
+                },
               ),
               SwitchListTile(
                 contentPadding:
@@ -258,15 +323,17 @@ class SettingsPage extends ConsumerWidget {
                     const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
                 secondary: const Icon(Icons.brightness_high_rounded, size: 22),
                 title: const Text('播放页始终亮屏', style: TextStyle(fontSize: 15)),
-                subtitle: Text('打开全屏播放页时保持屏幕常亮，离开播放页自动恢复'
-                        '系统熄屏（默认关闭）',
+                subtitle: Text(
+                    '打开全屏播放页时保持屏幕常亮，离开播放页自动恢复'
+                    '系统熄屏（默认关闭）',
                     style: TextStyle(
                         fontSize: 12,
                         color: theme.colorScheme.onSurfaceVariant)),
                 value: np.playerKeepScreenOn,
                 activeThumbColor: AppConstants.brandColor,
-                onChanged: (bool v) =>
-                    ref.read(npSettingsProvider.notifier).setPlayerKeepScreenOn(v),
+                onChanged: (bool v) => ref
+                    .read(npSettingsProvider.notifier)
+                    .setPlayerKeepScreenOn(v),
               ),
             ],
           ),
@@ -279,12 +346,10 @@ class SettingsPage extends ConsumerWidget {
             children: <Widget>[
               _RadioRow<MiniPlayerStyle>(
                 label: '样式',
-                subtitle: '紧凑极简嵌入底部导航栏中间；其余样式悬浮导航栏上方',
+                subtitle: '紧凑极简嵌入底部导航栏中间；经典条悬浮导航栏上方',
                 groups: const <(MiniPlayerStyle, String)>[
                   (MiniPlayerStyle.classic, '经典条'),
-                  (MiniPlayerStyle.overlay, '封面铺满'),
                   (MiniPlayerStyle.compact, '紧凑极简'),
-                  (MiniPlayerStyle.wide, '宽幅双行'),
                 ],
                 value: np.miniStyle,
                 onChanged: (MiniPlayerStyle v) =>
@@ -346,8 +411,8 @@ class SettingsPage extends ConsumerWidget {
                 trailing: const Icon(Icons.open_in_new_rounded, size: 18),
                 // 需求：补全无实际作用功能 —— 仓库入口真实打开浏览器
                 onTap: () async {
-                  final bool ok = await PlatformActions.openUrl(
-                      AppConstants.repoUrl);
+                  final bool ok =
+                      await PlatformActions.openUrl(AppConstants.repoUrl);
                   if (!context.mounted) return;
                   if (!ok) {
                     ScaffoldMessenger.of(context).showSnackBar(
@@ -441,8 +506,7 @@ class _CacheGroupState extends ConsumerState<_CacheGroup> {
       context: context,
       builder: (BuildContext ctx) => AlertDialog(
         title: const Text('清理歌曲缓存'),
-        content: Text(
-            '将删除已缓存的歌曲音频（当前占用 $_songSizeText）。'
+        content: Text('将删除已缓存的歌曲音频（当前占用 $_songSizeText）。'
             '清理后再次播放需重新联网加载，确定继续吗？'),
         actions: <Widget>[
           TextButton(
@@ -474,8 +538,7 @@ class _CacheGroupState extends ConsumerState<_CacheGroup> {
               const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
           leading: const Icon(Icons.library_music_rounded, size: 22),
           title: const Text('歌曲缓存', style: TextStyle(fontSize: 15)),
-          subtitle: Text(
-              '边听边缓存占用：$_songSizeText（仅可在此清理，系统「清除缓存」不影响；封面不再缓存）',
+          subtitle: Text('边听边缓存占用：$_songSizeText（仅可在此清理，系统「清除缓存」不影响；封面不再缓存）',
               style: TextStyle(
                   fontSize: 12,
                   color: Theme.of(context).colorScheme.onSurfaceVariant)),

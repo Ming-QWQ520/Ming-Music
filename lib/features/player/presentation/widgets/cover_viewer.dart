@@ -74,8 +74,8 @@ class _CoverViewerPageState extends State<CoverViewerPage> {
     // Android ≤28 写公共目录需要存储权限；
     // Android 10+ 走 MediaStore 无需权限，不要误请求（13+ 必被拒）。
     if (Platform.isAndroid) {
-      final RegExpMatch? m = RegExp(r'SDK (\d+)')
-          .firstMatch(Platform.operatingSystemVersion);
+      final RegExpMatch? m =
+          RegExp(r'SDK (\d+)').firstMatch(Platform.operatingSystemVersion);
       final int? sdk = m == null ? null : int.tryParse(m.group(1)!);
       if (sdk != null && sdk < 29) {
         final PermissionStatus status = await Permission.storage.request();
@@ -104,7 +104,8 @@ class _CoverViewerPageState extends State<CoverViewerPage> {
       );
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(ok == true ? '已保存到相册 Pictures/MingMusic' : '保存失败')),
+        SnackBar(
+            content: Text(ok == true ? '已保存到相册 Pictures/MingMusic' : '保存失败')),
       );
     } catch (e) {
       if (mounted) {
@@ -182,8 +183,8 @@ class _CoverViewerPageState extends State<CoverViewerPage> {
                         )
                       : const Icon(Icons.save_alt_rounded, size: 20),
                   label: const Text('保存至本地',
-                      style:
-                          TextStyle(fontSize: 14.5, fontWeight: FontWeight.w600)),
+                      style: TextStyle(
+                          fontSize: 14.5, fontWeight: FontWeight.w600)),
                 ),
               ),
             ),

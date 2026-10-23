@@ -57,7 +57,7 @@ class CommentItem {
         user['vipRights'] as Map<String, Object?>?;
     final int redVipLevel = safeIntOf(vipRights?['redVipLevel']) ?? 0;
     final int associatorLevel = safeIntOf(
-        (vipRights?['associator'] as Map<String, Object?>?)?['vipLevel']) ??
+            (vipRights?['associator'] as Map<String, Object?>?)?['vipLevel']) ??
         0;
     return CommentItem(
       commentId: safeIntOf(c['commentId']) ?? 0,

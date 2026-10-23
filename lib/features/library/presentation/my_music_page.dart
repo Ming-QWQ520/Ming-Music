@@ -16,11 +16,11 @@ import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
-import '../../../core/api/netease_models.dart' show PlaylistMeta, CloudDriveInfo;
+import '../../../core/api/netease_models.dart'
+    show PlaylistMeta, CloudDriveInfo;
 import '../../../core/constants/app_constants.dart';
 import '../../../core/widgets/cover_image.dart';
-import '../../auth/data/netease_auth_repository.dart'
-    show NeteaseUserPlaylist;
+import '../../auth/data/netease_auth_repository.dart' show NeteaseUserPlaylist;
 import '../../auth/presentation/login_sheet.dart';
 import '../../auth/providers/auth_providers.dart';
 import '../../discover/data/netease_providers.dart';
@@ -82,17 +82,17 @@ class _MyMusicPageState extends ConsumerState<MyMusicPage> {
           controller: ctrl,
           autofocus: true,
           maxLength: 40,
-          decoration: const InputDecoration(
-              hintText: '请输入歌单名称', counterText: ''),
+          decoration:
+              const InputDecoration(hintText: '请输入歌单名称', counterText: ''),
         ),
         actions: <Widget>[
           TextButton(
-              onPressed: () => Navigator.of(ctx).pop(), child: const Text('取消')),
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: const Text('取消')),
           FilledButton(
             style: FilledButton.styleFrom(
                 backgroundColor: AppConstants.brandColor),
-            onPressed: () =>
-                Navigator.of(ctx).pop(ctrl.text.trim()),
+            onPressed: () => Navigator.of(ctx).pop(ctrl.text.trim()),
             child: const Text('创建'),
           ),
         ],
@@ -172,8 +172,8 @@ class _MyMusicPageState extends ConsumerState<MyMusicPage> {
                 count: _createdList.length,
                 playlists: _createdList,
                 expanded: _createdExpanded,
-                onToggle: () => setState(
-                    () => _createdExpanded = !_createdExpanded),
+                onToggle: () =>
+                    setState(() => _createdExpanded = !_createdExpanded),
               ),
               if (_collectedList.isNotEmpty) ...<Widget>[
                 const SizedBox(height: 4),
@@ -182,11 +182,13 @@ class _MyMusicPageState extends ConsumerState<MyMusicPage> {
                   count: _collectedList.length,
                   playlists: _collectedList,
                   expanded: _collectedExpanded,
-                  onToggle: () => setState(
-                      () => _collectedExpanded = !_collectedExpanded),
+                  onToggle: () =>
+                      setState(() => _collectedExpanded = !_collectedExpanded),
                 ),
               ],
-              const _CloudDriveItem(),
+              // 需求：底部「我的云盘」行已移除 —— 云盘入口与样式
+              // 已上移至顶部功能宫格的「音乐云盘」tile（登录后显示
+              // 云盘歌曲数）。
               const SizedBox(height: 8),
               // 需求：我的页增加数据缓存入口（无网环境体验保障，可在此清理）
               const _CacheRow(),
@@ -302,8 +304,8 @@ class _ProfileHeader extends ConsumerWidget {
     final Widget avatar = Container(
       decoration: BoxDecoration(
         shape: BoxShape.circle,
-        border: Border.all(
-            color: Colors.white.withValues(alpha: 0.85), width: 1.8),
+        border:
+            Border.all(color: Colors.white.withValues(alpha: 0.85), width: 1.8),
         boxShadow: <BoxShadow>[
           BoxShadow(
             color: Colors.black.withValues(alpha: 0.28),
@@ -363,9 +365,7 @@ class _ProfileHeader extends ConsumerWidget {
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
       child: InkWell(
         borderRadius: BorderRadius.circular(16),
-        onTap: loggedIn
-            ? () => context.push('/profile')
-            : onLogin,
+        onTap: loggedIn ? () => context.push('/profile') : onLogin,
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 8),
           child: Row(
@@ -380,9 +380,7 @@ class _ProfileHeader extends ConsumerWidget {
                         color: theme.colorScheme.onSurfaceVariant)),
               const SizedBox(width: 6),
               Icon(
-                loggedIn
-                    ? Icons.chevron_right_rounded
-                    : Icons.login_rounded,
+                loggedIn ? Icons.chevron_right_rounded : Icons.login_rounded,
                 size: 22,
                 color: theme.colorScheme.onSurfaceVariant,
               ),
@@ -390,7 +388,10 @@ class _ProfileHeader extends ConsumerWidget {
           ),
         ),
       ),
-    ).animate(delay: 30.ms).fadeIn(duration: 240.ms).slideY(begin: 0.05, end: 0);
+    )
+        .animate(delay: 30.ms)
+        .fadeIn(duration: 240.ms)
+        .slideY(begin: 0.05, end: 0);
   }
 }
 
@@ -415,7 +416,8 @@ class _QuickGrid extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final AuthState auth = ref.watch(authProvider);
-    final String likeSub = auth.loggedIn ? '${auth.likedIds.length} 首' : '登录后可用';
+    final String likeSub =
+        auth.loggedIn ? '${auth.likedIds.length} 首' : '登录后可用';
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
@@ -474,19 +476,65 @@ class _QuickGrid extends ConsumerWidget {
               ),
               const SizedBox(width: 10),
               Expanded(
-                child: _QuickHubTile(
-                  icon: Icons.cloud_rounded,
-                  gradient: _gradients[3],
-                  title: '音乐云盘',
-                  subtitle: '登录后可用',
-                  onTap: () => context.push('/cloud-drive'),
-                ),
+                // 需求：云盘样式上移 —— 原「我的云盘」行样式移至本 tile
+                //（登录后显示云盘歌曲数），底部行已删除
+                child: const _CloudDriveTile(),
               ),
             ],
           ),
         ],
       ),
-    ).animate(delay: 70.ms).fadeIn(duration: 260.ms).slideY(begin: 0.05, end: 0);
+    )
+        .animate(delay: 70.ms)
+        .fadeIn(duration: 260.ms)
+        .slideY(begin: 0.05, end: 0);
+  }
+}
+
+/// 音乐云盘宫格 tile（需求：原「我的云盘」行样式上移至此）——
+/// 云盘绿渐变图标块 + 「音乐云盘」标题 + 登录后显示云盘歌曲数；
+/// 未登录/获取失败回退「登录后可用」。点击进云盘页。
+class _CloudDriveTile extends ConsumerStatefulWidget {
+  const _CloudDriveTile();
+
+  @override
+  ConsumerState<_CloudDriveTile> createState() => _CloudDriveTileState();
+}
+
+class _CloudDriveTileState extends ConsumerState<_CloudDriveTile> {
+  int? _count;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _loadCount());
+  }
+
+  Future<void> _loadCount() async {
+    final AuthState auth = ref.read(authProvider);
+    if (!auth.loggedIn) return;
+    try {
+      final CloudDriveInfo info =
+          await ref.read(neteaseRepositoryProvider).cloudInfo();
+      if (!mounted) return;
+      setState(() => _count = info.count);
+    } catch (_) {
+      // 云盘信息获取失败静默（仍可进入云盘页查看）
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final AuthState auth = ref.watch(authProvider);
+    final String subtitle =
+        auth.loggedIn && _count != null ? '$_count 首歌曲已同步' : '登录后可用';
+    return _QuickHubTile(
+      icon: Icons.cloud_rounded,
+      gradient: const <Color>[Color(0xFF9BE7A4), Color(0xFF4ADE80)],
+      title: '音乐云盘',
+      subtitle: subtitle,
+      onTap: () => context.push('/cloud-drive'),
+    );
   }
 }
 
@@ -587,8 +635,7 @@ class _RankRow extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
       child: Material(
-        color:
-            theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
+        color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
         borderRadius: BorderRadius.circular(16),
         child: InkWell(
           borderRadius: BorderRadius.circular(16),
@@ -695,9 +742,8 @@ class _PlaylistSection extends StatelessWidget {
                 ],
               ),
             ),
-            crossFadeState: expanded
-                ? CrossFadeState.showSecond
-                : CrossFadeState.showFirst,
+            crossFadeState:
+                expanded ? CrossFadeState.showSecond : CrossFadeState.showFirst,
             duration: const Duration(milliseconds: 220),
             sizeCurve: Curves.easeOutCubic,
           ),
@@ -719,8 +765,7 @@ class _PlaylistRowTile extends StatelessWidget {
     // 需求：歌单显示歌单封面（网易云样式：封面 46 + 名称 + 曲目数）
     final Widget row = ListTile(
       dense: true,
-      contentPadding:
-          const EdgeInsets.symmetric(horizontal: 12, vertical: 3),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 3),
       leading: ClipRRect(
         borderRadius: BorderRadius.circular(8),
         child: CoverImage(
@@ -737,8 +782,8 @@ class _PlaylistRowTile extends StatelessWidget {
       ),
       subtitle: Text(
         '${playlist.trackCount}首',
-        style: TextStyle(
-            fontSize: 11, color: theme.colorScheme.onSurfaceVariant),
+        style:
+            TextStyle(fontSize: 11, color: theme.colorScheme.onSurfaceVariant),
       ),
       trailing: Icon(Icons.chevron_right_rounded,
           size: 18, color: theme.colorScheme.onSurfaceVariant),
@@ -764,97 +809,6 @@ class _PlaylistRowTile extends StatelessWidget {
         ),
       ),
       child: row,
-    );
-  }
-}
-
-// ---------------------------------------------------------------- 云盘项
-
-/// 我的云盘行（需求：登录后显示总歌曲数）
-class _CloudDriveItem extends ConsumerStatefulWidget {
-  const _CloudDriveItem();
-
-  @override
-  ConsumerState<_CloudDriveItem> createState() => _CloudDriveItemState();
-}
-
-class _CloudDriveItemState extends ConsumerState<_CloudDriveItem> {
-  int? _count;
-
-  @override
-  void initState() {
-    super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _loadCount());
-  }
-
-  Future<void> _loadCount() async {
-    final AuthState auth = ref.read(authProvider);
-    if (!auth.loggedIn) return;
-    try {
-      final CloudDriveInfo info =
-          await ref.read(neteaseRepositoryProvider).cloudInfo();
-      if (!mounted) return;
-      setState(() => _count = info.count);
-    } catch (_) {
-      // 云盘信息获取失败静默（行内仍可进入云盘页查看）
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final ThemeData theme = Theme.of(context);
-    final AuthState auth = ref.watch(authProvider);
-    final String subtitle = auth.loggedIn && _count != null
-        ? '$_count 首歌曲，随时随地同步云端音乐资产'
-        : '随时随地，同步云端音乐资产';
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-      child: Material(
-        color:
-            theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
-        borderRadius: BorderRadius.circular(16),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(16),
-          onTap: () => context.push('/cloud-drive'),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-            child: Row(
-              children: <Widget>[
-                Container(
-                  width: 38,
-                  height: 38,
-                  decoration: BoxDecoration(
-                    gradient: const LinearGradient(
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                      colors: <Color>[Color(0xFF81D4FA), Color(0xFF0288D1)],
-                    ),
-                    borderRadius: BorderRadius.circular(11),
-                  ),
-                  child:
-                      const Icon(Icons.cloud_upload_rounded,
-                          size: 20, color: Colors.white),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: <Widget>[
-                      const Text('我的云盘',
-                          style: TextStyle(
-                              fontSize: 14.5, fontWeight: FontWeight.w600)),
-                      const SizedBox(height: 1),
-                      Text(subtitle, style: const TextStyle(fontSize: 11)),
-                    ],
-                  ),
-                ),
-                Icon(Icons.chevron_right_rounded,
-                    size: 19, color: theme.colorScheme.onSurfaceVariant),
-              ],
-            ),
-          ),
-        ),
-      ),
     );
   }
 }
@@ -900,8 +854,7 @@ class _CacheRowState extends ConsumerState<_CacheRow> {
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 0),
       child: Material(
-        color:
-            theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
+        color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
         borderRadius: BorderRadius.circular(16),
         child: InkWell(
           borderRadius: BorderRadius.circular(16),

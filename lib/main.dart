@@ -39,7 +39,8 @@ Future<void> main() async {
   Diag.installHooks();
   await Diag.init();
   Diag.milestone('binding ready');
-  Diag.log('设备: ${Platform.operatingSystem} ${Platform.operatingSystemVersion}');
+  Diag.log(
+      '设备: ${Platform.operatingSystem} ${Platform.operatingSystemVersion}');
 
   // 0.5) 全局 HTTP User-Agent 覆写（网易 CDN 403 的全局兑底）：
   // 网易 CDN 对 Dart 默认 UA（Dart/x.x）风控 403 —— 任何遗漏 UA 的
@@ -78,8 +79,8 @@ Future<void> main() async {
   //    电话铃声打断时自动淡出暂停、被打断恢复后继续播放。
   //    just_audio 检测到 audio_session 依赖后自动接管焦点事件。
   try {
-    final AudioSession session = await AudioSession.instance
-        .timeout(const Duration(seconds: 3));
+    final AudioSession session =
+        await AudioSession.instance.timeout(const Duration(seconds: 3));
     await session
         .configure(const AudioSessionConfiguration.music())
         .timeout(const Duration(seconds: 3));
@@ -115,7 +116,8 @@ Future<void> main() async {
       audioHandler = MingAudioHandler();
     } catch (e2, st2) {
       Diag.log('裸内核构造也失败: $e2');
-      Diag.log('  stack(首5帧): ${st2.toString().split('\n').take(5).join(' | ')}');
+      Diag.log(
+          '  stack(首5帧): ${st2.toString().split('\n').take(5).join(' | ')}');
       rethrow;
     }
   }
@@ -138,7 +140,8 @@ Future<void> main() async {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       () async {
         try {
-          final PermissionStatus s = await Permission.notification.request()
+          final PermissionStatus s = await Permission.notification
+              .request()
               .timeout(const Duration(seconds: 10));
           Diag.log('通知权限申请结果: $s');
         } catch (e) {
@@ -182,7 +185,8 @@ class _MingMusicBootstrapState extends ConsumerState<_MingMusicBootstrap> {
           Diag.milestone('restoreQueue done');
         } catch (e, st) {
           Diag.log('restoreQueue 异常: $e');
-          Diag.log('  stack(首5帧): ${st.toString().split('\n').take(5).join(' | ')}');
+          Diag.log(
+              '  stack(首5帧): ${st.toString().split('\n').take(5).join(' | ')}');
         }
       }();
     });

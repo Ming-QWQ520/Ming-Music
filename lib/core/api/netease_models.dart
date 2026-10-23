@@ -285,7 +285,8 @@ class PlaylistDetail {
         meta: PlaylistMeta.fromStoredJson(
             (j['meta'] as Map<String, Object?>?) ?? const <String, Object?>{}),
         tracks: <Song>[
-          for (final Object? t in (j['tracks'] as List<Object?>? ?? const <Object?>[]))
+          for (final Object? t
+              in (j['tracks'] as List<Object?>? ?? const <Object?>[]))
             if (t is Map<String, Object?>) Song.fromStoredJson(t),
         ],
       );
@@ -382,8 +383,7 @@ class MvDetail {
   static MvDetail fromJson(int id, Map<String, Object?> j) => MvDetail(
         id: (j['id'] as num?)?.toInt() ?? id,
         name: (j['name'] as String?) ?? 'MV',
-        artistName: (j['artistName'] as String?) ??
-            _artistsNames(j['artists']),
+        artistName: (j['artistName'] as String?) ?? _artistsNames(j['artists']),
         durationMs: (j['duration'] as num?)?.toInt() ?? 0,
         playCount: (j['playCount'] as num?)?.toInt() ?? 0,
         coverUrl: normalizeNeteaseUrl(j['cover'] as String?),
@@ -521,14 +521,13 @@ class SongWikiSummary {
     String totalText = '';
 
     // 按服务端 position 升序（对齐 Zephyr 的 sort）
-    final List<Map<String, Object?>> sorted = blocks
-        .whereType<Map<String, Object?>>()
-        .toList()
-      ..sort((Map<String, Object?> a, Map<String, Object?> b) {
-        final int pa = int.tryParse('${a['position'] ?? 0}') ?? 0;
-        final int pb = int.tryParse('${b['position'] ?? 0}') ?? 0;
-        return pa.compareTo(pb);
-      });
+    final List<Map<String, Object?>> sorted =
+        blocks.whereType<Map<String, Object?>>().toList()
+          ..sort((Map<String, Object?> a, Map<String, Object?> b) {
+            final int pa = int.tryParse('${a['position'] ?? 0}') ?? 0;
+            final int pb = int.tryParse('${b['position'] ?? 0}') ?? 0;
+            return pa.compareTo(pb);
+          });
 
     for (final Map<String, Object?> block in sorted) {
       final String code = '${block['showType'] ?? block['code'] ?? ''}';
@@ -558,8 +557,10 @@ class SongWikiSummary {
             }
             final Object? tp = ext['musicTotalPlayDto'];
             if (tp is Map<String, Object?>) {
-              totalPlay =
-                  (tp['playCount'] is num ? (tp['playCount'] as num).toInt() : int.tryParse('${tp['playCount'] ?? ''}')) ?? totalPlay;
+              totalPlay = (tp['playCount'] is num
+                      ? (tp['playCount'] as num).toInt()
+                      : int.tryParse('${tp['playCount'] ?? ''}')) ??
+                  totalPlay;
               totalText = (tp['text'] as String?) ?? totalText;
             }
           }
@@ -575,9 +576,11 @@ class SongWikiSummary {
       for (final Object? c in creatives) {
         if (c is! Map<String, Object?>) continue;
         final Map<String, Object?> ue =
-            (c['uiElement'] as Map<String, Object?>?) ?? const <String, Object?>{};
+            (c['uiElement'] as Map<String, Object?>?) ??
+                const <String, Object?>{};
         final Map<String, Object?> mt =
-            (ue['mainTitle'] as Map<String, Object?>?) ?? const <String, Object?>{};
+            (ue['mainTitle'] as Map<String, Object?>?) ??
+                const <String, Object?>{};
         final String title = (mt['title'] as String?) ?? '';
         if (title.isEmpty) continue;
         final List<String> items = <String>[];
@@ -596,9 +599,11 @@ class SongWikiSummary {
           for (final Object? r in resources) {
             if (r is! Map<String, Object?>) continue;
             final Map<String, Object?> rue =
-                (r['uiElement'] as Map<String, Object?>?) ?? const <String, Object?>{};
+                (r['uiElement'] as Map<String, Object?>?) ??
+                    const <String, Object?>{};
             final Map<String, Object?> rmt =
-                (rue['mainTitle'] as Map<String, Object?>?) ?? const <String, Object?>{};
+                (rue['mainTitle'] as Map<String, Object?>?) ??
+                    const <String, Object?>{};
             final String? t = rmt['title'] as String?;
             if (t != null && t.isNotEmpty) items.add(t);
           }
@@ -694,15 +699,13 @@ class CloudSong {
   static CloudSong? fromJson(Map<String, Object?> j) {
     final Map<String, Object?>? simple =
         j['simpleSong'] as Map<String, Object?>?;
-    final Map<String, Object?>? songNode =
-        j['song'] as Map<String, Object?>?;
+    final Map<String, Object?>? songNode = j['song'] as Map<String, Object?>?;
     final Song? s = simple != null
         ? Song.fromCloudJson(simple)
         : (songNode != null ? Song.fromCloudJson(songNode) : null);
     if (s == null || s.id == 0) return null;
-    final String name = (j['fileName'] as String?) ??
-        (j['songName'] as String?) ??
-        s.name;
+    final String name =
+        (j['fileName'] as String?) ?? (j['songName'] as String?) ?? s.name;
     return CloudSong(
       song: s,
       fileSize: (j['fileSize'] as num?)?.toInt() ?? 0,

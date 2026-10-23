@@ -89,10 +89,8 @@ class SongTile extends ConsumerWidget {
     final bool online = ref.watch(networkAvailableProvider
         .select((AsyncValue<bool> v) => v.valueOrNull ?? true));
     final int? songId = song.id > 0 ? song.id : null;
-    final bool normal = playing ||
-        songId == null ||
-        online ||
-        cachedIds.contains(songId);
+    final bool normal =
+        playing || songId == null || online || cachedIds.contains(songId);
     final Color titleColor = playing
         ? AppConstants.brandColor
         : normal

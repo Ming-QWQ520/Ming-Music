@@ -133,7 +133,8 @@ Future<Uint8List?> fetchBytes(String url, CoverSize size) async {
 
   // 重试阶梯：指定尺寸 → 原图 → 120 小图（部分特殊尺寸仅小图可访问）
   final List<String> candidates = <String>[
-    if (size.param != null && !rawUrl.contains('?param=')) '$rawUrl?param=${size.param}',
+    if (size.param != null && !rawUrl.contains('?param='))
+      '$rawUrl?param=${size.param}',
     rawUrl,
     if (!rawUrl.contains('?param=')) '$rawUrl?param=120y120',
   ];
@@ -315,10 +316,13 @@ class NotificationArtCache {
   /// LRU 收敛：超过 maxFiles 删除最旧文件
   static Future<void> _prune(Directory dir) async {
     try {
-      final List<FileSystemEntity> files = dir.listSync().whereType<File>().toList()
-        ..sort((FileSystemEntity a, FileSystemEntity b) =>
-            File(a.path).lastModifiedSync().compareTo(
-                File(b.path).lastModifiedSync()));
+      final List<FileSystemEntity> files = dir
+          .listSync()
+          .whereType<File>()
+          .toList()
+        ..sort((FileSystemEntity a, FileSystemEntity b) => File(a.path)
+            .lastModifiedSync()
+            .compareTo(File(b.path).lastModifiedSync()));
       for (int i = 0; i < files.length - maxFiles; i++) {
         try {
           files[i].deleteSync();

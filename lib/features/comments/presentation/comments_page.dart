@@ -197,8 +197,9 @@ class _CommentsBodyState extends ConsumerState<_CommentsBody> {
             const Text('评论加载失败'),
             const SizedBox(height: 8),
             TextButton(
-              onPressed: () =>
-                  ref.read(commentsProvider(widget.subject.key).notifier).reload(),
+              onPressed: () => ref
+                  .read(commentsProvider(widget.subject.key).notifier)
+                  .reload(),
               child: const Text('重试'),
             ),
           ],
@@ -241,10 +242,9 @@ class _CommentsBodyState extends ConsumerState<_CommentsBody> {
           }
           final CommentItem c = comments[i];
           // 对齐 Zephyr：自己的评论可删除（t=0）
-          final int? myUserId =
-              ref.watch(authProvider.select((AuthState s) => s.profile?.userId));
-          final bool isMine =
-              myUserId != null && myUserId == c.userId;
+          final int? myUserId = ref
+              .watch(authProvider.select((AuthState s) => s.profile?.userId));
+          final bool isMine = myUserId != null && myUserId == c.userId;
           return _CommentRow(
             comment: c,
             liked: liked.contains(c.commentId),

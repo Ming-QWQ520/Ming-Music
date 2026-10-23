@@ -26,8 +26,7 @@ import '../../../core/constants/app_constants.dart';
 import '../../../core/utils/platform_actions.dart';
 import '../../../core/widgets/cover_image.dart';
 import '../../auth/providers/auth_providers.dart';
-import '../../comments/providers/comments_providers.dart'
-    show CommentsSubject;
+import '../../comments/providers/comments_providers.dart' show CommentsSubject;
 import '../../library/data/download_service.dart';
 import '../../library/domain/track.dart';
 import '../../library/presentation/add_to_playlist_sheet.dart';
@@ -36,6 +35,7 @@ import '../../player/providers/player_providers.dart';
 import '../data/netease_providers.dart';
 import 'widgets/song_actions_sheet.dart';
 import 'widgets/song_tile.dart' show VipBadge;
+import '../../../core/widgets/sheet_host.dart' show showMingSheet;
 
 class PlaylistDetailPage extends ConsumerStatefulWidget {
   const PlaylistDetailPage._({
@@ -171,8 +171,7 @@ class _PlaylistDetailPageState extends ConsumerState<PlaylistDetailPage> {
   bool _isMine(PlaylistMeta meta) {
     final AuthState auth = ref.read(authProvider);
     if (!auth.loggedIn) return false;
-    final int? creatorId =
-        meta.creatorUserId ?? widget.meta?.creatorUserId;
+    final int? creatorId = meta.creatorUserId ?? widget.meta?.creatorUserId;
     return creatorId != null && creatorId == auth.profile?.userId;
   }
 }
@@ -242,15 +241,15 @@ class _DetailBodyState extends ConsumerState<_DetailBody> {
     final List<Song> visible = _visible;
     if (visible.isEmpty) return;
     ref.read(playerProvider.notifier).playSongs(
-          <Track>[for (final Song s in visible) s.toTrack()],
-          startIndex: indexInVisible,
-          queueTitle: _title,
-        );
+      <Track>[for (final Song s in visible) s.toTrack()],
+      startIndex: indexInVisible,
+      queueTitle: _title,
+    );
   }
 
   String _totalDurationText() {
-    final int ms = widget.tracks.fold<int>(
-        0, (int acc, Song s) => acc + (s.durationMs ?? 0));
+    final int ms = widget.tracks
+        .fold<int>(0, (int acc, Song s) => acc + (s.durationMs ?? 0));
     if (ms <= 0) return '';
     final int minutes = ms ~/ 60000;
     if (minutes >= 60) {
@@ -312,9 +311,7 @@ class _DetailBodyState extends ConsumerState<_DetailBody> {
     );
     if (ok != true) return;
     try {
-      await ref
-          .read(neteaseRepositoryProvider)
-          .playlistDelete(widget.meta.id);
+      await ref.read(neteaseRepositoryProvider).playlistDelete(widget.meta.id);
       if (!mounted) return;
       ScaffoldMessenger.of(context)
           .showSnackBar(const SnackBar(content: Text('歌单已删除')));
@@ -342,14 +339,15 @@ class _DetailBodyState extends ConsumerState<_DetailBody> {
     if (!mounted) return;
     setState(() => _downloading = false);
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('下载完成：$okCount/${widget.tracks.length} 首，已保存到 Music/MingMusic')),
+      SnackBar(
+          content: Text(
+              '下载完成：$okCount/${widget.tracks.length} 首，已保存到 Music/MingMusic')),
     );
   }
 
   void _showMoreMenu() {
-    showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: Colors.transparent,
+    showMingSheet<void>(
+      context,
       builder: (BuildContext ctx) => Container(
         decoration: const BoxDecoration(
           color: AppConstants.darkSurface,
@@ -405,8 +403,8 @@ class _DetailBodyState extends ConsumerState<_DetailBody> {
                   ),
                   title: const Text(
                     '移除歌单',
-                    style: TextStyle(
-                        fontSize: 15, color: AppConstants.brandColor),
+                    style:
+                        TextStyle(fontSize: 15, color: AppConstants.brandColor),
                   ),
                   onTap: () {
                     Navigator.of(ctx).pop();
@@ -422,9 +420,8 @@ class _DetailBodyState extends ConsumerState<_DetailBody> {
   }
 
   void _showFilterSheet() {
-    showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: Colors.transparent,
+    showMingSheet<void>(
+      context,
       builder: (BuildContext ctx) => Container(
         decoration: const BoxDecoration(
           color: AppConstants.darkSurface,
@@ -464,9 +461,8 @@ class _DetailBodyState extends ConsumerState<_DetailBody> {
   }
 
   void _showSortSheet() {
-    showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: Colors.transparent,
+    showMingSheet<void>(
+      context,
       builder: (BuildContext ctx) => Container(
         decoration: const BoxDecoration(
           color: AppConstants.darkSurface,
@@ -516,8 +512,8 @@ class _DetailBodyState extends ConsumerState<_DetailBody> {
       '${widget.tracks.length}首',
       if (_totalDurationText().isNotEmpty) _totalDurationText(),
     ].join(' · ');
-    final int currentId =
-        ref.watch(playerProvider.select((PlayerState s) => s.currentTrack?.neteaseId ?? 0));
+    final int currentId = ref.watch(playerProvider
+        .select((PlayerState s) => s.currentTrack?.neteaseId ?? 0));
 
     return CustomScrollView(
       slivers: <Widget>[
@@ -594,8 +590,7 @@ class _DetailBodyState extends ConsumerState<_DetailBody> {
                     borderRadius: BorderRadius.circular(24),
                     child: InkWell(
                       borderRadius: BorderRadius.circular(24),
-                      onTap:
-                          widget.tracks.isEmpty ? null : () => _playAll(0),
+                      onTap: widget.tracks.isEmpty ? null : () => _playAll(0),
                       child: Padding(
                         padding: const EdgeInsets.symmetric(
                             horizontal: 6, vertical: 5),
@@ -718,8 +713,7 @@ class _DetailBodyState extends ConsumerState<_DetailBody> {
                       .insertNext(s.toTrack());
                   if (!context.mounted) return;
                   ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                    content: Text(
-                        err ?? '已添加至下一首播放：${s.name}'),
+                    content: Text(err ?? '已添加至下一首播放：${s.name}'),
                   ));
                 },
               );
@@ -827,18 +821,17 @@ class _CoverHero extends StatelessWidget {
                       CircleAvatar(
                         radius: 12,
                         backgroundColor: Colors.white24,
-                        backgroundImage:
-                            (meta.creatorAvatarUrl != null &&
-                                    meta.creatorAvatarUrl!.startsWith('http'))
-                                // 网易 CDN 对 Dart 默认 UA 返回 403（实测取证）——
-                                // 裸 NetworkImage 必须显式携带浏览器 UA（全库统一）
-                                ? NetworkImage(
-                                    meta.creatorAvatarUrl!,
-                                    headers: const <String, String>{
-                                      'User-Agent': CoverImage.kImageUserAgent,
-                                    },
-                                  )
-                                : null,
+                        backgroundImage: (meta.creatorAvatarUrl != null &&
+                                meta.creatorAvatarUrl!.startsWith('http'))
+                            // 网易 CDN 对 Dart 默认 UA 返回 403（实测取证）——
+                            // 裸 NetworkImage 必须显式携带浏览器 UA（全库统一）
+                            ? NetworkImage(
+                                meta.creatorAvatarUrl!,
+                                headers: const <String, String>{
+                                  'User-Agent': CoverImage.kImageUserAgent,
+                                },
+                              )
+                            : null,
                         child: (meta.creatorAvatarUrl == null ||
                                 !meta.creatorAvatarUrl!.startsWith('http'))
                             ? const Icon(Icons.person_rounded,
@@ -1013,7 +1006,10 @@ class _BarIcon extends StatelessWidget {
       icon,
       size: 21,
       color: onTap == null
-          ? Theme.of(context).colorScheme.onSurfaceVariant.withValues(alpha: 0.4)
+          ? Theme.of(context)
+              .colorScheme
+              .onSurfaceVariant
+              .withValues(alpha: 0.4)
           : Theme.of(context).colorScheme.onSurfaceVariant,
     );
     if (busy) {
@@ -1128,7 +1124,8 @@ class _SwipeSongRow extends ConsumerWidget {
                           ),
                         ),
                       ),
-                      if (song.isVipOnly) ...<Widget>[ // 未缓存 VIP 同步暗淡
+                      if (song.isVipOnly) ...<Widget>[
+                        // 未缓存 VIP 同步暗淡
                         const SizedBox(width: 6),
                         Opacity(
                           opacity: normal ? 1 : 0.38,

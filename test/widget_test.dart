@@ -223,8 +223,8 @@ void main() {
       );
       final Map<String, Object?> encoded = detail.toJson();
       final String json = jsonEncode(encoded); // 必须可 JSON 序列化
-      final PlaylistDetail restored =
-          PlaylistDetail.fromStoredJson(jsonDecode(json) as Map<String, Object?>);
+      final PlaylistDetail restored = PlaylistDetail.fromStoredJson(
+          jsonDecode(json) as Map<String, Object?>);
       expect(restored.meta.id, 42);
       expect(restored.meta.name, '测试歌单');
       expect(restored.meta.creatorUserId, 7);

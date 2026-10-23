@@ -4,8 +4,10 @@ import android.app.AlertDialog
 import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
+import android.media.AudioAttributes
 import android.media.AudioDeviceInfo
 import android.media.AudioManager
+import android.media.AudioProductStrategy
 import android.media.MediaRoute2Info
 import android.media.MediaRouter2
 import android.media.MediaScannerConnection
@@ -20,6 +22,7 @@ import android.util.Log
 import com.ryanheise.audioservice.AudioServiceActivity
 import io.flutter.embedding.android.RenderMode
 import io.flutter.embedding.engine.FlutterEngine
+import io.flutter.embedding.engine.plugins.FlutterPlugin
 import io.flutter.plugin.common.MethodChannel
 import java.io.File
 import java.text.SimpleDateFormat
@@ -329,27 +332,68 @@ class MainActivity : AudioServiceActivity() {
     // ---------------------------------------------------------------- 输出路由
 
     /**
-     * 输出设备切换（修复「无法正常切换音频输出」）：
-     * ① 反射链定位 ExoPlayer.setPreferredAudioDevice（播放器级路由）；
-     * ② AudioManager.setBluetoothA2dpOn（API < 34 系统级立即生效，
-     *    覆盖 ExoPlayer 偏好不立即作用于已建音轨的缺陷）；
-     * ③ MediaRouter2 系统路由（API 31+，等价系统「媒体输出」面板）。
-     * 策略不早退：①②同时生效（①保播放器偏好、②保系统立即切），任一成功即 true。
+     * 输出设备切换（第三次修复：第三次报修「连蓝牙时仍两个都输出」）。
+     *
+     * logcat 实证旧实现三层全数失败：
+     *  - ExoPlayer 反射：`No field pluginMap`（新版 Flutter embedding 已移除
+     *    FlutterEngineConnectionRegistry.pluginMap 字段）；
+     *  - MediaRouter2：`target route not found`（旧匹配用
+     *    `route.id.contains(AudioDeviceInfo.id)` —— MediaRoute2Info.id 是
+     *    字符串路由标识，与 AudioDeviceInfo.id 数值毫无关联，必然不匹配）。
+     *
+     * 新策略（按可靠性排序，任一成功即返回 true，前两层并行都执行）：
+     *  ① 策略级路由（API 30+）：AudioManager.setPreferredDeviceForStrategy
+     *     直接把 MEDIA 策略的输出锁定到目标设备 —— 系统级、立即对现有
+     *     AudioTrack 生效、不依赖任何播放器实例，最可靠；device=null 清除。
+     *  ② 播放器级路由：官方 `FlutterEngine.plugins.get()` 定位
+     *     JustAudioPlugin（不再反射 pluginMap）→ 对象图搜索 ExoPlayer →
+     *     setPreferredAudioDevice。
+     *  ③ MediaRouter2 transferTo（API 31+，放宽匹配：类型匹配优先，
+     *    deviceId 仅作辅助 —— 不再作为必要条件）。
+     *  ④ API < 33 全局 A2DP 开关回落（保留旧行为）。
      */
     private fun setPreferredOutput(mode: String, deviceId: Int?): Boolean {
         val am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
-        // 目标 AudioDeviceInfo：null = 跟随系统自动（清除播放器级偏好）
+        // 目标 AudioDeviceInfo：null = 跟随系统自动（清除所有偏好）
         val device: AudioDeviceInfo? = when {
             mode == "speaker" -> am.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
                 .firstOrNull { it.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER }
             mode == "bluetooth" -> am.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
                 .firstOrNull { isBluetoothType(it.type) && (deviceId == null || it.id == deviceId) }
+                ?: am.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
+                    .firstOrNull { isBluetoothType(it.type) }
             else -> null
         }
         var routed = false
-        // ① 播放器级路由（反射 ExoPlayer，最直接可靠）：配合 Dart 侧
-        //    切换后重建音频管线（stop→play），新 AudioTrack 立即按偏好路由。
-        //    default（清除偏好交还系统路由）同样是有效的路由操作。
+
+        // ① 策略级路由（主策略）：对 usage=MEDIA 的所有 AudioProductStrategy
+        //    设置偏好设备；策略偏好立即作用于该策略的全部音轨（含播放中的）。
+        //    注意：数值 30 而非 VERSION_CODES.R —— compileSdk 兼容保险（同前例）。
+        if (Build.VERSION.SDK_INT >= 30) {
+            try {
+                var ok = false
+                for (s in AudioProductStrategy.getAudioProductStrategies()) {
+                    val aa: AudioAttributes? = try { s.audioAttributes } catch (_: Throwable) { null }
+                    if (aa == null || aa.usage != AudioAttributes.USAGE_MEDIA) continue
+                    try {
+                        // device=null 清除偏好（交还系统自动路由）
+                        am.setPreferredDeviceForStrategy(s, device)
+                        ok = true
+                    } catch (t: Throwable) {
+                        Log.w(TAG, "strategy ${s.id} routing failed: $t")
+                    }
+                }
+                if (ok) {
+                    Log.i(TAG, "setPreferredOutput via Strategy mode=$mode device=${device?.productName}")
+                    routed = true
+                }
+            } catch (t: Throwable) {
+                Log.w(TAG, "strategy routing failed: $t")
+            }
+        }
+
+        // ② 播放器级路由（官方 plugins.get 定位，不再反射 pluginMap）：
+        //    配合 Dart 侧切换后重建音频管线，新 AudioTrack 立即按偏好路由。
         val exo = findExoPlayer()
         if (exo != null) {
             try {
@@ -361,10 +405,41 @@ class MainActivity : AudioServiceActivity() {
                 Log.w(TAG, "ExoPlayer routing failed: $t")
             }
         }
-        // ② 系统级 A2DP 路由：仅在策略①不可用（反射失败）时作为回落 ——
-        //    全局 A2DP 开关影响所有应用（副作用大），不作首选。
-        // 注意：数值 33 而非 VERSION_CODES.TIRAMISI —— compileSdk 由
-        // flutter.compileSdkVersion 决定，CI 环境可能低于 33 无该常量
+
+        // ③ 系统级路由（MediaRouter2，API 31+）：放宽匹配 —— 类型匹配即可，
+        //    deviceId 仅用于精确命中（不再作为必要条件，旧匹配必失败）。
+        // isSystemRoute() 为 API 31+，守卫取 S
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            try {
+                val router = MediaRouter2.getInstance(this)
+                val routes = router.routes
+                val candidates = routes.filter { r ->
+                    r.isSystemRoute && when (mode) {
+                        "speaker" -> r.type == MediaRoute2Info.TYPE_BUILTIN_SPEAKER ||
+                                r.id.equals("DEFAULT_ROUTE", ignoreCase = true)
+                        "bluetooth" -> r.type == MediaRoute2Info.TYPE_BLUETOOTH_A2DP ||
+                                r.type == AudioDeviceInfo.TYPE_BLE_HEADSET ||
+                                r.type == AudioDeviceInfo.TYPE_BLE_SPEAKER
+                        else -> false // default 模式不走 transferTo（策略①已清除偏好）
+                    }
+                }
+                // 精确：route id 含 deviceId 数值；否则取第一个类型命中
+                val target = candidates.firstOrNull { r ->
+                    deviceId != null && r.id.contains(deviceId.toString())
+                } ?: candidates.firstOrNull()
+                if (target != null) {
+                    router.transferTo(target)
+                    Log.i(TAG, "setPreferredOutput via MediaRouter2 mode=$mode route=${target.name}")
+                    routed = true
+                } else if (mode != "default") {
+                    Log.w(TAG, "MediaRouter2 target route not found for mode=$mode (routes=${routes.map { it.type }})")
+                }
+            } catch (t: Throwable) {
+                Log.w(TAG, "MediaRouter2 routing failed: $t")
+            }
+        }
+
+        // ④ 全局 A2DP 开关回落（API < 33 且回落场景，保留旧行为）
         if (!routed && Build.VERSION.SDK_INT < 33 && mode != "default") {
             try {
                 @Suppress("DEPRECATION")
@@ -373,34 +448,6 @@ class MainActivity : AudioServiceActivity() {
                 routed = true
             } catch (t: Throwable) {
                 Log.w(TAG, "A2DP routing failed: $t")
-            }
-        }
-        // ③ 系统级路由（MediaRouter2）：路由整个 App 的媒体输出。
-        // isSystemRoute() 为 API 31+，守卫取 S
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            try {
-                val router = MediaRouter2.getInstance(this)
-                val routes = router.routes
-                val target = routes.firstOrNull { r ->
-                    // MediaRoute2Info 的 TYPE_BLE_* 常量在部分 compileSdk 缺失，
-                    // 使用等值 AudioDeviceInfo 常量（蓝牙路由类型数值一一对应）
-                    r.isSystemRoute && when (mode) {
-                        "speaker" -> r.type == MediaRoute2Info.TYPE_BUILTIN_SPEAKER
-                        "bluetooth" -> r.type == MediaRoute2Info.TYPE_BLUETOOTH_A2DP ||
-                                r.type == AudioDeviceInfo.TYPE_BLE_HEADSET ||
-                                r.type == AudioDeviceInfo.TYPE_BLE_SPEAKER
-                        else -> true
-                    } && (deviceId == null || r.id.contains(deviceId.toString()))
-                }
-                if (target != null) {
-                    router.transferTo(target)
-                    Log.i(TAG, "setPreferredOutput via MediaRouter2 mode=$mode route=${target.name}")
-                    routed = true
-                } else {
-                    Log.w(TAG, "MediaRouter2 target route not found for mode=$mode")
-                }
-            } catch (t: Throwable) {
-                Log.w(TAG, "MediaRouter2 routing failed: $t")
             }
         }
         if (!routed) Log.w(TAG, "setPreferredOutput all strategies failed mode=$mode")
@@ -458,24 +505,21 @@ class MainActivity : AudioServiceActivity() {
         false
     }
 
-    /** 反射定位 just_audio 内部的 ExoPlayer（见 [setPreferredOutput]）。
+    /** 定位 just_audio 内部的 ExoPlayer（见 [setPreferredOutput]）。
      *
-     * 不依赖固定字段名（just_audio 升级字段可能改名）：在插件对象图内
-     * 做有限深度遍历，找到第一个 androidx.media3.exoplayer.ExoPlayer 实例。
+     * 修复（logcat 实证 `No field pluginMap`）：新版 Flutter embedding 已
+     * 移除 FlutterEngineConnectionRegistry.pluginMap 反射入口，改用官方
+     * `FlutterEngine.plugins.get(Class)` API 定位 JustAudioPlugin，
+     * 之后在插件对象图内做有限深度遍历找 ExoPlayer 实例。
      */
     private fun findExoPlayer(): Any? {
         // FlutterActivity.flutterEngine 为平台可空 getter：空则直接放弃路由
         val engine = flutterEngine ?: return null
         return try {
-            val registry = engine.javaClass.getMethod("getPlugins").invoke(engine)
-            val pluginMapField = registry.javaClass.getDeclaredField("pluginMap").apply {
-                isAccessible = true
-            }
             @Suppress("UNCHECKED_CAST")
-            val pluginMap = pluginMapField.get(registry) as Map<Class<*>, Any>
-            val jaPlugin = pluginMap.values.firstOrNull {
-                it.javaClass.name.contains("JustAudioPlugin")
-            } ?: return null
+            val jaClass = Class.forName("com.ryanheise.just_audio.JustAudioPlugin")
+                as Class<FlutterPlugin>
+            val jaPlugin: FlutterPlugin = engine.plugins.get(jaClass) ?: return null
             searchExoPlayer(jaPlugin, depth = 0)
         } catch (t: Throwable) {
             Log.w(TAG, "findExoPlayer failed: $t")

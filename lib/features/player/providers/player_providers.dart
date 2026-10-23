@@ -25,10 +25,12 @@ import '../../discover/data/netease_providers.dart';
 import '../../discover/data/netease_repository.dart';
 import '../../library/domain/track.dart';
 import '../../../core/api/netease_models.dart' show Song, SongUrlInfo;
-import '../../settings/domain/settings_models.dart' show AudioQuality, AudioQualityX;
+import '../../settings/domain/settings_models.dart'
+    show AudioQuality, AudioQualityX;
 import '../../settings/providers/settings_providers.dart'
     show
         audioQualityProvider,
+        cacheLimitProvider,
         listenCacheProvider,
         preloadNextProvider,
         sharedPreferencesProvider;
@@ -69,6 +71,18 @@ final Provider<QueuePersistence> queuePersistenceProvider =
 final Provider<SongCacheService> songCacheProvider =
     Provider<SongCacheService>((Ref ref) => SongCacheService());
 
+/// 缓存配置同步（需求：LRU 默认 3GB 可改 / 可关闭）：
+/// listenCache（开关）与 cacheLimitProvider（容量上限）任一变化 →
+/// 立即同步到 SongCacheService 单例。挂在应用根（MingMusicApp watch），
+/// 不依赖播放状态，冷启动即生效。
+final Provider<void> cacheConfigSyncProvider = Provider<void>((Ref ref) {
+  final bool enabled = ref.watch(listenCacheProvider);
+  final int maxBytes = ref.watch(cacheLimitProvider);
+  final SongCacheService svc = ref.watch(songCacheProvider);
+  svc.setEnabled(enabled);
+  svc.setMaxBytes(maxBytes);
+});
+
 /// 队列历史快照（最多 3 个，最新在前；启动时从磁盘恢复）
 final NotifierProvider<QueueHistoryNotifier, List<QueueSnapshot>>
     queueHistoryProvider =
@@ -83,9 +97,7 @@ class QueueHistoryNotifier extends Notifier<List<QueueSnapshot>> {
   }
 
   Future<void> push(String title, List<Track> tracks) async {
-    state = await ref
-        .read(queuePersistenceProvider)
-        .pushHistory(title, tracks);
+    state = await ref.read(queuePersistenceProvider).pushHistory(title, tracks);
   }
 
   Future<void> removeAt(int index) async {
@@ -201,9 +213,16 @@ class PlayerNotifier extends Notifier<PlayerState> {
   /// 队列/下标变更落盘节流定时器
   Timer? _persistDebounce;
 
-  /// 当前曲目播放计次/听歌打卡定时器
-  Timer? _playStatTimer;
+  /// 当前曲目播放计次/听歌打卡（每秒 tick，有效播放计时）
+  Timer? _playTickTimer;
   int? _statSongId;
+
+  /// 当前曲目已累计的有效播放秒数（暂停不计时）
+  int _playedSeconds = 0;
+
+  /// 打卡状态：_scrobbleSent = 已触发（含补报）；_scrobbleDone = 上报完成
+  bool _scrobbleSent = false;
+  bool _scrobbleDone = false;
 
   /// 首次 build() 返回前 Riverpod 禁止读写 this.state（抛
   /// "Tried to read the state of an uninitialized provider"）。
@@ -261,8 +280,7 @@ class PlayerNotifier extends Notifier<PlayerState> {
       _indexSub?.cancel();
       _processingSub?.cancel();
       _persistDebounce?.cancel();
-      _playStatTimer?.cancel();
-      _scrobbleTimer?.cancel();
+      _playTickTimer?.cancel();
       _preloadTimer?.cancel();
     });
 
@@ -445,34 +463,67 @@ class PlayerNotifier extends Notifier<PlayerState> {
 
   // ------------------------------------------------------------ 播放统计
 
-  /// 曲目开播后计时：10s 计次（本机总听次数），30s 听歌打卡（登录后）
+  /// 歌曲打卡与上报（需求：对齐 Zephyr-Music）：
+  ///  - 每秒 tick 累计**有效播放时长**（暂停不计时，切歌即中断）；
+  ///  - 10s：本机播放计次（听歌排行本地统计）；
+  ///  - ≥30s：听歌打卡上报 `/scrobble?id&sourceid&time=实际秒数`
+  ///   （登录后；每曲至多一次；旧实现固定传 30 且暂停也在计时，
+  ///    现改为真实有效时长，与网易云客户端行为一致）；
+  ///  - 切歌时若已达 30s 但尚未上报，立即补报。
   void _schedulePlayStat(Track track) {
     final int? songId = track.neteaseId;
-    _playStatTimer?.cancel();
+    // 切歌：上一曲已达门槛未上报的立即补报
+    _flushScrobbleIfNeeded();
+    _playTickTimer?.cancel();
     _statSongId = songId;
+    _playedSeconds = 0;
+    _scrobbleDone = false;
+    _scrobbleSent = false;
     if (songId == null) return;
-    _playStatTimer = Timer(const Duration(seconds: 10), () {
-      if (_statSongId != songId) return;
-      ref.read(playStatsProvider.notifier).increment(songId);
-      _scrobbleAfter30s(songId);
+    _playTickTimer = Timer.periodic(const Duration(seconds: 1), (_) async {
+      if (_statSongId != songId) return; // 已切歌
+      // 暂停不累计有效播放时长（对齐网易云/Zephyr 语义）
+      if (!_handler.player.playing) return;
+      _playedSeconds++;
+      if (_playedSeconds == kPlayCountThreshold) {
+        ref.read(playStatsProvider.notifier).increment(songId);
+      }
+      if (_playedSeconds >= kScrobbleThreshold && !_scrobbleSent) {
+        _scrobbleSent = true;
+        await _scrobble(songId, _playedSeconds);
+      }
     });
   }
 
-  Timer? _scrobbleTimer;
+  /// 本机计次门槛（秒）
+  static const int kPlayCountThreshold = 10;
 
-  Future<void> _scrobbleAfter30s(int songId) async {
-    _scrobbleTimer?.cancel();
-    _scrobbleTimer = Timer(const Duration(seconds: 20), () async {
+  /// 听歌打卡门槛（秒，对齐网易云客户端/Zephyr）
+  static const int kScrobbleThreshold = 30;
+
+  /// 切歌/销毁前补报：已达门槛但 tick 尚未触发上报的场景
+  void _flushScrobbleIfNeeded() {
+    final int? songId = _statSongId;
+    if (songId == null || _scrobbleDone || _scrobbleSent) return;
+    if (_playedSeconds < kScrobbleThreshold) return;
+    _scrobbleSent = true;
+    unawaited(_scrobble(songId, _playedSeconds));
+  }
+
+  /// 听歌打卡上报（登录后才上报；失败静默不影响播放）
+  Future<void> _scrobble(int songId, int playedSeconds) async {
+    _scrobbleDone = true;
+    try {
       final bool loggedIn = ref.read(authProvider).loggedIn;
       if (!loggedIn) return;
-      try {
-        await ref
-            .read(neteaseRepositoryProvider)
-            .scrobble(songId, 0, 30);
-      } catch (_) {
-        // 打卡失败静默：不影响播放
-      }
-    });
+      await ref.read(neteaseRepositoryProvider).scrobble(
+            songId,
+            0,
+            playedSeconds,
+          );
+    } catch (_) {
+      // 打卡失败静默：不影响播放
+    }
   }
 
   static AppProcessingState _mapProcessing(ProcessingState s) => switch (s) {
@@ -577,8 +628,8 @@ class PlayerNotifier extends Notifier<PlayerState> {
       ];
       final Map<int, SongUrlInfo> urlById = <int, SongUrlInfo>{};
       if (ids.isNotEmpty) {
-        for (final SongUrlInfo u in await repo.songUrls(ids,
-            level: quality.apiValue)) {
+        for (final SongUrlInfo u
+            in await repo.songUrls(ids, level: quality.apiValue)) {
           urlById[u.id] = u;
         }
       }
@@ -713,7 +764,9 @@ class PlayerNotifier extends Notifier<PlayerState> {
       }
       final SongUrlInfo? cached = _urlCache[nid];
       if (cached != null) {
-        if (cached.playable) resolvedById[nid] = await _withCacheSource(t, cached);
+        if (cached.playable) {
+          resolvedById[nid] = await _withCacheSource(t, cached);
+        }
         continue; // 缓存命中但不可播：剔除（VIP 灰曲）
       }
       if (cacheOn) {
@@ -826,7 +879,8 @@ class PlayerNotifier extends Notifier<PlayerState> {
     try {
       final NeteaseRepository repo = ref.read(neteaseRepositoryProvider);
       final String level = ref.read(audioQualityProvider).apiValue;
-      final List<SongUrlInfo> urls = await repo.songUrls(<int>[id], level: level);
+      final List<SongUrlInfo> urls =
+          await repo.songUrls(<int>[id], level: level);
       for (final SongUrlInfo u in urls) {
         _urlCache[u.id] = u;
         if (u.playable) return u;
@@ -964,7 +1018,10 @@ class PlayerNotifier extends Notifier<PlayerState> {
         return '暂无相似歌曲可漫游';
       }
       // 当前曲放首位，后续为相似歌曲
-      final List<Track> tracks = <Track>[current!, ...songs.map((Song s) => s.toTrack())];
+      final List<Track> tracks = <Track>[
+        current!,
+        ...songs.map((Song s) => s.toTrack())
+      ];
       state = state.copyWith(processing: AppProcessingState.idle);
       await playSongs(tracks, startIndex: 0, queueTitle: '心动模式 · 相似歌曲漫游');
       return null;
@@ -980,7 +1037,8 @@ class PlayerNotifier extends Notifier<PlayerState> {
     final int? songId = current?.neteaseId;
     if (songId == null || songId == 0) return '当前没有可插播的歌曲';
     try {
-      final List<Song> songs = await ref.read(neteaseRepositoryProvider).simiSongs(songId);
+      final List<Song> songs =
+          await ref.read(neteaseRepositoryProvider).simiSongs(songId);
       if (songs.isEmpty) return '暂无相似歌曲';
       return await playSimilarNext(songs.first.toTrack());
     } catch (e) {
@@ -1043,16 +1101,14 @@ class PlayerNotifier extends Notifier<PlayerState> {
     // 目标曲目直链缺失（恢复队列/离线降级场景）：单曲按需解析 ——
     // 缓存命中（离线）得本地路径可播；彻底失败则提示，不再让内核空源报错
     if (state.queue[safe].needsUrlResolve) {
-      final List<Track> one =
-          await resolveTracks(<Track>[state.queue[safe]]);
+      final List<Track> one = await resolveTracks(<Track>[state.queue[safe]]);
       if (one.isNotEmpty) {
         final List<Track> q = List<Track>.of(state.queue);
         q[safe] = one.first;
         state = state.copyWith(queue: q);
       }
       if (state.queue[safe].needsUrlResolve) {
-        state = state.copyWith(
-            error: '该歌曲暂无法播放（离线且未缓存，联网后重试）');
+        state = state.copyWith(error: '该歌曲暂无法播放（离线且未缓存，联网后重试）');
         return;
       }
     }

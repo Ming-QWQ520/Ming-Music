@@ -32,8 +32,7 @@ class NeteaseVipInfo {
             0;
     final bool isVip = raw['isVip'] == true || associatorLevel > 0;
     if (!isVip) return null;
-    final int redVipLevel =
-        (raw['redVipLevel'] as num?)?.toInt() ?? 0;
+    final int redVipLevel = (raw['redVipLevel'] as num?)?.toInt() ?? 0;
     final Object? expire =
         (raw['associator'] as Map<String, Object?>?)?['expireTime'] ??
             (raw['musicPackage'] as Map<String, Object?>?)?['expireTime'];
@@ -88,8 +87,7 @@ class NeteaseProfile {
           : '网易云用户',
       avatarUrl: normalizeNeteaseUrl(raw['avatarUrl'] as String?),
       signature: (raw['signature'] as String?) ?? '',
-      backgroundUrl:
-          normalizeNeteaseUrl(raw['backgroundUrl'] as String?),
+      backgroundUrl: normalizeNeteaseUrl(raw['backgroundUrl'] as String?),
       vipType: (raw['vipType'] as num?)?.toInt() ?? 0,
     );
   }
@@ -180,8 +178,9 @@ class NeteaseUserDetail {
     if (raw is! Map<String, Object?>) return const NeteaseUserDetail();
     final int createTimeMs = (raw['createTime'] as num?)?.toInt() ?? 0;
     final int days = createTimeMs > 0
-        ? DateTime.now().difference(
-            DateTime.fromMillisecondsSinceEpoch(createTimeMs)).inDays
+        ? DateTime.now()
+            .difference(DateTime.fromMillisecondsSinceEpoch(createTimeMs))
+            .inDays
         : 0;
     return NeteaseUserDetail(
       signature: (raw['signature'] as String?) ?? '',
@@ -209,11 +208,12 @@ class NeteaseYunbeiInfo {
 
   static NeteaseYunbeiInfo fromMap(Map<String, Object?> j) {
     final Object? data = j['data'] is Map<String, Object?> ? j['data'] : j;
-    final Map<String, Object?> m = data as Map<String, Object?>? ?? const <String, Object?>{};
-    final Object? user = m['userPoint'] is Map<String, Object?>
-        ? m['userPoint']
-        : m;
-    final Map<String, Object?> p = user as Map<String, Object?>? ?? const <String, Object?>{};
+    final Map<String, Object?> m =
+        data as Map<String, Object?>? ?? const <String, Object?>{};
+    final Object? user =
+        m['userPoint'] is Map<String, Object?> ? m['userPoint'] : m;
+    final Map<String, Object?> p =
+        user as Map<String, Object?>? ?? const <String, Object?>{};
     return NeteaseYunbeiInfo(
       balance: (p['balance'] as num?)?.toInt() ?? 0,
       signed: (m['mobileSign'] ?? m['pcSign'] ?? p['sign']) == true,
@@ -223,17 +223,20 @@ class NeteaseYunbeiInfo {
 
 /// VIP 成长值（/vip/growthpoint）
 class NeteaseVipGrowth {
-  const NeteaseVipGrowth({this.growthPoint = 0, this.level = 0, this.levelName = ''});
+  const NeteaseVipGrowth(
+      {this.growthPoint = 0, this.level = 0, this.levelName = ''});
 
   final int growthPoint;
   final int level;
   final String levelName;
 
   static NeteaseVipGrowth fromMap(Map<String, Object?> j) {
-    final Object? userLevel = j['userLevel'] ?? (j['data'] is Map<String, Object?>
-        ? (j['data'] as Map<String, Object?>)['userLevel']
-        : null);
-    final Map<String, Object?> m = userLevel as Map<String, Object?>? ?? const <String, Object?>{};
+    final Object? userLevel = j['userLevel'] ??
+        (j['data'] is Map<String, Object?>
+            ? (j['data'] as Map<String, Object?>)['userLevel']
+            : null);
+    final Map<String, Object?> m =
+        userLevel as Map<String, Object?>? ?? const <String, Object?>{};
     return NeteaseVipGrowth(
       growthPoint: (m['growthPoint'] as num?)?.toInt() ?? 0,
       level: (m['level'] as num?)?.toInt() ?? 0,
@@ -418,7 +421,8 @@ class NeteaseAuthRepository {
       <String, String>{'uid': '$uid'},
       throwOnCode: false,
     );
-    return NeteaseUserDetail.fromMap(apiPayload(res)['profile'] ?? apiPayload(res));
+    return NeteaseUserDetail.fromMap(
+        apiPayload(res)['profile'] ?? apiPayload(res));
   }
 
   // -------------------------------------------------------- signin (Zephyr)

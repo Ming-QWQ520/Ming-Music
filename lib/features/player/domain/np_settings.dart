@@ -32,37 +32,32 @@ extension NpDisplayModeX on NpDisplayMode {
       };
 }
 
-/// Mini 播放条样式（不止变配色 —— 各样式的组件布局完全不同）
+/// Mini 播放条样式（需求：预设只保留「经典条」与「紧凑极简」，
+/// 其余样式全部移除；两种样式均带液态玻璃底）
 enum MiniPlayerStyle {
-  /// 经典条：封面左 + 「歌名 - 歌手」 + 圆环播放键 + 播放列表
+  /// 经典条（仿参考图）：深蓝液态玻璃圆角长条 —— 左圆形封面 +
+  /// 「歌名 - 歌手」+ 进度圆环播放键 + 播放列表键
   classic,
 
-  /// 封面铺满：封面作背景 + 渐变遮罩 + 文字压在封面上 + 右侧圆钮
-  overlay,
-
-  /// 紧凑极简：仅封面（圆环进度绕封面）+ 小号播放键，无文字
+  /// 紧凑极简：嵌入导航栏，仅封面（圆环进度绕封面），无文字
   compact,
-
-  /// 宽幅双行：大封面 + 歌名/歌手双行 + 底部细进度线
-  wide,
 }
 
 extension MiniPlayerStyleX on MiniPlayerStyle {
   String get label => switch (this) {
         MiniPlayerStyle.classic => '经典条',
-        MiniPlayerStyle.overlay => '封面铺满',
         MiniPlayerStyle.compact => '紧凑极简',
-        MiniPlayerStyle.wide => '宽幅双行',
       };
 }
 
-/// 封面样式（需求：去除黑胶样式，仅保留方形/圆形）
-enum NpCoverStyle { square, circle }
+/// 封面样式（需求：只保留「正方形」与「正方形带圆角」，圆形/黑胶
+/// 等其它样式全部移除；默认为方形圆角）
+enum NpCoverStyle { square, rounded }
 
 extension NpCoverStyleX on NpCoverStyle {
   String get label => switch (this) {
-        NpCoverStyle.square => '圆角方形',
-        NpCoverStyle.circle => '圆形',
+        NpCoverStyle.square => '正方形',
+        NpCoverStyle.rounded => '方形圆角',
       };
 }
 
@@ -87,21 +82,28 @@ extension NpCoverLyricsModeX on NpCoverLyricsMode {
       };
 }
 
-/// 底部功能条按钮 id（「播放页底部功能自定义」面板可勾选显隐）
+/// 底部功能条按钮 id（「播放页底部功能自定义」面板可勾选显隐 +
+/// 拖动自定义顺序）。需求：新增「音量条」按键 —— 勾选后播放页底部
+/// 只保留音量条与设置键（音量条在设置键左侧，样式与进度条一致）。
 const List<String> kStripButtonIds = <String>[
-  'output',    // 媒体输出
-  'similar',   // 相似歌曲
-  'wiki',      // 歌词百科
-  'download',  // 下载
-  'comments',  // 评论
-  'settings',  // 设置
+  'volume', // 音量条（勾选后独占模式：音量条 + 设置）
+  'output', // 媒体输出
+  'similar', // 相似歌曲
+  'wiki', // 歌词百科
+  'download', // 下载
+  'comments', // 评论
+  'settings', // 设置
 ];
 
 const List<String> kStripButtonDefaults = <String>[
-  'output', 'similar', 'wiki', 'settings',
+  'output',
+  'similar',
+  'wiki',
+  'settings',
 ];
 
 String stripButtonLabel(String id) => switch (id) {
+      'volume' => '音量条',
       'output' => '媒体输出',
       'similar' => '相似歌曲',
       'wiki' => '歌词百科',
@@ -114,13 +116,14 @@ String stripButtonLabel(String id) => switch (id) {
 class NpPlayerSettings {
   const NpPlayerSettings({
     this.displayMode = NpDisplayMode.both,
-    this.coverStyle = NpCoverStyle.square,
+    // 需求：封面默认样式为方形圆角
+    this.coverStyle = NpCoverStyle.rounded,
     this.coverScale = 1.0,
     this.coverShadow = true,
-    this.squareCoverRadius = false,
     this.bgBlur = 25,
     this.bgDim = 75,
-    this.lyricFontSize = 17,
+    // 需求：歌词默认字号 20px
+    this.lyricFontSize = 20,
     this.lyricLineGap = 14,
     this.lyricAlign = NpLyricAlign.left,
     this.showTranslation = true,
@@ -157,9 +160,6 @@ class NpPlayerSettings {
 
   /// 封面投影
   final bool coverShadow;
-
-  /// 方形封面圆角开关（需求：默认无圆角，可自定义开启）
-  final bool squareCoverRadius;
 
   /// Mini 播放条样式
   final MiniPlayerStyle miniStyle;
@@ -226,7 +226,6 @@ class NpPlayerSettings {
     NpCoverStyle? coverStyle,
     double? coverScale,
     bool? coverShadow,
-    bool? squareCoverRadius,
     double? bgBlur,
     double? bgDim,
     double? lyricFontSize,
@@ -251,7 +250,6 @@ class NpPlayerSettings {
       coverStyle: coverStyle ?? this.coverStyle,
       coverScale: coverScale ?? this.coverScale,
       coverShadow: coverShadow ?? this.coverShadow,
-      squareCoverRadius: squareCoverRadius ?? this.squareCoverRadius,
       bgBlur: bgBlur ?? this.bgBlur,
       bgDim: bgDim ?? this.bgDim,
       lyricFontSize: lyricFontSize ?? this.lyricFontSize,
@@ -279,7 +277,6 @@ class NpPlayerSettings {
         'coverStyle': coverStyle.name,
         'coverScale': coverScale,
         'coverShadow': coverShadow,
-        'squareCoverRadius': squareCoverRadius,
         'bgBlur': bgBlur,
         'bgDim': bgDim,
         'lyricFontSize': lyricFontSize,
@@ -319,19 +316,17 @@ class NpPlayerSettings {
         (NpDisplayMode m) => m.name == map['displayMode'],
         orElse: () => NpDisplayMode.both,
       ),
-      // 版本迁移：黑胶样式已移除（需求），历史值回退方形
+      // 版本迁移（需求：封面只保留正方形/方形圆角）——
+      // 历史 circle（圆形）/黑胶等旧值统一回退方形圆角
       coverStyle: switch (map['coverStyle']) {
-        'circle' => NpCoverStyle.circle,
         'square' => NpCoverStyle.square,
-        _ => NpCoverStyle.square,
+        'rounded' => NpCoverStyle.rounded,
+        _ => NpCoverStyle.rounded,
       },
       coverScale: clampD(map['coverScale'], 0.70, 1.20, defaults.coverScale),
       coverShadow: map['coverShadow'] is bool
           ? map['coverShadow']! as bool
           : defaults.coverShadow,
-      squareCoverRadius: map['squareCoverRadius'] is bool
-          ? map['squareCoverRadius']! as bool
-          : defaults.squareCoverRadius,
       bgBlur: clampD(map['bgBlur'], 0, 40, defaults.bgBlur),
       bgDim: clampD(map['bgDim'], 0, 100, defaults.bgDim),
       lyricFontSize:
@@ -365,7 +360,8 @@ class NpPlayerSettings {
         (MiniPlayerStyle s) => s.name == map['miniStyle'],
         orElse: () => defaults.miniStyle,
       ),
-      stripButtons: strip.isEmpty ? List<String>.of(kStripButtonDefaults) : strip,
+      stripButtons:
+          strip.isEmpty ? List<String>.of(kStripButtonDefaults) : strip,
     );
   }
 

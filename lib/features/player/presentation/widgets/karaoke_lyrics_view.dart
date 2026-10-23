@@ -116,9 +116,11 @@ class _KaraokeLyricsViewState extends ConsumerState<KaraokeLyricsView> {
     // 需求（歌名区透明可见歌词）：自动滚动以「可视区」为中心 ——
     // 底部被信息区/控制栏覆盖的部分不参与居中计算
     final double viewport = _scroll.position.viewportDimension;
-    final double effVp = (viewport - widget.bottomInset)
-        .clamp(viewport * 0.35, viewport);
-    final double top = heights.sublist(0, active).fold<double>(0, (double a, double h) => a + h);
+    final double effVp =
+        (viewport - widget.bottomInset).clamp(viewport * 0.35, viewport);
+    final double top = heights
+        .sublist(0, active)
+        .fold<double>(0, (double a, double h) => a + h);
     final double target =
         (_edgeTopPadding + top - effVp / 2 + heights[active] / 2)
             .clamp(0.0, _scroll.position.maxScrollExtent);
@@ -189,16 +191,16 @@ class _KaraokeLyricsViewState extends ConsumerState<KaraokeLyricsView> {
           // /最后一行也能滚动到可视区中心；拖动仍自由，松手后恢复跟随。
           // 可视区 = 列表高度 - 底部覆盖（歌名/控制区透明背景下歌词从其后穿过）。
           final double viewportH = constraints.maxHeight;
-          final double effVp =
-              (viewportH - widget.bottomInset).clamp(viewportH * 0.35, viewportH);
+          final double effVp = (viewportH - widget.bottomInset)
+              .clamp(viewportH * 0.35, viewportH);
           EdgeInsets listPadding;
           if (cfg.lyricAlwaysCenter && heights.isNotEmpty) {
             final double pTop =
                 (effVp / 2 - heights.first / 2).clamp(0.0, double.infinity);
             // 底部填充使最后一行也可居中：vp+inset)/2 - hLast/2
-            final double pBottom = ((viewportH + widget.bottomInset) / 2 -
-                    heights.last / 2)
-                .clamp(0.0, double.infinity);
+            final double pBottom =
+                ((viewportH + widget.bottomInset) / 2 - heights.last / 2)
+                    .clamp(0.0, double.infinity);
             _edgeTopPadding = pTop;
             listPadding = EdgeInsets.only(top: pTop, bottom: pBottom);
           } else {
@@ -257,6 +259,7 @@ class _KaraokeLyricsViewState extends ConsumerState<KaraokeLyricsView> {
               fontSize: cfg.lyricFontSize,
               align: cfg.lyricAlign,
               fade: cfg.lyricFade,
+              blur: cfg.lyricBlur,
               gapV: _gapV(cfg),
               onSeek: _seek,
             ),
@@ -286,9 +289,11 @@ class _KaraokeLyricsViewState extends ConsumerState<KaraokeLyricsView> {
   }
 
   /// 预测量所有行高（与行组件同一套样式参数，保证滚动偏移精确）
-  List<double> _measureAll(ParsedLyrics lyrics, NpPlayerSettings cfg, double width) {
-    final TextAlign align =
-        cfg.lyricAlign == NpLyricAlign.center ? TextAlign.center : TextAlign.left;
+  List<double> _measureAll(
+      ParsedLyrics lyrics, NpPlayerSettings cfg, double width) {
+    final TextAlign align = cfg.lyricAlign == NpLyricAlign.center
+        ? TextAlign.center
+        : TextAlign.left;
     // 行间隔：设置值整体 -4px（需求）
     final double gapV = _gapV(cfg);
 
@@ -315,7 +320,9 @@ class _KaraokeLyricsViewState extends ConsumerState<KaraokeLyricsView> {
             );
             double h =
                 _measureTextHeight(line.text, style, width, align) + gapV * 2;
-            if (!metadata) h += subHeight(lyrics.subLineFor(line.start.inMilliseconds));
+            if (!metadata) {
+              h += subHeight(lyrics.subLineFor(line.start.inMilliseconds));
+            }
             return h;
           }(),
       ];
@@ -343,6 +350,38 @@ class _KaraokeLyricsViewState extends ConsumerState<KaraokeLyricsView> {
 
 /// 行内水平 padding（左右各 28）
 const double _kRowHPadding = 28;
+
+/// 非活跃行效果（需求修复：非活跃行淡出与模糊此前未实际生效）：
+///  - 淡出：透明度随「非活跃行淡出」设置降低（对齐逐行行公式）；
+///  - 模糊：ImageFilter.blur 高斯模糊非活动行文本（设置 > 0 时启用）；
+/// RepaintBoundary 隔离模糊层，避免滚动时全列表重绘。
+Widget _applyInactiveEffect(
+  Widget child, {
+  required double fade,
+  required double blur,
+  required bool active,
+}) {
+  if (active) return child;
+  Widget result = child;
+  if (blur > 0) {
+    result = RepaintBoundary(
+      child: ImageFiltered(
+        imageFilter: ui.ImageFilter.blur(
+          sigmaX: blur,
+          sigmaY: blur,
+          tileMode: ui.TileMode.decal,
+        ),
+        child: result,
+      ),
+    );
+  }
+  // 淡出强度公式与 _LrcRow 一致：强度 0 → alpha 0.45；强度 1 → alpha 0.05
+  final double alpha = (0.05 + (1 - fade) * 0.40).clamp(0.05, 1.0);
+  if (alpha < 1.0) {
+    result = Opacity(opacity: alpha, child: result);
+  }
+  return result;
+}
 
 // ---------------------------------------------------------------- 逐字行
 
@@ -453,7 +492,8 @@ class _YrcRowState extends ConsumerState<_YrcRow>
     if (widget.active && !metadata && line.words.isNotEmpty) {
       // 活动行：Ticker 驱动的逐词擦除（对齐 Zephyr yrc-wipe）
       mainText = CustomPaint(
-        size: Size(widget.width, _measureTextHeight(line.text, style, widget.width, textAlign)),
+        size: Size(widget.width,
+            _measureTextHeight(line.text, style, widget.width, textAlign)),
         painter: _WipePainter(
           text: line.text,
           style: style,
@@ -489,36 +529,47 @@ class _YrcRowState extends ConsumerState<_YrcRow>
         ? CrossAxisAlignment.center
         : CrossAxisAlignment.start;
 
+    Widget rowContent = Column(
+      mainAxisAlignment: MainAxisAlignment.center,
+      crossAxisAlignment: cross,
+      children: <Widget>[
+        Align(
+          alignment: align == NpLyricAlign.center
+              ? Alignment.center
+              : Alignment.centerLeft,
+          child: mainText,
+        ),
+        if (showSub)
+          Text(
+            sub,
+            textAlign: textAlign,
+            style: TextStyle(
+              color: widget.active
+                  ? Colors.white.withValues(alpha: 0.72)
+                  : Colors.white.withValues(alpha: 0.45),
+              fontSize: 12.5,
+              height: 1.3,
+            ),
+          ),
+      ],
+    );
+
+    // 需求修复：非活跃行淡出与模糊实际生效（此前仅逐行行有淡出，
+    // 逐字行无任何非活跃效果）
+    rowContent = _applyInactiveEffect(
+      rowContent,
+      fade: cfg.lyricFade,
+      blur: cfg.lyricBlur,
+      active: widget.active,
+    );
+
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onDoubleTap: metadata ? null : () => widget.onSeek(line.start),
       child: Padding(
-        padding: EdgeInsets.symmetric(
-            horizontal: _kRowHPadding, vertical: gapV),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          crossAxisAlignment: cross,
-          children: <Widget>[
-            Align(
-              alignment: align == NpLyricAlign.center
-                  ? Alignment.center
-                  : Alignment.centerLeft,
-              child: mainText,
-            ),
-            if (showSub)
-              Text(
-                sub,
-                textAlign: textAlign,
-                style: TextStyle(
-                  color: widget.active
-                      ? Colors.white.withValues(alpha: 0.72)
-                      : Colors.white.withValues(alpha: 0.45),
-                  fontSize: 12.5,
-                  height: 1.3,
-                ),
-              ),
-          ],
-        ),
+        padding:
+            EdgeInsets.symmetric(horizontal: _kRowHPadding, vertical: gapV),
+        child: rowContent,
       ),
     );
   }
@@ -620,7 +671,10 @@ class _WipePainter extends CustomPainter {
         if (cut <= 0) continue;
         canvas.save();
         canvas.clipRect(Rect.fromLTRB(
-          box.left, box.top, box.left + cut, box.bottom,
+          box.left,
+          box.top,
+          box.left + cut,
+          box.bottom,
         ));
         bright.paint(canvas, Offset.zero);
         canvas.restore();
@@ -646,6 +700,7 @@ class _LrcRow extends StatelessWidget {
     required this.fontSize,
     required this.align,
     required this.fade,
+    required this.blur,
     required this.gapV,
     required this.onSeek,
   });
@@ -661,6 +716,9 @@ class _LrcRow extends StatelessWidget {
   final double fontSize;
   final NpLyricAlign align;
   final double fade;
+
+  /// 非活跃行模糊 px（需求修复：模糊此前无实际效果）
+  final double blur;
   final double gapV;
   final ValueChanged<Duration> onSeek;
 
@@ -680,42 +738,55 @@ class _LrcRow extends StatelessWidget {
             ? Colors.white.withValues(alpha: 0.72)
             : Colors.white.withValues(alpha: 0.05 + (1 - fade) * 0.40);
 
+    Widget rowContent = Column(
+      mainAxisAlignment: MainAxisAlignment.center,
+      crossAxisAlignment: cross,
+      children: <Widget>[
+        Text(
+          line.text,
+          textAlign: textAlign,
+          softWrap: true,
+          style: TextStyle(
+            color: mainColor,
+            fontSize: fontSize,
+            fontWeight: active || played ? FontWeight.w700 : FontWeight.w500,
+            height: 1.35,
+          ),
+        ),
+        if (showSub)
+          Text(
+            sub,
+            textAlign: textAlign,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: active || played
+                  ? Colors.white.withValues(alpha: 0.68)
+                  : Colors.white.withValues(alpha: 0.45),
+              fontSize: 12.5,
+              height: 1.3,
+            ),
+          ),
+      ],
+    );
+
+    // 需求修复：非活跃行模糊实际生效（淡出已有，此前缺模糊）
+    if (!active) {
+      rowContent = _applyInactiveEffect(
+        rowContent,
+        fade: fade,
+        blur: blur,
+        active: false,
+      );
+    }
+
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onDoubleTap: () => onSeek(line.time),
       child: Padding(
-        padding: EdgeInsets.symmetric(horizontal: _kRowHPadding, vertical: gapV),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          crossAxisAlignment: cross,
-          children: <Widget>[
-            Text(
-              line.text,
-              textAlign: textAlign,
-              softWrap: true,
-              style: TextStyle(
-                color: mainColor,
-                fontSize: fontSize,
-                fontWeight: active || played ? FontWeight.w700 : FontWeight.w500,
-                height: 1.35,
-              ),
-            ),
-            if (showSub)
-              Text(
-                sub,
-                textAlign: textAlign,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  color: active || played
-                      ? Colors.white.withValues(alpha: 0.68)
-                      : Colors.white.withValues(alpha: 0.45),
-                  fontSize: 12.5,
-                  height: 1.3,
-                ),
-              ),
-          ],
-        ),
+        padding:
+            EdgeInsets.symmetric(horizontal: _kRowHPadding, vertical: gapV),
+        child: rowContent,
       ),
     );
   }

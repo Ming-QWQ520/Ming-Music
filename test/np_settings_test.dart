@@ -35,7 +35,7 @@ void main() {
     test('自定义值往返：全部非默认字段保全', () {
       const NpPlayerSettings s = NpPlayerSettings(
         displayMode: NpDisplayMode.lyrics,
-        coverStyle: NpCoverStyle.circle,
+        coverStyle: NpCoverStyle.square,
         coverScale: 1.15,
         coverShadow: false,
         bgBlur: 8,
@@ -52,14 +52,15 @@ void main() {
         lyricAlwaysCenter: true,
         coverLyrics: NpCoverLyricsMode.two,
         heartEffect: false,
-        miniStyle: MiniPlayerStyle.wide,
+        miniStyle: MiniPlayerStyle.compact,
         stripButtons: <String>['wiki', 'output'],
       );
       final NpPlayerSettings restored = NpPlayerSettings.fromMap(s.toMap());
 
       expect(restored, isNot(same(s)));
       expect(restored.displayMode, NpDisplayMode.lyrics);
-      expect(restored.coverStyle, NpCoverStyle.circle);
+      // 需求迁移：封面只保留正方形/方形圆角；圆形等旧值一律回退方形圆角
+      expect(restored.coverStyle, NpCoverStyle.square);
       expect(restored.coverScale, closeTo(1.15, 1e-9));
       expect(restored.coverShadow, isFalse);
       expect(restored.bgBlur, 8);
@@ -76,7 +77,7 @@ void main() {
       expect(restored.lyricAlwaysCenter, isTrue);
       expect(restored.coverLyrics, NpCoverLyricsMode.two);
       expect(restored.heartEffect, isFalse);
-      expect(restored.miniStyle, MiniPlayerStyle.wide);
+      expect(restored.miniStyle, MiniPlayerStyle.compact);
       expect(restored.stripButtons, <String>['wiki', 'output']);
     });
 
@@ -84,7 +85,10 @@ void main() {
       final NpPlayerSettings fromEmpty =
           NpPlayerSettings.fromMap(<Object?, Object?>{});
       expect(fromEmpty.displayMode, NpDisplayMode.both);
-      expect(fromEmpty.coverStyle, NpCoverStyle.square);
+      // 需求：封面默认样式为方形圆角
+      expect(fromEmpty.coverStyle, NpCoverStyle.rounded);
+      // 需求：歌词默认字号 20px
+      expect(fromEmpty.lyricFontSize, 20);
       expect(fromEmpty.lyricAlign, NpLyricAlign.left);
       expect(fromEmpty.miniStyle, MiniPlayerStyle.classic);
       expect(fromEmpty.stripButtons, kStripButtonDefaults);
@@ -100,13 +104,25 @@ void main() {
         'stripButtons': <String>['wiki', 'bogus-id', 'settings'],
       });
       expect(fromGarbage.displayMode, NpDisplayMode.both);
-      expect(fromGarbage.coverStyle, NpCoverStyle.square);
+      expect(fromGarbage.coverStyle, NpCoverStyle.rounded);
       expect(fromGarbage.coverScale, closeTo(1.2, 1e-9));
       expect(fromGarbage.lyricFontSize, 12);
       expect(fromGarbage.yrcPlayed, const Color(0xFF112233));
       expect(fromGarbage.miniStyle, MiniPlayerStyle.classic);
-      // 非法按钮 id 被过滤，合法项按默认顺序保留
+      // 非法按钮 id 被过滤，合法项按传入顺序保留
       expect(fromGarbage.stripButtons, <String>['wiki', 'settings']);
+    });
+
+    test(
+        '旧值迁移：circle（已移除的圆形样式）回退方形圆角；'
+        'overlay/wide（已移除的 Mini 样式）回退经典条', () {
+      final NpPlayerSettings migrated =
+          NpPlayerSettings.fromMap(<Object?, Object?>{
+        'coverStyle': 'circle',
+        'miniStyle': 'overlay',
+      });
+      expect(migrated.coverStyle, NpCoverStyle.rounded);
+      expect(migrated.miniStyle, MiniPlayerStyle.classic);
     });
 
     test('copyWith 局部更新不影响其他字段', () {
@@ -124,8 +140,8 @@ void main() {
     test('旧版本数据（含已废弃字段）向前兼容', () {
       // 旧数据含已移除的 directShowLyrics / hidePlayerControls /
       // animationSpeed：解析应忽略未知字段不报错
-      final NpPlayerSettings legacy = NpPlayerSettings.fromMap(
-          <Object?, Object?>{
+      final NpPlayerSettings legacy =
+          NpPlayerSettings.fromMap(<Object?, Object?>{
         '_v': 1,
         'displayMode': 'both',
         'directShowLyrics': false, // 已废弃字段
@@ -143,8 +159,7 @@ void main() {
     test('stripButtons 顺序按 kStripButtonIds 规范化', () {
       // setStripButtons 的排序逻辑在 notifier 层；fromMap 侧校验
       // 未知 id 过滤与默认回填
-      final NpPlayerSettings s = NpPlayerSettings.fromMap(
-          <Object?, Object?>{
+      final NpPlayerSettings s = NpPlayerSettings.fromMap(<Object?, Object?>{
         'stripButtons': <String>['settings', 'wiki'],
       });
       // fromMap 不过滤顺序（保存时已规范化），仅过滤非法 id

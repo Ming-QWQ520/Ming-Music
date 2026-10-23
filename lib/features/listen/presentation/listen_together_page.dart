@@ -78,7 +78,8 @@ class _ListenTogetherPageState extends ConsumerState<ListenTogetherPage> {
           title: t?.title ?? '',
           artist: t?.artist ?? '',
           cover: t?.cover ?? '',
-          positionMs: ref.read(audioHandlerProvider).player.position.inMilliseconds,
+          positionMs:
+              ref.read(audioHandlerProvider).player.position.inMilliseconds,
           isPlaying: ps.playing,
         );
       });
@@ -156,8 +157,8 @@ class _ListenTogetherPageState extends ConsumerState<ListenTogetherPage> {
           .showSnackBar(const SnackBar(content: Text('已加入一起听，正在同步播放')));
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('$e'.replaceFirst('Exception: ', ''))));
+        ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('$e'.replaceFirst('Exception: ', ''))));
       }
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -242,8 +243,7 @@ class _ListenTogetherPageState extends ConsumerState<ListenTogetherPage> {
                 style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700)),
             const SizedBox(width: 8),
             Container(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
               decoration: BoxDecoration(
                 color: Colors.amber.withValues(alpha: 0.16),
                 border: Border.all(
@@ -316,9 +316,11 @@ class _ListenTogetherPageState extends ConsumerState<ListenTogetherPage> {
               children: <Widget>[
                 for (final String ip in _ips)
                   _KV('地址', '$ip:$_port', copyable: true),
-                _KV('正在播放', track == null
-                    ? '未在播放（请先播放一首歌曲）'
-                    : '${track.title} - ${track.artist}'),
+                _KV(
+                    '正在播放',
+                    track == null
+                        ? '未在播放（请先播放一首歌曲）'
+                        : '${track.title} - ${track.artist}'),
                 _KV('听众', _listeners <= 0 ? '暂无听众（等待好友加入）' : '$_listeners 位听众'),
               ],
             ),
@@ -333,9 +335,11 @@ class _ListenTogetherPageState extends ConsumerState<ListenTogetherPage> {
               closeLabel: '离开',
               children: <Widget>[
                 if (_remote != null) ...<Widget>[
-                  _KV('正在同步', _remote!.title.isEmpty
-                      ? '等待房主播放'
-                      : '${_remote!.title} - ${_remote!.artist}'),
+                  _KV(
+                      '正在同步',
+                      _remote!.title.isEmpty
+                          ? '等待房主播放'
+                          : '${_remote!.title} - ${_remote!.artist}'),
                   _KV('状态', _remote!.isPlaying ? '播放中' : '已暂停'),
                 ],
               ],
@@ -345,8 +349,7 @@ class _ListenTogetherPageState extends ConsumerState<ListenTogetherPage> {
               Center(
                 child: ClipRRect(
                   borderRadius: BorderRadius.circular(16),
-                  child: CoverImage(
-                      src: _remote!.cover, size: 180, radius: 16),
+                  child: CoverImage(src: _remote!.cover, size: 180, radius: 16),
                 ),
               ),
           ],
@@ -456,7 +459,9 @@ class _JoinCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Material(
-      color: Theme.of(context).colorScheme.surfaceContainerHighest
+      color: Theme.of(context)
+          .colorScheme
+          .surfaceContainerHighest
           .withValues(alpha: 0.5),
       borderRadius: BorderRadius.circular(16),
       child: Padding(
@@ -531,7 +536,9 @@ class _RoomCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Material(
-      color: Theme.of(context).colorScheme.surfaceContainerHighest
+      color: Theme.of(context)
+          .colorScheme
+          .surfaceContainerHighest
           .withValues(alpha: 0.5),
       borderRadius: BorderRadius.circular(16),
       child: Padding(
@@ -603,8 +610,7 @@ class _KV extends StatelessWidget {
                     color: Theme.of(context).colorScheme.onSurfaceVariant)),
           ),
           Expanded(
-            child: Text(value,
-                style: const TextStyle(fontSize: 13)),
+            child: Text(value, style: const TextStyle(fontSize: 13)),
           ),
           if (copyable)
             GestureDetector(

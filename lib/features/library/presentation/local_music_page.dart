@@ -54,8 +54,7 @@ class _LocalMusicPageState extends ConsumerState<LocalMusicPage> {
     });
   }
 
-  List<Track> _asTracks(List<Map<String, Object?>> files) =>
-      <Track>[
+  List<Track> _asTracks(List<Map<String, Object?>> files) => <Track>[
         for (final Map<String, Object?> f in files)
           Track(
             id: 'local_${f['id']}',

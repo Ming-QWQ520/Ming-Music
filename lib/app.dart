@@ -1,6 +1,8 @@
 /// 应用根 Widget：主题模式 + go_router 路由入口 + 全局 Mini 播放条宿主。
 library;
 
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -17,11 +19,17 @@ class MingMusicApp extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final ThemeMode mode = ref.watch(themeModeProvider);
+    // 需求：LRU 缓存上限/开关 → SongCacheService 同步（应用级常驻）
+    ref.watch(cacheConfigSyncProvider);
+    // 需求：全局图片背景（除播放页外）—— 启用时页面底色透明化，
+    // 背景图层铺在 Router 之下（BackdropFilter 仍可采样到）
+    final AppBackgroundConfig appBg = ref.watch(appBackgroundProvider);
+    final bool bgEnabled = appBg.enabled && (appBg.imagePath != null);
     return MaterialApp.router(
       title: AppTitle.text,
       debugShowCheckedModeBanner: false,
-      theme: AppTheme.light(),
-      darkTheme: AppTheme.dark(),
+      theme: AppTheme.light(transparentScaffold: bgEnabled),
+      darkTheme: AppTheme.dark(transparentScaffold: bgEnabled),
       themeMode: mode,
       localizationsDelegates: const <LocalizationsDelegate<Object>>[
         GlobalMaterialLocalizations.delegate,
@@ -88,9 +96,27 @@ class _GlobalMiniBarHostState extends ConsumerState<_GlobalMiniBarHost> {
   Widget build(BuildContext context) {
     final Widget child = widget.child ?? const SizedBox.shrink();
     final bool hasQueue = ref.watch(hasQueueProvider);
+    // 需求：全局图片背景（除播放页外）——铺在 Router 之下，页面 Scaffold
+    // 底色透明化后透出；播放页背景由 PlayerBackground 自绘不透出。
+    final AppBackgroundConfig appBg = ref.watch(appBackgroundProvider);
+    final bool bgEnabled = appBg.enabled && (appBg.imagePath != null);
+
+    final Widget? bg = bgEnabled
+        ? Positioned.fill(
+            child: Image.file(
+              File(appBg.imagePath!),
+              fit: BoxFit.cover,
+              // 轻压暗保证前景文字可读性
+              color: Colors.black.withValues(alpha: 0.25),
+              colorBlendMode: BlendMode.darken,
+              errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+            ),
+          )
+        : null;
 
     return Stack(
       children: <Widget>[
+        if (bg != null) bg,
         child,
         // 全局悬浮 Mini 条（子页面专属；主骨架与播放页由各自层级负责）
         if (_showFloat && hasQueue)
@@ -100,17 +126,7 @@ class _GlobalMiniBarHostState extends ConsumerState<_GlobalMiniBarHost> {
             bottom: MediaQuery.paddingOf(context).bottom + 6,
             child: Material(
               color: Colors.transparent,
-              child: Container(
-                decoration: BoxDecoration(
-                  color: Colors.black.withValues(alpha: 0.58),
-                  borderRadius: BorderRadius.circular(26),
-                  border: Border.all(
-                    color: Colors.white.withValues(alpha: 0.08),
-                    width: 0.5,
-                  ),
-                ),
-                child: const MiniPlayer(embedded: false),
-              ),
+              child: const MiniPlayer(embedded: false),
             ),
           ),
       ],

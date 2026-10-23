@@ -191,11 +191,11 @@ class ListenTogetherService {
 
   /// 远端状态回调（页面注册：执行播放跟随）
   void Function(ListenState state)? onRemoteState;
+
   /// 加入房间（校验 /ping 后开始轮询 /state）
   Future<void> join(String host, int port) async {
     await stop();
-    _client = HttpClient()
-      ..connectionTimeout = const Duration(seconds: 6);
+    _client = HttpClient()..connectionTimeout = const Duration(seconds: 6);
     final Map<String, Object?>? ping = await _getJson(host, port, '/ping');
     if (ping == null || ping['room'] != 'listen-together') {
       await stop();

@@ -1,7 +1,7 @@
-/// 播放页封面视图：按 NpCoverStyle 渲染两种样式 ——
-///  - square：方形大图（默认无圆角，可设置开启圆角；Apple Music 风格）；
-///  - circle：圆形大图。
-///（需求：黑胶样式已移除）
+/// 播放页封面视图：按 NpCoverStyle 渲染两种样式（需求收敛）——
+///  - square：正方形大图（无圆角，Apple Music 风格）；
+///  - rounded：正方形带圆角（**默认样式**）。
+///（需求：圆形/黑胶等其它样式已全部移除）
 ///
 /// 附加自定义：缩放（coverScale）与投影（coverShadow）。
 ///
@@ -18,6 +18,9 @@ import '../../../../core/widgets/cover_image.dart';
 import '../../domain/np_settings.dart';
 import 'mini_player.dart' show heroTagOf;
 
+/// 方形封面圆角比例（与封面边长的比值，观感对齐 Apple Music）
+const double kSquareCoverRadiusRatio = 0.055;
+
 class CoverArtView extends StatelessWidget {
   const CoverArtView({
     super.key,
@@ -27,7 +30,6 @@ class CoverArtView extends StatelessWidget {
     this.cover,
     this.scale = 1.0,
     this.shadow = true,
-    this.squareRadius = false,
     this.onLongPress,
     this.hero = true,
   });
@@ -39,9 +41,6 @@ class CoverArtView extends StatelessWidget {
   final double scale;
   final bool shadow;
 
-  /// 方形封面圆角开关（默认无圆角，自定义开启）
-  final bool squareRadius;
-
   /// 长按封面 → 全屏查看 + 保存（需求）
   final VoidCallback? onLongPress;
 
@@ -52,24 +51,17 @@ class CoverArtView extends StatelessWidget {
   Widget build(BuildContext context) {
     final double s = size * scale.clamp(0.70, 1.20);
 
-    Widget child = switch (style) {
-      NpCoverStyle.square => _FlatCover(
-          cover: cover,
-          // 需求：播放时尺寸不变，暂停时明显缩小
-          size: s * 0.92,
-          radius: squareRadius ? s * 0.055 : 0,
-          shadow: shadow,
-          shrinkOnPause: true,
-          playing: playing,
-        ),
-      NpCoverStyle.circle => _FlatCover(
-          cover: cover,
-          size: s * 0.92,
-          radius: s * 0.46,
-          shadow: shadow,
-          playing: playing,
-        ),
-    };
+    // 需求：方形/方形圆角两种样式（圆角比例 5.5%），暂停时明显缩小
+    Widget child = _FlatCover(
+      cover: cover,
+      size: s * 0.92,
+      radius: style == NpCoverStyle.rounded
+          ? s * 0.92 * kSquareCoverRadiusRatio
+          : 0,
+      shadow: shadow,
+      shrinkOnPause: true,
+      playing: playing,
+    );
 
     if (hero) {
       child = Hero(
@@ -113,8 +105,7 @@ class _FlatCover extends StatelessWidget {
       width: size,
       height: size,
       decoration: BoxDecoration(
-        borderRadius:
-            effRadius > 0 ? BorderRadius.circular(effRadius) : null,
+        borderRadius: effRadius > 0 ? BorderRadius.circular(effRadius) : null,
         boxShadow: shadow
             ? <BoxShadow>[
                 BoxShadow(
@@ -126,8 +117,9 @@ class _FlatCover extends StatelessWidget {
             : null,
       ),
       child: ClipRRect(
-        borderRadius:
-            effRadius > 0 ? BorderRadius.circular(effRadius) : BorderRadius.zero,
+        borderRadius: effRadius > 0
+            ? BorderRadius.circular(effRadius)
+            : BorderRadius.zero,
         // keepOldWhileLoading：切歌时保留旧封面直到新封面就绪（防闪占位；
         // 本组件仅用于播放页大封面）
         child: CoverImage(

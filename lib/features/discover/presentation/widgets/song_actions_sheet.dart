@@ -19,6 +19,7 @@ import '../../../library/data/download_service.dart';
 import '../../../library/domain/track.dart';
 import '../../../player/providers/player_providers.dart';
 import '../../data/netease_providers.dart';
+import '../../../../core/widgets/sheet_host.dart' show showMingSheet;
 
 /// 弹出歌曲操作菜单
 ///
@@ -30,9 +31,8 @@ Future<void> showSongActionsSheet(
   int? playlistId,
   VoidCallback? onRemoved,
 }) {
-  return showModalBottomSheet<void>(
-    context: context,
-    backgroundColor: Colors.transparent,
+  return showMingSheet<void>(
+    context,
     isScrollControlled: true,
     builder: (BuildContext ctx) => _SongActionsSheet(
       track: track,
@@ -117,8 +117,7 @@ class _SongActionsSheetState extends ConsumerState<_SongActionsSheet> {
       context: context,
       builder: (BuildContext ctx) => AlertDialog(
         title: const Text('移出歌单'),
-        content:
-            Text('确定将「${widget.track.title}」从当前歌单中移除吗？'),
+        content: Text('确定将「${widget.track.title}」从当前歌单中移除吗？'),
         actions: <Widget>[
           TextButton(
               onPressed: () => Navigator.of(ctx).pop(false),
@@ -160,7 +159,8 @@ class _SongActionsSheetState extends ConsumerState<_SongActionsSheet> {
   @override
   Widget build(BuildContext context) {
     final bool liked = _isNetease &&
-        ref.watch(authProvider.select((AuthState s) => s.likedIds))
+        ref
+            .watch(authProvider.select((AuthState s) => s.likedIds))
             .contains(widget.track.neteaseId);
 
     // 评论数（需求：评论(评论数)）—— 异步加载，未就绪时仅显示「评论」
@@ -271,7 +271,8 @@ class _SongActionsSheetState extends ConsumerState<_SongActionsSheet> {
               _ActionRow(
                 icon: Icons.person_outline_rounded,
                 label: '歌手',
-                onTap: widget.track.artistId != null && widget.track.artistId! > 0
+                onTap: widget.track.artistId != null &&
+                        widget.track.artistId! > 0
                     ? () => _push(
                         '/artist/${widget.track.artistId}?name=${Uri.encodeComponent(widget.track.artist)}')
                     : () => _toast('暂无歌手信息'),
@@ -338,9 +339,8 @@ class _ActionRow extends StatelessWidget {
               ? (color ?? Colors.white70).withValues(alpha: 0.35)
               : color ?? Colors.white70),
       title: Text(label,
-          style: TextStyle(
-              fontSize: 15,
-              color: disabled ? Colors.white38 : null)),
+          style:
+              TextStyle(fontSize: 15, color: disabled ? Colors.white38 : null)),
       onTap: onTap,
     );
   }

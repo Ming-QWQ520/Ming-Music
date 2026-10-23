@@ -178,7 +178,8 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
                           strokeWidth: 2, color: Colors.white))
                   : const Icon(Icons.edit_calendar_rounded, size: 15),
               label: const Text('签到',
-                  style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600)),
+                  style:
+                      TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600)),
             ),
           ),
         ],
@@ -200,8 +201,7 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
             if (_playlists != null && _playlists!.isNotEmpty) ...<Widget>[
               const SizedBox(height: 18),
               const _SectionHeader('我的歌单'),
-              _PlaylistScroller(
-                  playlists: _playlists!, myUid: profile.userId),
+              _PlaylistScroller(playlists: _playlists!, myUid: profile.userId),
             ],
             const SizedBox(height: 18),
             Row(
@@ -328,8 +328,8 @@ class _UserCard extends ConsumerWidget {
               children: <Widget>[
                 for (final String f in facts)
                   Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 8, vertical: 3),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                     decoration: BoxDecoration(
                       color: Colors.white.withValues(alpha: 0.08),
                       borderRadius: BorderRadius.circular(10),
@@ -521,8 +521,7 @@ class _SectionHeader extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.only(bottom: 10),
       child: Text(text,
-          style:
-              const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
     );
   }
 }
@@ -744,7 +743,8 @@ class _EmptyHint extends StatelessWidget {
       child: Text(
         text,
         style: TextStyle(
-            fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
+            fontSize: 12,
+            color: Theme.of(context).colorScheme.onSurfaceVariant),
       ),
     );
   }

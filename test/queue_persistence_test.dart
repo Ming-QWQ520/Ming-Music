@@ -32,8 +32,7 @@ void main() {
       );
 
   group('队列状态持久化', () {
-    test('v2：网易云曲目只存歌曲 ID，恢复为占位曲目（需求：歌单数据只存 ID）',
-        () async {
+    test('v2：网易云曲目只存歌曲 ID，恢复为占位曲目（需求：歌单数据只存 ID）', () async {
       final List<Track> queue = <Track>[
         track('netease_111', neteaseId: 111, mvId: 222),
         track('netease_333', neteaseId: 333),
@@ -108,7 +107,8 @@ void main() {
       await persistence.pushHistory('C', <Track>[track('c1')]);
 
       List<QueueSnapshot> h = persistence.loadHistory();
-      expect(h.map((QueueSnapshot s) => s.title).toList(), <String>['C', 'B', 'A']);
+      expect(h.map((QueueSnapshot s) => s.title).toList(),
+          <String>['C', 'B', 'A']);
 
       // 同内容去重：A 重新入队 → 移到最前，不新增
       await persistence.pushHistory('A', <Track>[track('a1')]);

@@ -8,12 +8,13 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/constants/app_constants.dart';
 import '../../../settings/domain/settings_models.dart';
 import '../../providers/player_providers.dart';
+import '../../../../core/widgets/sheet_host.dart'
+    show GlassSheet, showMingSheet;
 
 /// 弹出音质选择
 Future<void> showQualitySheet(BuildContext context, AudioQuality current) {
-  return showModalBottomSheet<void>(
-    context: context,
-    backgroundColor: Colors.transparent,
+  return showMingSheet<void>(
+    context,
     builder: (BuildContext ctx) => _QualitySheet(current: current),
   );
 }
@@ -33,11 +34,8 @@ class _QualitySheetState extends ConsumerState<_QualitySheet> {
   @override
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
-    return Container(
-      decoration: const BoxDecoration(
-        color: AppConstants.darkSurface,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
-      ),
+    // 液态玻璃弹窗底板（需求）
+    return GlassSheet(
       child: SafeArea(
         child: Column(
           mainAxisSize: MainAxisSize.min,

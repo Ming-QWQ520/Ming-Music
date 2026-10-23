@@ -13,13 +13,13 @@ import '../../../discover/data/netease_providers.dart'
     show neteaseRepositoryProvider;
 import '../../../library/domain/track.dart';
 import '../../providers/player_providers.dart';
+import '../../../../core/widgets/sheet_host.dart' show showMingSheet;
 
 /// 打开相似歌曲弹窗
 Future<void> showSimilarSongsSheet(BuildContext context, Track current) {
-  return showModalBottomSheet<void>(
-    context: context,
+  return showMingSheet<void>(
+    context,
     isScrollControlled: true,
-    backgroundColor: Colors.transparent,
     builder: (BuildContext context) => _SimilarSongsSheet(current: current),
   );
 }
@@ -51,9 +51,8 @@ class _SimilarSongsSheetState extends ConsumerState<_SimilarSongsSheet> {
   Future<void> _play(Song song) async {
     if (_busy.contains(song.id)) return;
     setState(() => _busy.add(song.id));
-    final String? error = await ref
-        .read(playerProvider.notifier)
-        .playSimilarNext(song.toTrack());
+    final String? error =
+        await ref.read(playerProvider.notifier).playSimilarNext(song.toTrack());
     if (!mounted) return;
     setState(() {
       _busy.remove(song.id);
@@ -123,8 +122,7 @@ class _SimilarSongsSheetState extends ConsumerState<_SimilarSongsSheet> {
           Flexible(
             child: FutureBuilder<List<Song>>(
               future: _future,
-              builder:
-                  (BuildContext ctx, AsyncSnapshot<List<Song>> snapshot) {
+              builder: (BuildContext ctx, AsyncSnapshot<List<Song>> snapshot) {
                 if (snapshot.connectionState != ConnectionState.done) {
                   return const Padding(
                     padding: EdgeInsets.all(40),
@@ -136,8 +134,8 @@ class _SimilarSongsSheetState extends ConsumerState<_SimilarSongsSheet> {
                   return Padding(
                     padding: const EdgeInsets.all(40),
                     child: Text('暂无相似歌曲推荐',
-                        style:
-                            TextStyle(color: theme.colorScheme.onSurfaceVariant)),
+                        style: TextStyle(
+                            color: theme.colorScheme.onSurfaceVariant)),
                   );
                 }
                 return ListView.builder(

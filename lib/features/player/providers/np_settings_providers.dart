@@ -61,9 +61,6 @@ class NpSettingsNotifier extends Notifier<NpPlayerSettings> {
   void setCoverShadow(bool shadow) =>
       _commit(state.copyWith(coverShadow: shadow));
 
-  void setSquareCoverRadius(bool on) =>
-      _commit(state.copyWith(squareCoverRadius: on));
-
   void setMiniStyle(MiniPlayerStyle style) =>
       _commit(state.copyWith(miniStyle: style));
 
@@ -110,16 +107,19 @@ class NpSettingsNotifier extends Notifier<NpPlayerSettings> {
 
   void setShowMvBadge(bool on) => _commit(state.copyWith(showMvBadge: on));
 
-  /// 底部功能条按钮显隐（保持 kStripButtonIds 中的原始顺序）
+  /// 底部功能条按钮显隐与顺序（需求：预览从左到右可拖动自定义）——
+  /// 持久化保留用户拖动后的顺序（不再按 kStripButtonIds 重排），
+  /// 仅过滤非法 id 与去重；全空时回退默认集合。
   void setStripButtons(List<String> enabled) {
-    final List<String> ordered = <String>[
-      for (final String id in kStripButtonIds)
-        if (enabled.contains(id)) id,
-    ];
+    final List<String> ordered = <String>[];
+    for (final String id in enabled) {
+      if (kStripButtonIds.contains(id) && !ordered.contains(id)) {
+        ordered.add(id);
+      }
+    }
     _commit(state.copyWith(
-      stripButtons: ordered.isEmpty
-          ? List<String>.of(kStripButtonDefaults)
-          : ordered,
+      stripButtons:
+          ordered.isEmpty ? List<String>.of(kStripButtonDefaults) : ordered,
     ));
   }
 

@@ -11,14 +11,14 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/constants/app_constants.dart';
 import '../data/netease_auth_repository.dart' show QrStatus;
 import '../providers/auth_providers.dart';
+import '../../../core/widgets/sheet_host.dart' show showMingSheet;
 
 /// 全局登录入口：弹出底部登录面板
 Future<void> showLoginSheet(BuildContext context) {
-  return showModalBottomSheet<void>(
-    context: context,
+  return showMingSheet<void>(
+    context,
     isScrollControlled: true,
     useSafeArea: true,
-    backgroundColor: Colors.transparent,
     isDismissible: true,
     builder: (BuildContext ctx) => const LoginSheet(),
   );

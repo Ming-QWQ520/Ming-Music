@@ -202,8 +202,9 @@ class _SearchPageState extends ConsumerState<SearchPage> {
           key: ValueKey<String>('search_${s.id}'),
           confirmDismiss: (DismissDirection dir) async {
             if (dir == DismissDirection.startToEnd) {
-              final String? err =
-                  await ref.read(playerProvider.notifier).insertNext(s.toTrack());
+              final String? err = await ref
+                  .read(playerProvider.notifier)
+                  .insertNext(s.toTrack());
               if (!context.mounted) return false;
               ScaffoldMessenger.of(context).showSnackBar(SnackBar(
                 content: Text(err ?? '已添加至下一首播放：${s.name}'),

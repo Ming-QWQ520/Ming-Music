@@ -9,6 +9,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/constants/app_constants.dart';
+import '../../../core/widgets/sheet_host.dart';
 import '../../settings/domain/settings_models.dart';
 import '../../settings/providers/settings_providers.dart';
 import '../domain/np_settings.dart';
@@ -16,11 +17,10 @@ import '../providers/np_settings_providers.dart';
 
 /// 弹出播放页自定义面板
 Future<void> showNpSettingsSheet(BuildContext context) {
-  return showModalBottomSheet<void>(
-    context: context,
+  return showMingSheet<void>(
+    context,
     isScrollControlled: true,
-    useSafeArea: true,
-    backgroundColor: Colors.transparent,
+    barrierLabel: '播放页自定义',
     builder: (BuildContext ctx) => const NpSettingsSheet(),
   );
 }
@@ -30,14 +30,12 @@ class NpSettingsSheet extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    // 需求：液态玻璃弹窗底板（低端机/关闭玻璃自动降级实色）
     return DefaultTabController(
       length: 4,
-      child: Container(
-        height: MediaQuery.sizeOf(context).height * 0.72,
-        decoration: const BoxDecoration(
-          color: Color(0xFF1B1B20),
-          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-        ),
+      child: GlassSheet(
+        borderRadius: 24,
+        maxHeight: MediaQuery.sizeOf(context).height * 0.72,
         child: Column(
           children: <Widget>[
             Padding(
@@ -123,18 +121,16 @@ class _DisplayPane extends ConsumerWidget {
         const _GroupTitle('Mini 播放条'),
         _SegmentedRow<MiniPlayerStyle>(
           label: '样式',
+          hint: '两种样式均带液态玻璃；紧凑极简嵌入底部导航栏中间',
           groups: const <(MiniPlayerStyle, String)>[
             (MiniPlayerStyle.classic, '经典条'),
-            (MiniPlayerStyle.overlay, '封面铺满'),
             (MiniPlayerStyle.compact, '紧凑极简'),
-            (MiniPlayerStyle.wide, '宽幅双行'),
           ],
           value: cfg.miniStyle,
           onChanged: (MiniPlayerStyle v) =>
               ref.read(npSettingsProvider.notifier).setMiniStyle(v),
         ),
-        const _HintText(
-            '紧凑极简：嵌入底部导航栏中间；其余样式悬浮于导航栏上方（透明无底色）'),
+        const _HintText('经典条：深蓝玻璃长条悬浮导航栏上方；紧凑极简：仅封面圆环嵌入导航栏'),
       ],
     );
   }
@@ -151,11 +147,12 @@ class _CoverPane extends ConsumerWidget {
     return _SettingsList(
       children: <Widget>[
         const _GroupTitle('封面样式'),
+        // 需求：封面只保留正方形/方形圆角，默认方形圆角
         _SegmentedRow<NpCoverStyle>(
           label: '样式',
           groups: const <(NpCoverStyle, String)>[
-            (NpCoverStyle.square, '方形'),
-            (NpCoverStyle.circle, '圆形'),
+            (NpCoverStyle.square, '正方形'),
+            (NpCoverStyle.rounded, '方形圆角'),
           ],
           value: cfg.coverStyle,
           onChanged: (NpCoverStyle v) =>
@@ -179,13 +176,6 @@ class _CoverPane extends ConsumerWidget {
           value: cfg.coverLyrics,
           onChanged: (NpCoverLyricsMode v) =>
               ref.read(npSettingsProvider.notifier).setCoverLyrics(v),
-        ),
-        _SwitchRow(
-          label: '方形封面圆角',
-          hint: '方形样式默认无圆角，开启后显示圆角',
-          value: cfg.squareCoverRadius,
-          onChanged: (bool v) =>
-              ref.read(npSettingsProvider.notifier).setSquareCoverRadius(v),
         ),
         _SliderRow(
           label: '封面大小',

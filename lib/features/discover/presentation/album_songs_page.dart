@@ -123,8 +123,7 @@ class _AlbumBody extends ConsumerWidget {
                       const SizedBox(height: 6),
                       Text(
                         <String>[
-                          if (detail.meta.creator != null)
-                            detail.meta.creator!,
+                          if (detail.meta.creator != null) detail.meta.creator!,
                           '${tracks.length} 首',
                         ].join(' · '),
                         style: TextStyle(
@@ -174,12 +173,12 @@ class _AlbumBody extends ConsumerWidget {
                 song: s,
                 trackIndex: index + 1,
                 onPlay: () => ref.read(playerProvider.notifier).playSongs(
-                      <Track>[
-                        for (final Song x in tracks) x.toTrack(),
-                      ],
-                      startIndex: index,
-                      queueTitle: '专辑：${detail.meta.name}',
-                    ),
+                  <Track>[
+                    for (final Song x in tracks) x.toTrack(),
+                  ],
+                  startIndex: index,
+                  queueTitle: '专辑：${detail.meta.name}',
+                ),
                 onMore: () => showSongActionsSheet(context, s.toTrack()),
                 onLongPress: () => showSongActionsSheet(context, s.toTrack()),
               );

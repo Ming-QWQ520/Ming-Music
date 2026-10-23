@@ -322,8 +322,8 @@ class _HotWordsSection extends ConsumerWidget {
                             .surfaceContainerHighest
                             .withValues(alpha: 0.5),
                         side: BorderSide.none,
-                        onPressed: () =>
-                            context.push('/search?kw=${Uri.encodeComponent(words[i].word)}'),
+                        onPressed: () => context.push(
+                            '/search?kw=${Uri.encodeComponent(words[i].word)}'),
                       ),
                   ],
                 ),

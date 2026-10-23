@@ -58,9 +58,8 @@ class _DiagPageState extends State<DiagPage> {
       body: FutureBuilder<String>(
         future: _future,
         builder: (BuildContext context, AsyncSnapshot<String> snap) {
-          final String text = (snap.data == null || snap.data!.isEmpty)
-              ? '（暂无日志）'
-              : snap.data!;
+          final String text =
+              (snap.data == null || snap.data!.isEmpty) ? '（暂无日志）' : snap.data!;
           return SingleChildScrollView(
             padding: const EdgeInsets.fromLTRB(14, 12, 14, 24),
             child: SelectableText(

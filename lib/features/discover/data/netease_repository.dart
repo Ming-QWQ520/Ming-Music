@@ -58,7 +58,8 @@ class NeteaseRepository {
     if (parsed.isEmpty) {
       final Map<String, Object?> res = await _api.get('/cloudsearch', params);
       final Object? data = res['data'];
-      final Object? songs = (data is Map<String, Object?>) ? data['songs'] : null;
+      final Object? songs =
+          (data is Map<String, Object?>) ? data['songs'] : null;
       parsed = _songsFrom(songs);
     }
     return _fillMissingCovers(parsed);
@@ -142,7 +143,8 @@ class NeteaseRepository {
     final PlaylistMeta meta = PlaylistMeta.fromJson(playlist);
     List<Song> tracks = _songsFrom(playlist['tracks']);
     final List<int> trackIds = <int>[
-      for (final Object? t in (playlist['trackIds'] as List<Object?>? ?? const <Object?>[]))
+      for (final Object? t
+          in (playlist['trackIds'] as List<Object?>? ?? const <Object?>[]))
         if (t is Map<String, Object?>) ((t['id'] as num?)?.toInt() ?? 0),
     ].where((int v) => v > 0).toList(growable: false);
 
@@ -153,12 +155,15 @@ class NeteaseRepository {
       // tracks 只有前 N 条：补全剩余（保持 trackIds 顺序）
       final Set<int> have = <int>{for (final Song s in tracks) s.id};
       final List<int> rest = <int>[
-        for (final int tid in trackIds) if (!have.contains(tid)) tid,
+        for (final int tid in trackIds)
+          if (!have.contains(tid)) tid,
       ];
       if (rest.isNotEmpty) {
         final List<Song> more = await _songsByIds(rest);
         if (more.isNotEmpty) {
-          final Map<int, Song> byId = <int, Song>{for (final Song s in more) s.id: s};
+          final Map<int, Song> byId = <int, Song>{
+            for (final Song s in more) s.id: s
+          };
           final List<Song> merged = <Song>[...tracks];
           for (final int tid in trackIds) {
             if (!have.contains(tid) && byId.containsKey(tid)) {
@@ -276,8 +281,8 @@ class NeteaseRepository {
 
   /// 歌曲百科（/song/wiki/summary）：曲风/推荐标签/获奖成就/影视节目/乐评
   Future<SongWikiSummary> songWiki(int id) async {
-    final Map<String, Object?> res = await _api
-        .get('/song/wiki/summary', <String, String>{'id': '$id'});
+    final Map<String, Object?> res =
+        await _api.get('/song/wiki/summary', <String, String>{'id': '$id'});
     final Map<String, Object?> payload = apiPayload(res);
     return SongWikiSummary.fromJson(payload);
   }
@@ -324,8 +329,7 @@ class NeteaseRepository {
     final Object? artists =
         result is Map<String, Object?> ? result['artists'] : null;
     if (artists is! List<Object?> || artists.isEmpty) return null;
-    final Map<String, Object?> first =
-        artists.first as Map<String, Object?>;
+    final Map<String, Object?> first = artists.first as Map<String, Object?>;
     return (first['id'] as num?)?.toInt();
   }
 
@@ -375,12 +379,12 @@ class NeteaseRepository {
     required List<int> trackIds,
     required bool add,
   }) async {
-    final Map<String, Object?> res = await _api.get('/playlist/tracks',
-        <String, String>{
-          'op': add ? 'add' : 'del',
-          'pid': '$playlistId',
-          'tracks': trackIds.join(','),
-        });
+    final Map<String, Object?> res =
+        await _api.get('/playlist/tracks', <String, String>{
+      'op': add ? 'add' : 'del',
+      'pid': '$playlistId',
+      'tracks': trackIds.join(','),
+    });
     final Object? body = res['body'];
     // 部分版本返回 {body:{code:502,...}}：曲目已存在等场景给出明确错误
     if (body is Map<String, Object?>) {
@@ -400,8 +404,7 @@ class NeteaseRepository {
   // -------------------------------------------------- 听歌排行 / 最近播放
 
   /// 听歌排行（/user/record，type=0 所有时间 1 最近一周）
-  Future<List<PlayRecordSong>> userRecord(int uid,
-      {required bool week}) async {
+  Future<List<PlayRecordSong>> userRecord(int uid, {required bool week}) async {
     final Map<String, Object?> res = await _api.get('/user/record',
         <String, String>{'uid': '$uid', 'type': week ? '1' : '0'});
     final Map<String, Object?> payload = apiPayload(res);
@@ -440,8 +443,8 @@ class NeteaseRepository {
   /// 云盘容量信息（/user/cloud 顶层 count/size/maxSize，分页无关）
   /// 需求：云盘显示总歌曲数和总容量；我的页登录后显示总歌曲数
   Future<CloudDriveInfo> cloudInfo() async {
-    final Map<String, Object?> res = await _api.get('/user/cloud',
-        <String, String>{'limit': '1', 'offset': '0'});
+    final Map<String, Object?> res = await _api
+        .get('/user/cloud', <String, String>{'limit': '1', 'offset': '0'});
     return CloudDriveInfo.fromJson(res);
   }
 

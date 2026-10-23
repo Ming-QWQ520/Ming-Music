@@ -35,13 +35,13 @@ import '../providers/np_settings_providers.dart';
 import '../providers/player_providers.dart';
 import 'np_settings_sheet.dart';
 import 'widgets/quality_sheet.dart';
+import '../../../core/widgets/sheet_host.dart' show showMingSheet;
 
 /// 弹出播放页自定义底部菜单
 Future<void> showPlayerMoreSheet(BuildContext context) {
-  return showModalBottomSheet<void>(
-    context: context,
+  return showMingSheet<void>(
+    context,
     isScrollControlled: true,
-    backgroundColor: Colors.transparent,
     builder: (BuildContext ctx) => const _PlayerMoreSheet(),
   );
 }
@@ -142,8 +142,8 @@ class _PlayerMoreSheetState extends ConsumerState<_PlayerMoreSheet> {
   @override
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
-    final Track? track = ref.watch(
-        playerProvider.select((PlayerState s) => s.currentTrack));
+    final Track? track =
+        ref.watch(playerProvider.select((PlayerState s) => s.currentTrack));
     final NpPlayerSettings cfg = ref.watch(npSettingsProvider);
     final AudioQuality quality = ref.watch(audioQualityProvider);
     final bool liked = (track?.neteaseId ?? 0) > 0 &&
@@ -159,8 +159,8 @@ class _PlayerMoreSheetState extends ConsumerState<_PlayerMoreSheet> {
     }
 
     return Container(
-      constraints: BoxConstraints(
-          maxHeight: MediaQuery.sizeOf(context).height * 0.86),
+      constraints:
+          BoxConstraints(maxHeight: MediaQuery.sizeOf(context).height * 0.86),
       decoration: const BoxDecoration(
         color: AppConstants.darkSurface,
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
@@ -188,8 +188,7 @@ class _PlayerMoreSheetState extends ConsumerState<_PlayerMoreSheet> {
                   children: <Widget>[
                     ClipRRect(
                       borderRadius: BorderRadius.circular(8),
-                      child: CoverImage(
-                          src: track.cover, size: 52, radius: 8),
+                      child: CoverImage(src: track.cover, size: 52, radius: 8),
                     ),
                     const SizedBox(width: 12),
                     Expanded(
@@ -377,8 +376,7 @@ class _PlayerMoreSheetState extends ConsumerState<_PlayerMoreSheet> {
                                     horizontal: 10, vertical: 4),
                                 decoration: BoxDecoration(
                                   border: Border.all(
-                                      color: AppConstants.brandColor,
-                                      width: 1),
+                                      color: AppConstants.brandColor, width: 1),
                                   borderRadius: BorderRadius.circular(12),
                                 ),
                                 child: const Text(
@@ -393,7 +391,7 @@ class _PlayerMoreSheetState extends ConsumerState<_PlayerMoreSheet> {
                           : null,
                       onTap: _artistId != null
                           ? () => _popThen(() => _router?.push(
-                                  '/artist/$_artistId?name=${Uri.encodeComponent(track.artist)}'))
+                              '/artist/$_artistId?name=${Uri.encodeComponent(track.artist)}'))
                           : null,
                     ),
                     if ((track.neteaseId ?? 0) > 0)
@@ -401,9 +399,9 @@ class _PlayerMoreSheetState extends ConsumerState<_PlayerMoreSheet> {
                         icon: Icons.menu_book_rounded,
                         label: '查看歌曲百科',
                         onTap: () => _popThen(() => _router?.push(
-                              '/wiki/${track.neteaseId}?title=${Uri.encodeComponent(track.title)}'
-                              '&artist=${Uri.encodeComponent(track.artist)}'
-                              '${track.mvId != null ? '&mv=${track.mvId}' : ''}')),
+                            '/wiki/${track.neteaseId}?title=${Uri.encodeComponent(track.title)}'
+                            '&artist=${Uri.encodeComponent(track.artist)}'
+                            '${track.mvId != null ? '&mv=${track.mvId}' : ''}')),
                       ),
                   ],
                   const _SectionLabel('推荐'),
@@ -554,9 +552,8 @@ class _PlayerMoreSheetState extends ConsumerState<_PlayerMoreSheet> {
   // ------------------------------------------------------------- pickers
 
   void _showStylePicker(NpPlayerSettings cfg) {
-    showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: Colors.transparent,
+    showMingSheet<void>(
+      context,
       builder: (BuildContext ctx) => Container(
         decoration: const BoxDecoration(
           color: AppConstants.darkSurface,
@@ -569,8 +566,7 @@ class _PlayerMoreSheetState extends ConsumerState<_PlayerMoreSheet> {
             children: <Widget>[
               const SizedBox(height: 12),
               const Text('播放器样式',
-                  style:
-                      TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
               const SizedBox(height: 6),
               for (final NpCoverStyle s in NpCoverStyle.values)
                 ListTile(
@@ -593,9 +589,8 @@ class _PlayerMoreSheetState extends ConsumerState<_PlayerMoreSheet> {
   }
 
   void _showSleepTimerPicker(bool active) {
-    showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: Colors.transparent,
+    showMingSheet<void>(
+      context,
       builder: (BuildContext ctx) => Container(
         decoration: const BoxDecoration(
           color: AppConstants.darkSurface,
@@ -613,7 +608,8 @@ class _PlayerMoreSheetState extends ConsumerState<_PlayerMoreSheet> {
               const SizedBox(height: 6),
               for (final int minutes in const <int>[15, 30, 60, 90])
                 ListTile(
-                  title: Text('$minutes 分钟', style: const TextStyle(fontSize: 15)),
+                  title:
+                      Text('$minutes 分钟', style: const TextStyle(fontSize: 15)),
                   onTap: () {
                     ref
                         .read(sleepTimerProvider.notifier)
@@ -643,9 +639,8 @@ class _PlayerMoreSheetState extends ConsumerState<_PlayerMoreSheet> {
   void _showSpeedPicker() {
     final double current =
         ref.read(playerProvider.select((PlayerState s) => s.speed));
-    showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: Colors.transparent,
+    showMingSheet<void>(
+      context,
       builder: (BuildContext ctx) => Container(
         decoration: const BoxDecoration(
           color: AppConstants.darkSurface,
@@ -658,10 +653,16 @@ class _PlayerMoreSheetState extends ConsumerState<_PlayerMoreSheet> {
             children: <Widget>[
               const SizedBox(height: 12),
               const Text('倍速播放',
-                  style:
-                      TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
               const SizedBox(height: 6),
-              for (final double sp in const <double>[0.5, 0.75, 1.0, 1.25, 1.5, 2.0])
+              for (final double sp in const <double>[
+                0.5,
+                0.75,
+                1.0,
+                1.25,
+                1.5,
+                2.0
+              ])
                 ListTile(
                   title: Text('${sp.toStringAsFixed(2)}x',
                       style: const TextStyle(fontSize: 15)),
@@ -682,15 +683,25 @@ class _PlayerMoreSheetState extends ConsumerState<_PlayerMoreSheet> {
     );
   }
 
-  /// 底部功能条按钮显隐编辑
+  /// 底部功能条编辑器（需求重构：预览式自定义）——
+  ///  1. 顶部「预览」区：从左到右按当前实际顺序排列按钮（与播放页底部
+  ///     一致），**可拖动自定义顺序**（ReorderableListView 横向）；
+  ///  2. 下方勾选列表：决定每个按钮是否显示；
+  ///  3. 「音量条」为独占模式：勾选后播放页底部只保留音量条与设置键
+  ///     （音量条在设置键左侧），预览区同步提示。
   void _showStripEditor(NpPlayerSettings cfg) {
-    showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: Colors.transparent,
+    showMingSheet<void>(
+      context,
+      barrierLabel: '播放页底部功能自定义',
       builder: (BuildContext ctx) {
-        final List<String> selected = List<String>.of(cfg.stripButtons);
+        final List<String> order = List<String>.of(cfg.stripButtons);
+        // 未启用的按钮（kStripButtonIds 中不在当前顺序表内的）排在最后供勾选
+        final List<String> disabled = kStripButtonIds
+            .where((String id) => !order.contains(id))
+            .toList(growable: false);
         return StatefulBuilder(
-          builder: (BuildContext ctx2, void Function(void Function()) setState2) {
+          builder:
+              (BuildContext ctx2, void Function(void Function()) setState2) {
             return Container(
               decoration: const BoxDecoration(
                 color: AppConstants.darkSurface,
@@ -698,64 +709,178 @@ class _PlayerMoreSheetState extends ConsumerState<_PlayerMoreSheet> {
               ),
               child: SafeArea(
                 top: false,
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: <Widget>[
-                    const SizedBox(height: 12),
-                    const Text('播放页底部功能自定义',
-                        style: TextStyle(
-                            fontSize: 16, fontWeight: FontWeight.w700)),
-                    const SizedBox(height: 4),
-                    const Padding(
-                      padding: EdgeInsets.symmetric(horizontal: 20),
-                      child: Align(
-                        alignment: Alignment.centerLeft,
-                        child: Text('按住拖动不可用，勾选决定显示与顺序（按默认顺序排列）',
-                            style:
-                                TextStyle(fontSize: 11.5, color: Colors.white38)),
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.fromLTRB(0, 0, 0, 10),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: <Widget>[
+                      const SizedBox(height: 12),
+                      const Center(
+                        child: Text('播放页底部功能自定义',
+                            style: TextStyle(
+                                fontSize: 16, fontWeight: FontWeight.w700)),
                       ),
-                    ),
-                    for (final String id in kStripButtonIds)
-                      CheckboxListTile(
-                        value: selected.contains(id),
-                        title: Text(stripButtonLabel(id),
-                            style: const TextStyle(fontSize: 15)),
-                        activeColor: AppConstants.brandColor,
-                        onChanged: (bool? v) {
-                          setState2(() {
-                            if (v == true) {
-                              selected.add(id);
-                            } else {
-                              selected.remove(id);
-                            }
-                          });
-                        },
-                      ),
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(20, 4, 20, 14),
-                      child: SizedBox(
-                        width: double.infinity,
-                        child: FilledButton(
-                          style: FilledButton.styleFrom(
-                            backgroundColor: AppConstants.brandColor,
-                          ),
-                          onPressed: () {
-                            ref
-                                .read(npSettingsProvider.notifier)
-                                .setStripButtons(selected);
-                            Navigator.of(ctx2).pop();
-                          },
-                          child: const Text('完成'),
+                      const SizedBox(height: 10),
+                      // ---- 预览区（从左到右排列，可拖动排序） ----
+                      const Padding(
+                        padding: EdgeInsets.symmetric(horizontal: 20),
+                        child: Align(
+                          alignment: Alignment.centerLeft,
+                          child: Text('预览（从左到右排列，可拖动自定义）',
+                              style: TextStyle(
+                                  fontSize: 12.5,
+                                  color: Colors.white38,
+                                  fontWeight: FontWeight.w600)),
                         ),
                       ),
-                    ),
-                  ],
+                      if (order.contains('volume'))
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(20, 8, 20, 0),
+                          child: Text(
+                            '已勾选音量条：播放页底部将只保留音量条与设置键',
+                            style: TextStyle(
+                                fontSize: 11.5,
+                                color: AppConstants.brandColor
+                                    .withValues(alpha: 0.9)),
+                          ),
+                        ),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 12),
+                        child: SizedBox(
+                          height: 78,
+                          child: ReorderableListView.builder(
+                            buildDefaultDragHandles: false,
+                            scrollDirection: Axis.horizontal,
+                            itemCount: order.length,
+                            proxyDecorator: (Widget child, int index,
+                                Animation<double> anim) {
+                              return AnimatedBuilder(
+                                animation: anim,
+                                builder: (BuildContext c, Widget? w) =>
+                                    Material(
+                                  color: Colors.white.withValues(
+                                      alpha: 0.08 * anim.value.clamp(0.0, 1.0)),
+                                  borderRadius: BorderRadius.circular(14),
+                                  child: w,
+                                ),
+                                child: child,
+                              );
+                            },
+                            onReorderItem: (int oldIndex, int newIndex) {
+                              setState2(() {
+                                final String id = order.removeAt(oldIndex);
+                                order.insert(newIndex, id);
+                              });
+                            },
+                            itemBuilder: (BuildContext c, int i) {
+                              final String id = order[i];
+                              return ReorderableDragStartListener(
+                                key: ValueKey<String>('strip_$id'),
+                                index: i,
+                                child: _StripPreviewChip(
+                                    label: stripButtonLabel(id)),
+                              );
+                            },
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      const Padding(
+                        padding: EdgeInsets.symmetric(horizontal: 20),
+                        child: Align(
+                          alignment: Alignment.centerLeft,
+                          child: Text('勾选显示',
+                              style: TextStyle(
+                                  fontSize: 12.5,
+                                  color: Colors.white38,
+                                  fontWeight: FontWeight.w600)),
+                        ),
+                      ),
+                      for (final String id in order)
+                        CheckboxListTile(
+                          value: true,
+                          title: Text(stripButtonLabel(id),
+                              style: const TextStyle(fontSize: 15)),
+                          activeColor: AppConstants.brandColor,
+                          onChanged: (bool? v) {
+                            if (v == false) {
+                              setState2(() => order.remove(id));
+                            }
+                          },
+                        ),
+                      for (final String id in disabled)
+                        CheckboxListTile(
+                          value: false,
+                          title: Text(stripButtonLabel(id),
+                              style: const TextStyle(fontSize: 15)),
+                          activeColor: AppConstants.brandColor,
+                          onChanged: (bool? v) {
+                            if (v == true) {
+                              setState2(() => order.add(id));
+                            }
+                          },
+                        ),
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(20, 8, 20, 6),
+                        child: SizedBox(
+                          width: double.infinity,
+                          child: FilledButton(
+                            style: FilledButton.styleFrom(
+                              backgroundColor: AppConstants.brandColor,
+                            ),
+                            onPressed: () {
+                              ref
+                                  .read(npSettingsProvider.notifier)
+                                  .setStripButtons(order);
+                              Navigator.of(ctx2).pop();
+                            },
+                            child: const Text('完成'),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ),
             );
           },
         );
       },
+    );
+  }
+}
+
+/// 预览芯片（拖动把手 + 标签；按住即可拖动排序）
+class _StripPreviewChip extends StatelessWidget {
+  const _StripPreviewChip({required this.label});
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 74,
+      margin: const EdgeInsets.symmetric(horizontal: 6, vertical: 12),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.06),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.14)),
+      ),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: <Widget>[
+          const Icon(Icons.drag_handle_rounded,
+              size: 18, color: Colors.white54),
+          const SizedBox(height: 2),
+          Text(
+            label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(fontSize: 11.5, color: Colors.white),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -861,8 +986,7 @@ class _QuickIcon extends StatelessWidget {
                         height: 20,
                         child: CircularProgressIndicator(strokeWidth: 2),
                       )
-                    : Icon(icon,
-                        size: 22, color: theme.colorScheme.onSurface),
+                    : Icon(icon, size: 22, color: theme.colorScheme.onSurface),
               ),
             ),
             const SizedBox(height: 2),
