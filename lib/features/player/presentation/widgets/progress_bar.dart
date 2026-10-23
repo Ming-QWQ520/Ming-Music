@@ -8,7 +8,8 @@
 ///    配置下满宽渲染（BaseSliderTrackShape：overlay/thumb 宽 0 → 内收 0），
 ///    自定义 track shape 强制轨道两侧内收 16px，与时间行 padding 对齐；
 ///  - 需求新增：高潮点（副歌）白点 —— /song/chorus 首个 startTime
-///    （Zephyr-Music 方式），显示在轨道对应位置，点击跳转高潮点。
+///    （Zephyr-Music 方式），显示在轨道对应位置；
+///  - 需求调整：白点仅作标记显示，去除点击跳转功能。
 library;
 
 import 'dart:math' as math;
@@ -94,8 +95,9 @@ class _PlayerProgressBarState extends ConsumerState<PlayerProgressBar> {
       },
     );
 
-    // 高潮点白点：Stack 叠加在轨道对应位置（不占额外布局空间），
-    // 点击跳转副歌起点（Zephyr-Music 方式）
+    // 高潮点白点：Stack 叠加在轨道对应位置（不占额外布局空间）。
+    // 需求：去除「点击白点跳转高潮」功能 —— 白点仅作位置标记显示，
+    // 不再响应点击（保留长按气泡提示说明含义）。
     final Widget sliderWithDot;
     if (chorusMs != null && chorusMs > 0 && chorusMs < safeDuration) {
       sliderWithDot = LayoutBuilder(
@@ -112,45 +114,39 @@ class _PlayerProgressBarState extends ConsumerState<PlayerProgressBar> {
                 top: 0,
                 bottom: 0,
                 child: Center(
-                  child: GestureDetector(
-                    behavior: HitTestBehavior.opaque,
-                    onTap: () => ref
-                        .read(playerProvider.notifier)
-                        .seek(Duration(milliseconds: chorusMs)),
-                    // 长按气泡提示（与底部功能条同规范）
-                    child: Tooltip(
-                      message: '高潮点 ${Duration(milliseconds: chorusMs).clock}',
-                      triggerMode: TooltipTriggerMode.longPress,
-                      preferBelow: false,
-                      verticalOffset: 24,
-                      decoration: BoxDecoration(
-                        color: Colors.white.withValues(alpha: 0.14),
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      textStyle: const TextStyle(
-                          fontSize: 11.5, color: Colors.white),
-                      // 命中区放宽到 34x30，白点本体 9px
-                      child: SizedBox(
-                        width: 34,
-                        height: 30,
-                        child: Center(
-                          child: Container(
-                            width: 9,
-                            height: 9,
-                            decoration: BoxDecoration(
-                              shape: BoxShape.circle,
-                              color: Colors.white,
-                              border: Border.all(
-                                color: Colors.black.withValues(alpha: 0.35),
-                                width: 1,
-                              ),
-                              boxShadow: <BoxShadow>[
-                                BoxShadow(
-                                  color: Colors.black.withValues(alpha: 0.4),
-                                  blurRadius: 4,
-                                ),
-                              ],
+                  // 仅显示：不加手势，白点不拦截进度条拖动
+                  child: Tooltip(
+                    message: '高潮点 ${Duration(milliseconds: chorusMs).clock}',
+                    triggerMode: TooltipTriggerMode.longPress,
+                    preferBelow: false,
+                    verticalOffset: 24,
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.14),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    textStyle: const TextStyle(
+                        fontSize: 11.5, color: Colors.white),
+                    // 命中区放宽到 34x30，白点本体 9px
+                    child: SizedBox(
+                      width: 34,
+                      height: 30,
+                      child: Center(
+                        child: Container(
+                          width: 9,
+                          height: 9,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: Colors.white,
+                            border: Border.all(
+                              color: Colors.black.withValues(alpha: 0.35),
+                              width: 1,
                             ),
+                            boxShadow: <BoxShadow>[
+                              BoxShadow(
+                                color: Colors.black.withValues(alpha: 0.4),
+                                blurRadius: 4,
+                              ),
+                            ],
                           ),
                         ),
                       ),

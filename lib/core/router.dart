@@ -245,7 +245,14 @@ final GoRouter appRouter = GoRouter(
   ],
 );
 
-/// 打开全屏播放页（Mini 播放条 / 通知栏点击统一入口）
+/// 打开全屏播放页（Mini 播放条 / 通知栏点击统一入口）。
+///
+/// 崩溃修复（logcat 实证 `GoRouter.of` 空指针）：全局 Mini 条经由
+/// `MaterialApp.builder` 构建，其 context 位于 Router **之外**，
+/// `GoRouter.of(context)` 在该上下文必抛
+/// `Null check operator used on a null value`。
+/// 因此统一走全局 [appRouter] 实例（不依赖 context 查找）；
+/// 参数保留以兼容既有调用点。
 Future<void> openFullPlayer(BuildContext context) {
-  return GoRouter.of(context).push<void>('/player');
+  return appRouter.push<void>('/player');
 }

@@ -2,6 +2,11 @@
 ///  - 连接蓝牙后自动显示蓝牙设备名称（AudioManager 轮询，2.5s 刷新）；
 ///  - 输出设备可控：连接蓝牙时默认使用蓝牙播放；可手动勾选「本机(扬声器)」
 ///    强制扬声器输出，或勾选蓝牙设备切回蓝牙（ExoPlayer.setPreferredAudioDevice）；
+///  - 需求修复「切换不生效/两边都在输出」：ExoPlayer 偏好仅对之后新建的
+///    AudioTrack 生效，正在播放中的音轨不迁移 —— 切换成功后强制重建
+///    音频管线（stop→play，just_audio 会释放并重建 AudioTrack），
+///    确保选择立即生效；
+///  - 输出状态文案唯一化：勾选行 = 正在此设备输出，另一行明确未输出；
 ///  - 仅保留「本机(扬声器)」与蓝牙设备 /「管理蓝牙设备」，无扫描/权限流程。
 library;
 
@@ -10,6 +15,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:just_audio/just_audio.dart' show AudioPlayer;
 
 import '../../../../core/constants/app_constants.dart';
 import '../../../../core/utils/platform_actions.dart';
@@ -97,13 +103,40 @@ class _MediaOutputSheetState extends ConsumerState<_MediaOutputSheet> {
       deviceId: deviceId,
     );
     if (!mounted) return;
-    setState(() => _switching = false);
     ref.read(audioOutputModeProvider.notifier).state = mode;
+    if (ok) {
+      // 需求修复「切换不生效」：ExoPlayer 的 setPreferredAudioDevice
+      // 只影响之后新建的 AudioTrack，正在播放的音轨不会迁移 ——
+      // 强制重建音频管线（stop→play），新音轨立即按新偏好路由。
+      await _rebuildAudioPipeline();
+    }
+    if (!mounted) return;
+    setState(() => _switching = false);
     if (!ok) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('当前设备不支持手动切换，已恢复系统自动路由')),
       );
       ref.read(audioOutputModeProvider.notifier).state = AudioOutputMode.auto;
+    }
+  }
+
+  /// 重建音频管线：stop 会释放原生解码器与 AudioTrack，
+  /// play 重新渲染时新建 AudioTrack 并应用刚设置的输出偏好。
+  /// just_audio 语义：stop/play 保留队列与位置（恢复播放时定位回原进度），
+  /// 若恢复后位置漂移超过 1.5s 则 seek 校正；失败静默（下一次切歌
+  /// 自然按新偏好路由）。
+  Future<void> _rebuildAudioPipeline() async {
+    try {
+      final AudioPlayer player = ref.read(audioHandlerProvider).player;
+      if (!player.playing) return;
+      final Duration pos = player.position;
+      await player.stop();
+      await player.play();
+      if ((player.position - pos).abs() > const Duration(milliseconds: 1500)) {
+        await player.seek(pos);
+      }
+    } catch (_) {
+      // 重建失败不影响输出偏好的设置（下一首歌自然生效）
     }
   }
 
@@ -194,9 +227,11 @@ class _MediaOutputSheetState extends ConsumerState<_MediaOutputSheet> {
                     style:
                         TextStyle(fontSize: 15.5, fontWeight: FontWeight.w600)),
                 subtitle: Text(
-                  hasBt && mode != AudioOutputMode.speaker
-                      ? '已连接蓝牙 · 点击切换至手机播放'
-                      : '当前输出设备',
+                  mode == AudioOutputMode.speaker
+                      ? '正在此设备输出'
+                      : hasBt
+                          ? '蓝牙已连接 · 点击切换至手机播放'
+                          : '点击锁定手机扬声器输出',
                   style: TextStyle(
                       fontSize: 11.5,
                       color: theme.colorScheme.onSurfaceVariant),
@@ -262,8 +297,8 @@ class _MediaOutputSheetState extends ConsumerState<_MediaOutputSheet> {
                       mode == AudioOutputMode.speaker
                           ? '已连接 · 点击切回蓝牙输出'
                           : mode == AudioOutputMode.bluetooth
-                              ? '正在输出'
-                              : '已连接 · 默认蓝牙输出（点击锁定）',
+                              ? '正在此设备输出'
+                              : '系统默认输出（点击锁定蓝牙）',
                       style: TextStyle(
                           fontSize: 11.5,
                           color: theme.colorScheme.onSurfaceVariant),

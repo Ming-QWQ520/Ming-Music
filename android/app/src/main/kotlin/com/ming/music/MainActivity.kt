@@ -347,23 +347,25 @@ class MainActivity : AudioServiceActivity() {
             else -> null
         }
         var routed = false
-        // ① 播放器级路由（反射 ExoPlayer，最直接可靠）
+        // ① 播放器级路由（反射 ExoPlayer，最直接可靠）：配合 Dart 侧
+        //    切换后重建音频管线（stop→play），新 AudioTrack 立即按偏好路由。
+        //    default（清除偏好交还系统路由）同样是有效的路由操作。
         val exo = findExoPlayer()
         if (exo != null) {
             try {
                 val m = exo.javaClass.getMethod("setPreferredAudioDevice", AudioDeviceInfo::class.java)
                 m.invoke(exo, device)
                 Log.i(TAG, "setPreferredOutput via ExoPlayer mode=$mode device=${device?.productName}")
-                if (mode != "default") routed = true
+                routed = true
             } catch (t: Throwable) {
                 Log.w(TAG, "ExoPlayer routing failed: $t")
             }
         }
-        // ② 系统级 A2DP 路由（Android 10 实测生效；API 33+ 系统弃用且可能无效，
-        //    此时仅保留策略①③）。speaker=关 A2DP 回落扬声器，bluetooth=开 A2DP。
+        // ② 系统级 A2DP 路由：仅在策略①不可用（反射失败）时作为回落 ——
+        //    全局 A2DP 开关影响所有应用（副作用大），不作首选。
         // 注意：数值 33 而非 VERSION_CODES.TIRAMISI —— compileSdk 由
         // flutter.compileSdkVersion 决定，CI 环境可能低于 33 无该常量
-        if (Build.VERSION.SDK_INT < 33 && mode != "default") {
+        if (!routed && Build.VERSION.SDK_INT < 33 && mode != "default") {
             try {
                 @Suppress("DEPRECATION")
                 am.setBluetoothA2dpOn(mode == "bluetooth")

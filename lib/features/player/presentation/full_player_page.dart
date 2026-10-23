@@ -21,12 +21,14 @@ import 'dart:math' as math;
 import 'dart:ui' as ui show lerpDouble;
 
 import 'package:flutter/material.dart' hide RepeatMode;
+import 'package:flutter/scheduler.dart' show Ticker;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../core/constants/app_constants.dart';
-import '../../../core/utils/lyrics.dart' show activeLyricIndex;
-import '../../../core/utils/yrc_lyrics.dart' show activeYrcIndex;
+import '../../../core/utils/lyrics.dart' show LyricLine, activeLyricIndex;
+import '../../../core/utils/yrc_lyrics.dart'
+    show YrcLine, YrcWord, activeYrcIndex;
 import '../../../core/widgets/cover_image.dart'
     show CoverImage, CoverSize, fetchBytes;
 import '../../../core/widgets/marquee_text.dart';
@@ -881,9 +883,9 @@ class _InfoSectionState extends ConsumerState<_InfoSection> {
             .select((AuthState s) => s.likedIds.contains(songId)));
 
     return Padding(
-      // 需求：底部区域呼吸感修复 —— 进度条/信息区/控制键间距全面放宽，
-      // 信息区与进度条不再挤在一起（原 8/0 过于紧凑）
-      padding: const EdgeInsets.fromLTRB(24, 10, 12, 6),
+      // 需求：底部区域呼吸感修复 —— 信息区与进度条不再挤在一起；
+      // 本批需求「进度条和以上控件还需向上移动」：上/下边距再度收紧
+      padding: const EdgeInsets.fromLTRB(24, 6, 12, 4),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: <Widget>[
@@ -1232,9 +1234,13 @@ class _MvPill extends StatelessWidget {
 
 // ---------------------------------------------------------------- 封面页歌词预览
 
-/// 封面页歌词预览（需求：借鉴 kgka_Music_hl 封面页）：
-///  - 当前播放行大字白色（跑马灯防溢出），副行淡色；
-///  - 副行优先翻译（跟随「显示翻译副行」开关），无翻译显示下一行；
+/// 封面页歌词预览（需求：完全仿照 kgka_Music_hl 封面播放页）：
+///  - 主行：当前播放行大字白色（22px/w900），左对齐；
+///    原文有逐字歌词（yrc）→ 逐字播放动画（[_KaraokeText] 卡拉OK渐进）；
+///    无逐字 → 跑马灯防溢出；
+///  - 副行（固定规则，不随「显示翻译」设置变化）：
+///    翻译/音译存在 → 一行原文一行翻译（非中文歌）；
+///    无翻译 → 下一非空行（中文歌显示两行原文）；
 ///  - 一行/两行两种模式，默认一行；无歌词时显示占位避免布局跳动；
 ///  - 换行时 AnimatedSwitcher 平滑过渡（对齐 kgka 260ms）。
 class _CoverLyricsPreview extends ConsumerWidget {
@@ -1243,48 +1249,69 @@ class _CoverLyricsPreview extends ConsumerWidget {
   final NpCoverLyricsMode mode;
   final double width;
 
-  ({String main, String sub}) _resolve(ParsedLyrics lyrics, Duration position,
-      bool preferTranslation) {
+  /// 解析当前行：主行（逐字/普通）+ 副行。
+  ///
+  /// 需求（kgka_Music_hl 对齐）：
+  ///  - 双行模式副行规则（不随「显示翻译」设置变化）：
+  ///    翻译/音译存在时显示翻译 —— 非中文歌 = 一行原文 + 一行翻译；
+  ///    无翻译时显示下一非空行 —— 中文歌 = 两行原文；
+  ///  - 原文（主行）有逐字歌词（yrc）时主行走逐字播放动画（[_KaraokeText]），
+  ///    无逐字（LRC / 元数据行 / 空行）回退跑马灯。
+  ({YrcLine? karaoke, String main, String sub}) _resolve(
+      ParsedLyrics lyrics, Duration position) {
     if (lyrics.hasYrc) {
       final int idx = activeYrcIndex(lyrics.yrcLines, position);
-      if (idx < 0) return (main: '', sub: '');
-      final cur = lyrics.yrcLines[idx];
-      final String main = cur.text;
+      if (idx < 0) return (karaoke: null, main: '', sub: '');
+      final YrcLine cur = lyrics.yrcLines[idx];
       String sub = '';
       if (!cur.isMetadata) {
+        // 副行：翻译/音译优先（非中文带翻译 → 一行原文一行翻译）
         final String t = lyrics.subLineFor(cur.start.inMilliseconds);
-        if (preferTranslation && t.isNotEmpty) {
+        if (t.isNotEmpty) {
           sub = t;
-        } else if (idx + 1 < lyrics.yrcLines.length) {
-          sub = lyrics.yrcLines[idx + 1].text;
+        } else {
+          // 无翻译（中文歌）→ 显示下一非空、非元数据行（两行原文）
+          for (int j = idx + 1; j < lyrics.yrcLines.length; j++) {
+            final YrcLine nx = lyrics.yrcLines[j];
+            if (!nx.isMetadata && nx.text.trim().isNotEmpty) {
+              sub = nx.text;
+              break;
+            }
+          }
         }
       }
-      return (main: main, sub: sub);
+      return (
+        karaoke: cur.isMetadata || cur.words.isEmpty ? null : cur,
+        main: cur.text,
+        sub: sub,
+      );
     }
     final int idx = activeLyricIndex(lyrics.lrcLines, position);
-    if (idx < 0) return (main: '', sub: '');
-    final String main = lyrics.lrcLines[idx].text;
+    if (idx < 0) return (karaoke: null, main: '', sub: '');
+    final LyricLine cur = lyrics.lrcLines[idx];
     String sub = '';
-    final String t =
-        lyrics.subLineFor(lyrics.lrcLines[idx].time.inMilliseconds);
-    if (preferTranslation && t.isNotEmpty) {
+    final String t = lyrics.subLineFor(cur.time.inMilliseconds);
+    if (t.isNotEmpty) {
       sub = t;
-    } else if (idx + 1 < lyrics.lrcLines.length) {
-      sub = lyrics.lrcLines[idx + 1].text;
+    } else {
+      // LRC 行同理：无翻译显示下一非空行
+      for (int j = idx + 1; j < lyrics.lrcLines.length; j++) {
+        final String txt = lyrics.lrcLines[j].text;
+        if (txt.trim().isNotEmpty) {
+          sub = txt;
+          break;
+        }
+      }
     }
-    return (main: main, sub: sub);
+    return (karaoke: null, main: cur.text, sub: sub);
   }
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final ParsedLyrics lyrics = ref.watch(currentLyricsProvider);
-    final NpPlayerSettings cfg = ref.watch(npSettingsProvider);
     final Duration position =
         ref.watch(positionProvider).value ?? Duration.zero;
 
-    // kgka_Music_hl 移植（需求）：主行大字重 + 副行（翻译优先，否则下一行）
-    // —— 主行 22px/w900/行高1.22，副行 16px/w700/白 46%（_PosterLyricPreview
-    // 规格）；对齐方式保留左对齐（需求：kgka 封面页歌词左对齐）。
     final bool two = mode == NpCoverLyricsMode.two;
     final double height = two ? 78 : 40;
 
@@ -1306,10 +1333,11 @@ class _CoverLyricsPreview extends ConsumerWidget {
       );
     }
 
-    final ({String main, String sub}) line =
-        _resolve(lyrics, position, cfg.showTranslation);
+    final ({YrcLine? karaoke, String main, String sub}) line =
+        _resolve(lyrics, position);
     final String main = line.main.isEmpty ? '···' : line.main;
     final String sub = two ? line.sub : '';
+    final bool useKaraoke = line.karaoke != null && line.main.isNotEmpty;
 
     return SizedBox(
       width: width,
@@ -1324,20 +1352,24 @@ class _CoverLyricsPreview extends ConsumerWidget {
           mainAxisAlignment: MainAxisAlignment.center,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
-            // 主行：当前行大字（kgka：22px / w900 / height 1.22）
+            // 主行：当前行大字（kgka：22px / w900 / height 1.22）；
+            // 有逐字歌词 → 逐字播放动画（需求）
             SizedBox(
               height: 30,
-              child: MarqueeText(
-                main,
-                textAlign: TextAlign.left,
-                velocity: 32,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 22,
-                  height: 1.22,
-                  fontWeight: FontWeight.w900,
-                ),
-              ),
+              width: width,
+              child: useKaraoke
+                  ? _KaraokeText(line: line.karaoke!)
+                  : MarqueeText(
+                      main,
+                      textAlign: TextAlign.left,
+                      velocity: 32,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 22,
+                        height: 1.22,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
             ),
             if (two && sub.isNotEmpty) ...<Widget>[
               const SizedBox(height: 5),
@@ -1362,6 +1394,173 @@ class _CoverLyricsPreview extends ConsumerWidget {
   }
 }
 
+/// 逐字卡拉OK主行（需求：原文有逐字歌词时封面页歌词需有逐字播放动画）。
+///
+/// 实现：同排版双层文本叠加 —— 底层未唱色（白 40%）、顶层已唱色（白），
+/// 顶层按「已唱像素宽度」ClipRect 裁剪，像素级平滑推进；
+/// 进度 = positionProvider 流（200ms 粒度）+ Ticker 每帧向未来线性外推
+/// （播放中每帧推进，暂停停在流位置）；排版与逐字 x 区间按行文本缓存，
+/// 行不变不重排 —— 每帧开销仅为一次宽度裁剪更新。
+class _KaraokeText extends ConsumerStatefulWidget {
+  const _KaraokeText({required this.line});
+
+  final YrcLine line;
+
+  @override
+  ConsumerState<_KaraokeText> createState() => _KaraokeTextState();
+}
+
+class _KaraokeTextState extends ConsumerState<_KaraokeText>
+    with SingleTickerProviderStateMixin {
+  late final Ticker _ticker;
+
+  /// 最近一次流位置与其到达时刻（Ticker 外推基准）
+  Duration _streamPos = Duration.zero;
+  DateTime _streamAt = DateTime.now();
+
+  // 排版缓存（行文本不变时复用，避免每帧重排）
+  TextPainter? _painter;
+  List<Rect>? _boxes;
+  String? _layoutKey;
+
+  @override
+  void initState() {
+    super.initState();
+    _ticker = createTicker((Duration _) {
+      if (mounted) setState(() {});
+    })..start();
+  }
+
+  @override
+  void dispose() {
+    _ticker.dispose();
+    _painter?.dispose();
+    _painter = null;
+    super.dispose();
+  }
+
+  void _ensureLayout(TextStyle style) {
+    final String key = '${widget.line.text}'
+        '|${style.fontSize}|${style.fontWeight?.value ?? 0}';
+    if (_layoutKey == key && _painter != null) return;
+    _layoutKey = key;
+    _painter?.dispose();
+    final TextPainter tp = TextPainter(
+      text: TextSpan(text: widget.line.text, style: style),
+      textDirection: TextDirection.ltr,
+      maxLines: 1,
+    )..layout(maxWidth: double.infinity);
+    // 每个 word 在整行中的 x 区间（与 words 顺序一一对应）
+    final List<Rect> boxes = <Rect>[];
+    int offset = 0;
+    for (final YrcWord w in widget.line.words) {
+      final int end = math.min(offset + w.text.length, widget.line.text.length);
+      final List<TextBox> hb = offset < end
+          ? tp.getBoxesForSelection(
+              TextSelection(baseOffset: offset, extentOffset: end))
+          : const <TextBox>[];
+      boxes.add(hb.isNotEmpty ? hb.first.toRect() : Rect.zero);
+      offset = end;
+    }
+    _painter = tp;
+    _boxes = boxes;
+  }
+
+  /// 已唱像素宽度（当前字内按时间进度线性展开）
+  double _sungWidth(Duration pos) {
+    final List<Rect>? boxes = _boxes;
+    if (boxes == null) return 0;
+    double width = 0;
+    final List<YrcWord> words = widget.line.words;
+    for (int i = 0; i < words.length; i++) {
+      final YrcWord w = words[i];
+      final Rect box = boxes[i];
+      if (box == Rect.zero) continue; // 空格等无字形区间
+      if (pos >= w.end) {
+        width = box.right;
+      } else if (pos > w.start) {
+        return box.left + (box.right - box.left) * w.progress(pos);
+      } else {
+        break;
+      }
+    }
+    return width;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // 流位置更新（200ms 粒度）：listen 只更新外推基准，不触发重建；
+    // 重绘由 Ticker 驱动（播放中每帧推进）
+    ref.listen<AsyncValue<Duration>>(positionProvider,
+        (AsyncValue<Duration>? _, AsyncValue<Duration> v) {
+      final Duration? p = v.value;
+      if (p != null) {
+        _streamPos = p;
+        _streamAt = DateTime.now();
+      }
+    });
+    final bool playing =
+        ref.watch(playerProvider.select((PlayerState s) => s.playing));
+    // 暂停时停表（省电），恢复播放时重启
+    if (playing && !_ticker.isActive) _ticker.start();
+    if (!playing && _ticker.isActive) _ticker.stop();
+
+    const TextStyle style = TextStyle(
+      color: Colors.white,
+      fontSize: 22,
+      height: 1.22,
+      fontWeight: FontWeight.w900,
+    );
+    _ensureLayout(style);
+
+    final Duration pos = playing
+        ? _streamPos + DateTime.now().difference(_streamAt)
+        : _streamPos;
+
+    return ClipRect(
+      child: Stack(
+        alignment: Alignment.centerLeft,
+        clipBehavior: Clip.hardEdge,
+        children: <Widget>[
+          // 未唱层：整行白 40%
+          Text(
+            widget.line.text,
+            maxLines: 1,
+            softWrap: false,
+            overflow: TextOverflow.clip,
+            style: style.copyWith(
+                color: Colors.white.withValues(alpha: 0.4)),
+          ),
+          // 已唱层：白色，按已唱像素宽度揭示
+          ClipRect(
+            clipper: _WidthClipper(width: _sungWidth(pos)),
+            child: Text(
+              widget.line.text,
+              maxLines: 1,
+              softWrap: false,
+              overflow: TextOverflow.clip,
+              style: style,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// 卡拉OK已唱部分揭示裁剪（按宽度）
+class _WidthClipper extends CustomClipper<Rect> {
+  const _WidthClipper({required this.width});
+
+  final double width;
+
+  @override
+  Rect getClip(Size size) => Rect.fromLTWH(0, 0, width, size.height);
+
+  @override
+  bool shouldReclip(_WidthClipper oldClipper) => oldClipper.width != width;
+}
+
 // ---------------------------------------------------------------- 进度
 
 class _ProgressSection extends ConsumerWidget {
@@ -1369,10 +1568,11 @@ class _ProgressSection extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    // 需求：进度区与上下区块拉开呼吸距离（纵向留白 2 → 10），
-    // 音质标签行不再贴着进度条
+    // 需求：进度区与上下区块拉开呼吸距离；
+    // 本批需求「进度条和以上控件向上移动」：纵向留白 10 → 6，
+    // 整个底部浮层上收
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       child: PlayerProgressBar(
         // 仿网易云：进度行中央为音质标签（可点击弹音质选择）
         centerLabel: const _QualityButton(),
@@ -1429,8 +1629,8 @@ class _ControlBar extends ConsumerWidget {
         s.processing == AppProcessingState.buffering));
 
     return Padding(
-      // 需求：控制键与上方音质标签行拉开间距（4 → 12）
-      padding: const EdgeInsets.fromLTRB(10, 12, 10, 0),
+      // 需求：控制键与上方音质标签行拉开间距；本批上移收紧 12 → 8
+      padding: const EdgeInsets.fromLTRB(10, 8, 10, 0),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceEvenly,
         children: <Widget>[
@@ -1684,10 +1884,11 @@ class _BottomStrip extends ConsumerWidget {
     ];
 
     return Padding(
-      // 需求：底部控件位置上移（太靠近底部显得很奇怪）；本批再度上收，
-      // 让底部浮层更紧凑、信息区随之上移
+      // 需求：底部控件位置上移（太靠近底部显得很奇怪）；本批再度上收
+      // （底边距 14 → 6、上边距 4 → 2），整层浮层更紧凑，
+      // 进度条与其上方控件随之上移
       padding: EdgeInsets.fromLTRB(
-          math.max(34.0 - buttons.length * 4, 16), 4, 34, 14),
+          math.max(34.0 - buttons.length * 4, 16), 2, 34, 6),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: buttons.isEmpty
