@@ -105,6 +105,44 @@ class PlatformActions {
     }
   }
 
+  /// 当前是否有可用网络（ConnectivityManager 实时状态，离线跳歌提示用）
+  static Future<bool> isNetworkAvailable() async {
+    try {
+      return await _channel.invokeMethod<bool>('isNetworkAvailable') ?? true;
+    } catch (_) {
+      return true; // 探测失败按有网处理：宁可少提示不误报
+    }
+  }
+
+  /// 发一条普通系统通知（需求：无网跳过未缓存歌曲时通知栏提示）。
+  /// 使用独立轻量通道，与媒体通知互不干扰；失败静默。
+  static Future<void> postStatusNotice({
+    required String title,
+    required String text,
+  }) async {
+    try {
+      await _channel.invokeMethod<bool>(
+        'postStatusNotice',
+        <String, String>{'title': title, 'text': text},
+      );
+    } catch (_) {
+      // 通知失败不影响播放流程
+    }
+  }
+
+  /// 播放页屏幕常亮（需求：设置中「播放页始终亮屏」开关）。
+  /// 原生 WindowManager FLAG_KEEP_SCREEN_ON，[on] false 恢复自动熄屏。
+  static Future<void> keepScreenOn(bool on) async {
+    try {
+      await _channel.invokeMethod<bool>(
+        'keepScreenOn',
+        <String, bool>{'on': on},
+      );
+    } catch (_) {
+      // 失败仅影响常亮功能本身
+    }
+  }
+
   /// 音频嗅探 MIME（按文件扩展名，服务端 type 优先）
   static String audioMimeOf(String? type, String url) {
     switch ((type ?? '').toLowerCase()) {

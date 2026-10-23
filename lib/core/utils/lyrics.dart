@@ -8,12 +8,16 @@ library;
 /// 单行歌词：时间戳 + 文本（Dart 3 Record）
 typedef LyricLine = ({Duration time, String text});
 
+/// 中文弯引号（U+2018/U+2019）→ ASCII 直引号（需求：歌词引号统一显示）
+final RegExp _curlyQuoteExp = RegExp('[\u2018\u2019]');
+
 final RegExp _tagExp = RegExp(r'\[(\d{1,2}):(\d{1,2})(?:[.:](\d{1,3}))?\]');
 
 /// 解析 LRC 文本：
 ///  - 支持一行多时间戳 `[00:01.20][00:05.00]text`
 ///  - 忽略元数据标签（[ar:] [ti:] 等）
 ///  - 返回按时间升序排列的歌词行
+///  - 中文弯引号 '' 归一化为 ASCII '（需求：歌词直引号显示）
 List<LyricLine> parseLrc(String raw) {
   final List<LyricLine> lines = <LyricLine>[];
   for (final String rawLine in raw.split('\n')) {
@@ -23,7 +27,8 @@ List<LyricLine> parseLrc(String raw) {
     final Iterable<RegExpMatch> tags = _tagExp.allMatches(line);
     if (tags.isEmpty) continue;
 
-    final String text = line.substring(tags.last.end).trim();
+    final String text =
+        line.substring(tags.last.end).trim().replaceAll(_curlyQuoteExp, "'");
     if (text.isEmpty) continue;
 
     for (final RegExpMatch m in tags) {

@@ -152,12 +152,22 @@ void main() {
       expect(lyrics.subLineFor(10000), '你好');
     });
 
-    test('超出容忍度不误配', () {
+    test('超出容忍度不误配（Zephyr 处理方式：容忍 3.0s）', () {
+      // 5.2s 偏移超出 3.0s 容忍度 → 不匹配（旧断言 1.2s 已随 Zephyr 容忍度调整）
+      final ParsedLyrics lyrics = ParsedLyrics(
+        lrcLines: parseLrc('[00:10.000]Hello'),
+        translations: <int, String>{15200: '你好'},
+      );
+      expect(lyrics.subLineFor(10000), isEmpty);
+    });
+
+    test('1.2s 偏移在 Zephyr 容忍度内可匹配', () {
+      // Zephyr-Music 处理方式：3.0s 容忍度 —— 1.2s 整体偏移的 tlyric 应命中
       final ParsedLyrics lyrics = ParsedLyrics(
         lrcLines: parseLrc('[00:10.000]Hello'),
         translations: <int, String>{11200: '你好'},
       );
-      expect(lyrics.subLineFor(10000), isEmpty);
+      expect(lyrics.subLineFor(10000), '你好');
     });
 
     test('多个翻译行取最近的一行', () {
@@ -170,6 +180,12 @@ void main() {
         },
       );
       expect(lyrics.subLineFor(20000), '当前行');
+    });
+
+    test('中文弯引号归一化为 ASCII 直引号（需求）', () {
+      final List<LyricLine> lines =
+          parseLrc('[00:01.000]I\u2019m OK \u2018hi\u2019');
+      expect(lines.single.text, "I'm OK 'hi'");
     });
 
     test('无翻译时回退音译', () {

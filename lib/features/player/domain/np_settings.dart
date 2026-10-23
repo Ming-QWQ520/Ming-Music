@@ -133,6 +133,7 @@ class NpPlayerSettings {
     this.coverLyrics = NpCoverLyricsMode.one,
     this.heartEffect = true,
     this.showMvBadge = true,
+    this.playerKeepScreenOn = false,
     this.miniStyle = MiniPlayerStyle.classic,
     this.stripButtons = kStripButtonDefaults,
   });
@@ -214,6 +215,9 @@ class NpPlayerSettings {
   /// MV 徽标开关（需求：播放页歌名旁 MV 胶囊可开关显示，默认开启）
   final bool showMvBadge;
 
+  /// 播放页始终亮屏（需求：设置中可开启，进入播放页保持屏幕常亮）
+  final bool playerKeepScreenOn;
+
   /// 播放页底部功能条按钮（有序 id 列表，来自 kStripButtonIds）
   final List<String> stripButtons;
 
@@ -238,6 +242,7 @@ class NpPlayerSettings {
     NpCoverLyricsMode? coverLyrics,
     bool? heartEffect,
     bool? showMvBadge,
+    bool? playerKeepScreenOn,
     MiniPlayerStyle? miniStyle,
     List<String>? stripButtons,
   }) {
@@ -262,6 +267,7 @@ class NpPlayerSettings {
       coverLyrics: coverLyrics ?? this.coverLyrics,
       heartEffect: heartEffect ?? this.heartEffect,
       showMvBadge: showMvBadge ?? this.showMvBadge,
+      playerKeepScreenOn: playerKeepScreenOn ?? this.playerKeepScreenOn,
       miniStyle: miniStyle ?? this.miniStyle,
       stripButtons: stripButtons ?? this.stripButtons,
     );
@@ -289,6 +295,7 @@ class NpPlayerSettings {
         'coverLyrics': coverLyrics.name,
         'heartEffect': heartEffect,
         'showMvBadge': showMvBadge,
+        'playerKeepScreenOn': playerKeepScreenOn,
         'miniStyle': miniStyle.name,
         'stripButtons': stripButtons,
       };
@@ -353,6 +360,7 @@ class NpPlayerSettings {
       showMvBadge: map['showMvBadge'] is bool
           ? map['showMvBadge']! as bool
           : defaults.showMvBadge,
+      playerKeepScreenOn: map['playerKeepScreenOn'] == true,
       miniStyle: MiniPlayerStyle.values.firstWhere(
         (MiniPlayerStyle s) => s.name == map['miniStyle'],
         orElse: () => defaults.miniStyle,

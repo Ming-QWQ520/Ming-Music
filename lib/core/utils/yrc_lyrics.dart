@@ -83,7 +83,9 @@ List<YrcLine> parseYrc(String raw) {
     for (final RegExpMatch m in _wordExp.allMatches(line)) {
       final int ws = int.parse(m.group(1)!);
       final int wd = int.parse(m.group(2)!);
-      final String text = m.group(3) ?? '';
+      // 中文弯引号 '' → ASCII '（需求：与 LRC 解析同规则归一化）
+      final String text =
+          (m.group(3) ?? '').replaceAll(RegExp('[\u2018\u2019]'), "'");
       if (text.isEmpty) continue;
       words.add(YrcWord(
         text: text,

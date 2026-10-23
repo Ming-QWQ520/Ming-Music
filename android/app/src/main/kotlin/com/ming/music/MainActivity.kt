@@ -231,6 +231,35 @@ class MainActivity : AudioServiceActivity() {
                         val deviceId = call.argument<Int>("deviceId")
                         result.success(setPreferredOutput(mode, deviceId))
                     }
+                    // 联网检测（无网跳过未缓存歌曲提示的判定条件）
+                    "isNetworkAvailable" -> result.success(isNetworkAvailable())
+                    // 普通系统通知（无网跳歌原因告知；与媒体通知互不干扰）
+                    "postStatusNotice" -> {
+                        val title = call.argument<String>("title") ?: "MingMusic"
+                        val text = call.argument<String>("text") ?: ""
+                        result.success(postStatusNotice(title, text))
+                    }
+                    // 播放页屏幕常亮（设置「播放页始终亮屏」）
+                    "keepScreenOn" -> {
+                        val on = call.argument<Boolean>("on") ?: false
+                        try {
+                            runOnUiThread {
+                                val win = window
+                                if (on) {
+                                    win.addFlags(
+                                        android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
+                                    )
+                                } else {
+                                    win.clearFlags(
+                                        android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
+                                    )
+                                }
+                            }
+                            result.success(true)
+                        } catch (e: Exception) {
+                            result.success(false)
+                        }
+                    }
                     // 封面保存至相册（MediaStore / 公共目录 + 扫描）
                     "saveImage" -> {
                         val bytes = call.argument<ByteArray>("bytes")
@@ -300,10 +329,12 @@ class MainActivity : AudioServiceActivity() {
     // ---------------------------------------------------------------- 输出路由
 
     /**
-     * 输出设备切换：
-     * ① 优先 MediaRouter2 系统路由（API 30+，App 级媒体输出，等价系统「媒体输出」面板）；
-     * ② 回退反射链定位 ExoPlayer.setPreferredAudioDevice（播放器级路由）。
-     * 两者均失败返回 false（UI 回退为「跟随系统自动路由」）。
+     * 输出设备切换（修复「无法正常切换音频输出」）：
+     * ① 反射链定位 ExoPlayer.setPreferredAudioDevice（播放器级路由）；
+     * ② AudioManager.setBluetoothA2dpOn（API < 34 系统级立即生效，
+     *    覆盖 ExoPlayer 偏好不立即作用于已建音轨的缺陷）；
+     * ③ MediaRouter2 系统路由（API 31+，等价系统「媒体输出」面板）。
+     * 策略不早退：①②同时生效（①保播放器偏好、②保系统立即切），任一成功即 true。
      */
     private fun setPreferredOutput(mode: String, deviceId: Int?): Boolean {
         val am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
@@ -315,6 +346,7 @@ class MainActivity : AudioServiceActivity() {
                 .firstOrNull { isBluetoothType(it.type) && (deviceId == null || it.id == deviceId) }
             else -> null
         }
+        var routed = false
         // ① 播放器级路由（反射 ExoPlayer，最直接可靠）
         val exo = findExoPlayer()
         if (exo != null) {
@@ -322,13 +354,25 @@ class MainActivity : AudioServiceActivity() {
                 val m = exo.javaClass.getMethod("setPreferredAudioDevice", AudioDeviceInfo::class.java)
                 m.invoke(exo, device)
                 Log.i(TAG, "setPreferredOutput via ExoPlayer mode=$mode device=${device?.productName}")
-                return true
+                if (mode != "default") routed = true
             } catch (t: Throwable) {
                 Log.w(TAG, "ExoPlayer routing failed: $t")
             }
         }
-        // ② 系统级路由（MediaRouter2）：路由整个 App 的媒体输出。
-        // isSystemRoute() 为 API 31+，守卫取 S（用户设备 Android 12+）
+        // ② 系统级 A2DP 路由（Android 10 实测生效；API 33+ 系统弃用且可能无效，
+        //    此时仅保留策略①③）。speaker=关 A2DP 回落扬声器，bluetooth=开 A2DP。
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISI && mode != "default") {
+            try {
+                @Suppress("DEPRECATION")
+                am.setBluetoothA2dpOn(mode == "bluetooth")
+                Log.i(TAG, "setPreferredOutput via A2DP mode=$mode")
+                routed = true
+            } catch (t: Throwable) {
+                Log.w(TAG, "A2DP routing failed: $t")
+            }
+        }
+        // ③ 系统级路由（MediaRouter2）：路由整个 App 的媒体输出。
+        // isSystemRoute() 为 API 31+，守卫取 S
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             try {
                 val router = MediaRouter2.getInstance(this)
@@ -347,15 +391,67 @@ class MainActivity : AudioServiceActivity() {
                 if (target != null) {
                     router.transferTo(target)
                     Log.i(TAG, "setPreferredOutput via MediaRouter2 mode=$mode route=${target.name}")
-                    return true
+                    routed = true
+                } else {
+                    Log.w(TAG, "MediaRouter2 target route not found for mode=$mode")
                 }
-                Log.w(TAG, "MediaRouter2 target route not found for mode=$mode")
             } catch (t: Throwable) {
                 Log.w(TAG, "MediaRouter2 routing failed: $t")
             }
         }
-        Log.w(TAG, "setPreferredOutput all strategies failed mode=$mode")
-        return false
+        if (!routed) Log.w(TAG, "setPreferredOutput all strategies failed mode=$mode")
+        return routed
+    }
+
+    /** 联网检测：任一网络可用即视为在线（wifi/蜂窝/以太网） */
+    private fun isNetworkAvailable(): Boolean = try {
+        val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as android.net.ConnectivityManager
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            val net = cm.activeNetwork
+            if (net == null) false
+            else {
+                val caps = cm.getNetworkCapabilities(net)
+                caps != null && caps.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET)
+            }
+        } else {
+            @Suppress("DEPRECATION")
+            cm.activeNetworkInfo?.isConnected == true
+        }
+    } catch (e: Exception) {
+        Log.w(TAG, "isNetworkAvailable failed: $e")
+        true
+    }
+
+    /** 普通状态通知（无网跳过未缓存歌曲提示）：独立通道，不与媒体通知冲突 */
+    private fun postStatusNotice(title: String, text: String): Boolean = try {
+        val nm = getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
+        val channelId = "ming_status"
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            nm.createNotificationChannel(
+                android.app.NotificationChannel(channelId, "播放状态提示", android.app.NotificationManager.IMPORTANCE_DEFAULT)
+            )
+        }
+        var iconRes = applicationContext.resources.getIdentifier("ic_launcher", "mipmap", packageName)
+        if (iconRes == 0) {
+            iconRes = applicationContext.resources.getIdentifier("ic_launcher", "drawable", packageName)
+        }
+        if (iconRes == 0) iconRes = android.R.drawable.ic_dialog_info
+        val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            android.app.Notification.Builder(this, channelId)
+        } else {
+            @Suppress("DEPRECATION")
+            android.app.Notification.Builder(this)
+        }
+        builder.setContentTitle(title)
+            .setContentText(text)
+            .setSmallIcon(iconRes)
+            .setAutoCancel(true)
+            .setStyle(android.app.Notification.BigTextStyle().bigText(text))
+        nm.notify(1127, builder.build())
+        true
+    } catch (e: Exception) {
+        Log.w(TAG, "postStatusNotice failed: $e")
+        false
     }
 
     /** 反射定位 just_audio 内部的 ExoPlayer（见 [setPreferredOutput]）。

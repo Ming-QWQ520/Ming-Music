@@ -1,14 +1,19 @@
-/// 歌曲条目组件：参考图6 歌单列表行 —— 封面/序号 + 标题 + VIP 徽章 + 副标题。
-/// 需求：所有歌曲支持长按弹出统一操作菜单（onLongPress）。
+/// 歌曲条目组件：封面/序号 + 标题 + VIP 徽章 + 副标题。
+/// 需求：所有歌曲支持长按弹出统一操作菜单（onLongPress）；
+/// 需求「无缓存暗淡」：未缓存歌曲整行暗淡（歌名/歌手/VIP/封面），
+/// 正在播放行保持红色高亮不受暗淡影响。
 library;
 
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/api/netease_models.dart';
 import '../../../../core/constants/app_constants.dart';
 import '../../../../core/widgets/cover_image.dart';
+import '../../../player/providers/cache_providers.dart'
+    show cachedSongIdsProvider;
 
-/// VIP 徽章（红底白字小圆角，参考图1/3/6 样式）
+/// VIP 徽标（需求：透明背景 + 白色 VIP 字体 + 白色带圆角长方形描边）
 class VipBadge extends StatelessWidget {
   const VipBadge({super.key, this.height = 15});
 
@@ -17,18 +22,23 @@ class VipBadge extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 0.5),
       decoration: BoxDecoration(
-        color: AppConstants.brandColor.withValues(alpha: 0.9),
-        borderRadius: BorderRadius.circular(3),
+        color: Colors.transparent,
+        borderRadius: BorderRadius.circular(4),
+        border: Border.all(
+          color: Colors.white.withValues(alpha: 0.85),
+          width: 1,
+        ),
       ),
       child: Text(
         'VIP',
         style: TextStyle(
           color: Colors.white,
-          fontSize: height * 0.73,
-          height: 1.1,
-          fontWeight: FontWeight.w700,
+          fontSize: height * 0.67,
+          height: 1.15,
+          fontWeight: FontWeight.w800,
+          letterSpacing: 0.4,
         ),
       ),
     );
@@ -36,7 +46,7 @@ class VipBadge extends StatelessWidget {
 }
 
 /// 歌曲条目
-class SongTile extends StatelessWidget {
+class SongTile extends ConsumerWidget {
   const SongTile({
     super.key,
     required this.song,
@@ -69,10 +79,25 @@ class SongTile extends StatelessWidget {
   final Widget? trailing;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final ThemeData theme = Theme.of(context);
-    final Color titleColor =
-        playing ? AppConstants.brandColor : theme.colorScheme.onSurface;
+    // 需求：未缓存歌曲整行暗淡（歌名/歌手/VIP/封面 同规则 alpha 0.38）
+    final Set<int> cachedIds =
+        ref.watch(cachedSongIdsProvider).valueOrNull ?? const <int>{};
+    final int? songId = song.id > 0 ? song.id : null;
+    final bool normal = playing || songId == null || cachedIds.contains(songId);
+    final Color titleColor = playing
+        ? AppConstants.brandColor
+        : normal
+            ? theme.colorScheme.onSurface
+            : theme.colorScheme.onSurface.withValues(alpha: 0.38);
+    final Color subtitleColor = normal
+        ? theme.colorScheme.onSurfaceVariant
+        : theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.38);
+    final Color indexColor = normal
+        ? theme.colorScheme.onSurfaceVariant
+        : theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.38);
+    final Widget cover = CoverImage(src: song.coverUrl, size: 48, radius: 8);
     final Widget? endWidget = trailing ??
         (onMore != null
             ? IconButton(
@@ -98,18 +123,14 @@ class SongTile extends StatelessWidget {
                 child: Text(
                   '$trackIndex',
                   style: TextStyle(
-                    color: theme.colorScheme.onSurfaceVariant,
+                    color: indexColor,
                     fontSize: 14,
                     fontWeight: FontWeight.w500,
                   ),
                 ),
               )
             else
-              CoverImage(
-                src: song.coverUrl,
-                size: 48,
-                radius: 8,
-              ),
+              Opacity(opacity: normal ? 1 : 0.38, child: cover),
             const SizedBox(width: 12),
             Expanded(
               child: Column(
@@ -131,7 +152,10 @@ class SongTile extends StatelessWidget {
                       ),
                       if (song.isVipOnly) ...<Widget>[
                         const SizedBox(width: 6),
-                        const VipBadge(),
+                        Opacity(
+                          opacity: normal ? 1 : 0.38,
+                          child: const VipBadge(),
+                        ),
                       ],
                     ],
                   ),
@@ -143,7 +167,7 @@ class SongTile extends StatelessWidget {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
-                      color: theme.colorScheme.onSurfaceVariant,
+                      color: subtitleColor,
                       fontSize: 12.5,
                     ),
                   ),

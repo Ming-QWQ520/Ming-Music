@@ -16,6 +16,7 @@ import 'dart:async';
 
 import 'package:audio_service/audio_service.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show SystemNavigator;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/constants/app_constants.dart';
@@ -55,6 +56,27 @@ class _MainScaffoldState extends ConsumerState<MainScaffold> {
 
   /// 播放页是否已由本监听打开（防止重复 push）
   bool _playerOpen = false;
+
+  /// 需求：退出时再按一次退出 —— 首次返回提示，2 秒内再次返回才退出
+  DateTime _lastBackAt = DateTime.fromMillisecondsSinceEpoch(0);
+
+  void _handleExitIntent() {
+    final DateTime now = DateTime.now();
+    if (now.difference(_lastBackAt) < const Duration(seconds: 2)) {
+      // 二次返回：真正退出应用（结束 Activity 与后台音频服务由系统回收）
+      unawaited(SystemNavigator.pop());
+      return;
+    }
+    _lastBackAt = now;
+    ScaffoldMessenger.of(context).hideCurrentSnackBar();
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('再按一次退出应用'),
+        duration: Duration(milliseconds: 1600),
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
 
   @override
   void initState() {
@@ -98,7 +120,13 @@ class _MainScaffoldState extends ConsumerState<MainScaffold> {
   // ---------------------------------------------------------------- 平板
 
   Widget _tabletScaffold(BuildContext context, WidgetRef ref, int tab) {
-    return Scaffold(
+    return PopScope<bool>(
+      canPop: false,
+      onPopInvokedWithResult: (bool didPop, Object? result) {
+        if (didPop) return;
+        _handleExitIntent();
+      },
+      child: Scaffold(
       body: SafeArea(
         child: Row(
           children: <Widget>[
@@ -122,6 +150,7 @@ class _MainScaffoldState extends ConsumerState<MainScaffold> {
           ],
         ),
       ),
+      ),
     );
   }
 
@@ -142,7 +171,13 @@ class _MainScaffoldState extends ConsumerState<MainScaffold> {
       center: navEmbedded && hasQueue ? const MiniPlayer(embedded: true) : null,
     );
 
-    return Scaffold(
+    return PopScope<bool>(
+      canPop: false,
+      onPopInvokedWithResult: (bool didPop, Object? result) {
+        if (didPop) return;
+        _handleExitIntent();
+      },
+      child: Scaffold(
       body: IndexedStack(index: tab, children: MainScaffold._pages),
       bottomNavigationBar: Column(
         mainAxisSize: MainAxisSize.min,
@@ -150,6 +185,7 @@ class _MainScaffoldState extends ConsumerState<MainScaffold> {
           if (!navEmbedded) const MiniPlayer(embedded: false),
           navBar,
         ],
+      ),
       ),
     );
   }

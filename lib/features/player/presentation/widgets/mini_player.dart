@@ -6,13 +6,13 @@
 ///    点击主体进全屏；
 ///  - classic / overlay / wide：**悬浮于导航栏上方**（需求：维持之前的
 ///    设计），背景与边框全透明（无 Material 底色 / 无描边），带控制键：
-///    · classic：封面 + 单行「歌名 - 歌手」 + 播放键 + 列表键
-///      （需求：经典样式播放键周围无进度条显示）；
+///    · classic：封面 + 单行「歌名 - 歌手」 + 播放键 + 列表键；
 ///    · overlay：封面作背景 + 渐变压暗 + 标题叠印 + 播放键 + 列表键；
 ///    · wide：封面 + 歌名/歌手双行 + 播放键 + 列表键 + 底部细进度线。
 ///
 /// 通用：
-///  - 进度：圆环仅在紧凑极简模式绕封面显示（顶部中心起点，顺时针）；
+///  - 进度：需求「无论任何样式都需显示进度」—— 紧凑极简=封面周围圆环，
+///    其余样式一律带底部细进度线（classic/overlay 本批补齐）；
 ///  - `select` 只订阅 playing / currentTrack / hasQueue；
 ///  - 封面 Hero：与全屏播放页同 tag，路由转场无缝放大（配合背景模糊动画）。
 library;
@@ -248,6 +248,42 @@ class _NavCompact extends ConsumerWidget {
   }
 }
 
+// ---------------------------------------------------------------- 细进度线
+
+/// 底部细进度线（需求：任何样式都需显示进度 —— classic/overlay/wide
+/// 统一复用；只订阅 position/duration 两个流，RepaintBoundary 隔离重绘）
+class _MiniProgressLine extends ConsumerWidget {
+  const _MiniProgressLine();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return SizedBox(
+      height: 2,
+      child: ClipRRect(
+        borderRadius: const BorderRadius.all(Radius.circular(1)),
+        child: RepaintBoundary(
+          child: Consumer(
+            builder: (BuildContext ctx, WidgetRef r, _) {
+              final double position =
+                  r.watch(positionProvider).value?.inMilliseconds.toDouble() ?? 0;
+              final double duration =
+                  r.watch(durationProvider).value?.inMilliseconds.toDouble() ?? 1;
+              final double progress =
+                  duration > 0 ? (position / duration).clamp(0.0, 1.0) : 0.0;
+              return LinearProgressIndicator(
+                value: progress,
+                minHeight: 2,
+                backgroundColor: Colors.white.withValues(alpha: 0.12),
+                color: AppConstants.brandColor,
+              );
+            },
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 // ---------------------------------------------------------------- 悬浮条公共
 
 /// 切歌时内容淡入刷新（flutter_animate）
@@ -289,7 +325,7 @@ class _FloatCover extends ConsumerWidget {
 
 /// 样式 1（悬浮版）：封面 + 单行「歌名 - 歌手」+ 播放键 + 列表键。
 /// 需求：背景与边框全透明（无 Material 底色、无描边、无阴影）；
-/// 播放键周围无进度条显示（本样式无任何进度环/进度线）。
+/// 需求「无论任何样式都需显示进度」：底部细进度线（与 wide 同款）。
 class _FloatClassic extends ConsumerWidget {
   const _FloatClassic();
 
@@ -300,35 +336,43 @@ class _FloatClassic extends ConsumerWidget {
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 4, 12, 6),
-      child: Row(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
         children: <Widget>[
-          const _FloatCover(),
-          const SizedBox(width: 10),
-          Expanded(
-            child: GestureDetector(
-              behavior: HitTestBehavior.opaque,
-              onTap: () => openFullPlayer(context),
-              child: _navAnimated(
-                Text(
-                  track == null ? '未在播放' : '${track.title} - ${track.artist}',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                      fontSize: 13.5, fontWeight: FontWeight.w600),
+          Row(
+            children: <Widget>[
+              const _FloatCover(),
+              const SizedBox(width: 10),
+              Expanded(
+                child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: () => openFullPlayer(context),
+                  child: _navAnimated(
+                    Text(
+                      track == null ? '未在播放' : '${track.title} - ${track.artist}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                          fontSize: 13.5, fontWeight: FontWeight.w600),
+                    ),
+                    track?.id ?? 'empty',
+                  ),
                 ),
-                track?.id ?? 'empty',
               ),
-            ),
+              const _MiniPlayButton(size: 40, iconSize: 22, showRing: false),
+              const _MiniQueueButton(size: 36, iconSize: 21),
+            ],
           ),
-          const _MiniPlayButton(size: 40, iconSize: 22, showRing: false),
-          const _MiniQueueButton(size: 36, iconSize: 21),
+          const SizedBox(height: 5),
+          const _MiniProgressLine(),
         ],
       ),
     );
   }
 }
 
-/// 样式 2（悬浮版）：封面铺满（圆形裁剪）+ 渐变压暗 + 标题叠印 + 控制键
+/// 样式 2（悬浮版）：封面铺满（圆形裁剪）+ 渐变压暗 + 标题叠印 + 控制键。
+/// 需求「无论任何样式都需显示进度」：底部细进度线。
 class _FloatOverlay extends ConsumerWidget {
   const _FloatOverlay();
 
@@ -340,74 +384,82 @@ class _FloatOverlay extends ConsumerWidget {
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 4, 12, 6),
-      child: Row(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
         children: <Widget>[
-          GestureDetector(
-            onTap: () => openFullPlayer(context),
-            child: _navAnimated(
-              ClipOval(
-                child: SizedBox(
-                  width: 52,
-                  height: 52,
-                  child: Stack(
-                    fit: StackFit.expand,
-                    children: <Widget>[
-                      Hero(
-                        tag: heroTagOf(cover),
-                        child: CoverImage(src: cover, size: 52, radius: 0),
-                      ),
-                      const DecoratedBox(
-                        decoration: BoxDecoration(
-                          gradient: LinearGradient(
-                            begin: Alignment.topCenter,
-                            end: Alignment.bottomCenter,
-                            colors: <Color>[
-                              Color(0x59000000),
-                              Color(0xCC000000)
-                            ],
+          Row(
+            children: <Widget>[
+              GestureDetector(
+                onTap: () => openFullPlayer(context),
+                child: _navAnimated(
+                  ClipOval(
+                    child: SizedBox(
+                      width: 52,
+                      height: 52,
+                      child: Stack(
+                        fit: StackFit.expand,
+                        children: <Widget>[
+                          Hero(
+                            tag: heroTagOf(cover),
+                            child: CoverImage(src: cover, size: 52, radius: 0),
                           ),
-                        ),
-                      ),
-                      Center(
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 6),
-                          child: Text(
-                            track?.title ?? '未在播放',
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                            textAlign: TextAlign.center,
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 9.5,
-                              height: 1.2,
-                              fontWeight: FontWeight.w700,
+                          const DecoratedBox(
+                            decoration: BoxDecoration(
+                              gradient: LinearGradient(
+                                begin: Alignment.topCenter,
+                                end: Alignment.bottomCenter,
+                                colors: <Color>[
+                                  Color(0x59000000),
+                                  Color(0xCC000000)
+                                ],
+                              ),
                             ),
                           ),
-                        ),
+                          Center(
+                            child: Padding(
+                              padding:
+                                  const EdgeInsets.symmetric(horizontal: 6),
+                              child: Text(
+                                track?.title ?? '未在播放',
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                textAlign: TextAlign.center,
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 9.5,
+                                  height: 1.2,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
-                    ],
+                    ),
+                  ),
+                  track?.id ?? 'empty',
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: () => openFullPlayer(context),
+                  child: Text(
+                    '${track?.title ?? '未在播放'} · ${track?.artist ?? ''}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                        fontSize: 13.5, fontWeight: FontWeight.w600),
                   ),
                 ),
               ),
-              track?.id ?? 'empty',
-            ),
+              const _MiniPlayButton(size: 40, iconSize: 22, showRing: false),
+              const _MiniQueueButton(size: 36, iconSize: 21),
+            ],
           ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: GestureDetector(
-              behavior: HitTestBehavior.opaque,
-              onTap: () => openFullPlayer(context),
-              child: Text(
-                '${track?.title ?? '未在播放'} · ${track?.artist ?? ''}',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                    fontSize: 13.5, fontWeight: FontWeight.w600),
-              ),
-            ),
-          ),
-          const _MiniPlayButton(size: 40, iconSize: 22, showRing: false),
-          const _MiniQueueButton(size: 36, iconSize: 21),
+          const SizedBox(height: 5),
+          const _MiniProgressLine(),
         ],
       ),
     );

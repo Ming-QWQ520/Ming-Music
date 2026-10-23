@@ -326,24 +326,6 @@ class _DetailBodyState extends ConsumerState<_DetailBody> {
     }
   }
 
-  Future<void> _removeTrack(int songId, String name) async {
-    try {
-      await ref.read(neteaseRepositoryProvider).playlistTracks(
-            playlistId: widget.meta.id,
-            trackIds: <int>[songId],
-            add: false,
-          );
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('已从歌单移除「$name」')),
-      );
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('移除失败：$e')));
-    }
-  }
-
   Future<void> _downloadAll() async {
     if (_downloading) return;
     setState(() {
@@ -714,7 +696,6 @@ class _DetailBodyState extends ConsumerState<_DetailBody> {
                 song: s,
                 index: index,
                 playingNow: playingNow,
-                canRemove: widget.isMine,
                 onPlay: () => _playAll(index),
                 onMore: () => showSongActionsSheet(
                   context,
@@ -728,11 +709,19 @@ class _DetailBodyState extends ConsumerState<_DetailBody> {
                   playlistId: widget.meta.id,
                   onRemoved: widget.onReload,
                 ),
-                onRemove: widget.isMine
-                    ? () => _removeTrack(s.id, s.name)
-                    : null,
                 onAddTo: () =>
                     showAddToPlaylistSheet(context, ref, <int>[s.id]),
+                // 需求：左滑 = 添加至下一首播放（不打断播放，增量插入）
+                onAddNext: () async {
+                  final String? err = await ref
+                      .read(playerProvider.notifier)
+                      .insertNext(s.toTrack());
+                  if (!context.mounted) return;
+                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                    content: Text(
+                        err ?? '已添加至下一首播放：${s.name}'),
+                  ));
+                },
               );
             },
           ),
@@ -1056,30 +1045,33 @@ class _BarIcon extends StatelessWidget {
 
 // ---------------------------------------------------------------- 歌曲行
 
-/// 歌单歌曲行（描述.txt：封面缩略图 + 标题 + VIP 标签 + 歌手-专辑），
-/// 支持右滑移除（自有歌单）/ 左滑添加至歌单。
+/// 歌单歌曲行（封面缩略图 + 标题 + VIP 标签 + 歌手-专辑），
+/// 需求：右滑添加至歌单 / 左滑添加至下一首播放（移除改由长按菜单承载）；
+/// 未缓存歌曲整行暗淡（歌名/歌手/VIP/封面 同规则）。
 class _SwipeSongRow extends ConsumerWidget {
   const _SwipeSongRow({
     super.key,
     required this.song,
     required this.index,
     required this.playingNow,
-    required this.canRemove,
     required this.onPlay,
     required this.onMore,
-    required this.onRemove,
     required this.onAddTo,
+    required this.onAddNext,
     this.onLongPress,
   });
 
   final Song song;
   final int index;
   final bool playingNow;
-  final bool canRemove;
   final VoidCallback onPlay;
   final VoidCallback onMore;
-  final VoidCallback? onRemove;
+
+  /// 右滑：添加至歌单
   final VoidCallback onAddTo;
+
+  /// 需求：左滑 = 添加至下一首播放
+  final Future<void> Function() onAddNext;
 
   /// 需求：所有歌曲长按弹出统一操作菜单
   final VoidCallback? onLongPress;
@@ -1087,15 +1079,20 @@ class _SwipeSongRow extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final ThemeData theme = Theme.of(context);
-    // 需求：歌名按缓存状态着色 —— 已缓存正常显示，未缓存暗淡
+    // 需求：未缓存歌曲整行暗淡 —— 歌名/歌手/VIP 徽标同规则着色
+    // （已缓存或正在播放正常显示，未缓存统一 alpha 0.38 暗淡）
     final Set<int> cachedIds =
         ref.watch(cachedSongIdsProvider).valueOrNull ?? const <int>{};
     final bool cached = cachedIds.contains(song.id);
+    final bool normal = playingNow || cached;
     final Color titleColor = playingNow
         ? AppConstants.brandColor
-        : cached
+        : normal
             ? theme.colorScheme.onSurface
             : theme.colorScheme.onSurface.withValues(alpha: 0.38);
+    final Color subtitleColor = normal
+        ? theme.colorScheme.onSurfaceVariant
+        : theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.38);
 
     final Widget row = InkWell(
       onTap: onPlay,
@@ -1105,7 +1102,10 @@ class _SwipeSongRow extends ConsumerWidget {
         child: Row(
           children: <Widget>[
             // 封面缩略图（方形圆角小图）
-            CoverImage(src: song.coverUrl, size: 48, radius: 6),
+            Opacity(
+              opacity: normal ? 1 : 0.38,
+              child: CoverImage(src: song.coverUrl, size: 48, radius: 6),
+            ),
             const SizedBox(width: 12),
             Expanded(
               child: Column(
@@ -1125,9 +1125,12 @@ class _SwipeSongRow extends ConsumerWidget {
                           ),
                         ),
                       ),
-                      if (song.isVipOnly) ...<Widget>[
+                      if (song.isVipOnly) ...<Widget>[ // 未缓存 VIP 同步暗淡
                         const SizedBox(width: 6),
-                        const VipBadge(),
+                        Opacity(
+                          opacity: normal ? 1 : 0.38,
+                          child: const VipBadge(),
+                        ),
                       ],
                     ],
                   ),
@@ -1139,7 +1142,7 @@ class _SwipeSongRow extends ConsumerWidget {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
-                      color: theme.colorScheme.onSurfaceVariant,
+                      color: subtitleColor,
                       fontSize: 12.5,
                     ),
                   ),
@@ -1165,33 +1168,28 @@ class _SwipeSongRow extends ConsumerWidget {
       ),
     );
 
+    // 需求：滑动动作重做 —— 右滑 = 添加至歌单；左滑 = 添加至下一首播放。
+    // 旧「右滑移除」移除（移除仍可在长按菜单中使用），不再真正滑走。
     final Widget swipeable = Dismissible(
       key: ValueKey<String>('row_${song.id}_$index'),
-      // 右滑 = 移除出歌单（仅自有歌单）；左滑 = 添加至歌单
       confirmDismiss: (DismissDirection dir) async {
         if (dir == DismissDirection.startToEnd) {
-          if (onRemove == null) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('仅能移除自己创建的歌单中的歌曲')),
-            );
-            return false;
-          }
-          onRemove!();
-          return false; // 移除后由详情数据刷新，这里不真正移除行
+          onAddTo(); // 右滑：添加至歌单
+        } else {
+          await onAddNext(); // 左滑：下一首播放
         }
-        onAddTo();
-        return false;
+        return false; // 动作完成后回弹，不移除行
       },
       background: _SwipeBg(
-        color: AppConstants.brandColor,
-        icon: Icons.playlist_remove_rounded,
-        label: '移除',
-        alignRight: false,
-      ),
-      secondaryBackground: _SwipeBg(
         color: const Color(0xFF3D7BFF),
         icon: Icons.playlist_add_rounded,
         label: '添加到歌单',
+        alignRight: false,
+      ),
+      secondaryBackground: _SwipeBg(
+        color: AppConstants.brandColor,
+        icon: Icons.low_priority_rounded,
+        label: '下一首播放',
         alignRight: true,
       ),
       child: row,

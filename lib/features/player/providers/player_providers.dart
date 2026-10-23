@@ -20,6 +20,7 @@ import 'package:just_audio/just_audio.dart'
     show LoopMode, ProcessingState, SequenceState;
 
 import '../../auth/providers/auth_providers.dart' show authProvider, AuthState;
+import '../../../core/utils/platform_actions.dart';
 import '../../discover/data/netease_providers.dart';
 import '../../discover/data/netease_repository.dart';
 import '../../library/domain/track.dart';
@@ -171,6 +172,24 @@ final Provider<bool> isPlayingProvider = Provider<bool>(
 final Provider<bool> hasQueueProvider = Provider<bool>(
   (Ref ref) => ref.watch(playerProvider.select((PlayerState s) => s.hasQueue)),
 );
+
+/// 单曲高潮点（毫秒）：/song/chorus 首个 startTime（Zephyr-Music 方式）
+final FutureProviderFamily<int?, int> chorusStartProvider =
+    FutureProvider.family<int?, int>((Ref ref, int songId) async {
+  try {
+    return await ref.read(neteaseRepositoryProvider).chorusStartMs(songId);
+  } catch (_) {
+    return null; // 无高潮点数据 / 接口异常：进度条不显示白点
+  }
+});
+
+/// 当前曲目的高潮点（null = 无数据不显示）
+final Provider<int?> currentChorusStartProvider = Provider<int?>((Ref ref) {
+  final int? songId = ref.watch(
+      playerProvider.select((PlayerState s) => s.currentTrack?.neteaseId));
+  if (songId == null || songId <= 0) return null;
+  return ref.watch(chorusStartProvider(songId)).valueOrNull;
+});
 
 class PlayerNotifier extends Notifier<PlayerState> {
   late MingAudioHandler _handler;
@@ -491,6 +510,19 @@ class PlayerNotifier extends Notifier<PlayerState> {
         );
         return;
       }
+      // 需求：无网播放时通知栏提示「已跳过未缓存歌曲」——
+      // 解析被剔除的曲目数 > 0 且当前处于无网环境时，发系统通知告知用户
+      // （通知栏可见，应用后台/熄屏播歌也能收到原因说明）
+      final int dropped = tracks.length - resolved.length;
+      if (dropped > 0) {
+        final bool offline = !(await PlatformActions.isNetworkAvailable());
+        if (offline) {
+          unawaited(PlatformActions.postStatusNotice(
+            title: 'MingMusic',
+            text: '当前无网环境已跳过 $dropped 首未缓存歌曲',
+          ));
+        }
+      }
       // 起点 id 对齐：解析过程可能剔除灰曲，按下标近似定位
       final Track wanted = tracks[safeStart];
       int startIdx = resolved.indexWhere((Track t) => t.id == wanted.id);
@@ -591,7 +623,9 @@ class PlayerNotifier extends Notifier<PlayerState> {
   }
 
   /// 长按菜单「下一首播放」（需求）：解析后插入当前曲目之后，
-  /// **不打断当前播放**（保留进度与播放状态，仅重建内核队列）。
+  /// **不打断当前播放**（保留进度与播放状态）。
+  /// 修复「插队时短暂停顿」：不再 loadQueue 重建整个内核队列（那会
+  /// 重新初始化当前音轨），改用内核增量插入/移除（insertAudioSource）。
   /// 返回 null 表示成功，否则为错误信息。
   Future<String?> insertNext(Track track) async {
     if (!state.hasQueue) return '当前没有播放队列';
@@ -604,17 +638,15 @@ class PlayerNotifier extends Notifier<PlayerState> {
       int index = state.index;
       if (existing >= 0) {
         if (existing == index + 1) return null; // 已是下一首：幂等
-        q.removeAt(existing);
-        if (existing < index) index--;
+        // 增量移除旧位置（当前播放曲目不可移除：放弃去重，仅插入）
+        if (await _handler.removeTrackAt(existing)) {
+          q.removeAt(existing);
+          if (existing < index) index--;
+        }
       }
       q.insert((index + 1).clamp(0, q.length), target);
       state = state.copyWith(queue: q, index: index);
-      final Duration pos = _handler.player.position;
-      final bool wasPlaying = state.playing;
-      await _handler
-          .loadQueue(q, initialIndex: state.index.clamp(0, q.length - 1));
-      if (pos > Duration.zero) await _handler.seek(pos);
-      if (wasPlaying) await _handler.play();
+      await _handler.insertTrackNext(target, atIndex: index + 1);
       _schedulePersist();
       _schedulePreload();
       return null;

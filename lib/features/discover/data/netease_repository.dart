@@ -231,6 +231,23 @@ class NeteaseRepository {
     );
   }
 
+  /// 高潮点（副歌时间，/song/chorus）—— Zephyr-Music 获取/解析方式：
+  /// 返回 chorus[] 与 data[]（结构相同），每项含 startTime/endTime（毫秒）；
+  /// 取首个 startTime 即歌曲高潮点（进度条白点 + 点击跳转）。
+  /// 无数据返回 null（部分歌曲无副歌标注）。
+  Future<int?> chorusStartMs(int id) async {
+    final Map<String, Object?> res =
+        await _api.get('/song/chorus', <String, String>{'id': '$id'});
+    final Object? raw = res['chorus'] ?? res['data'];
+    if (raw is! List<Object?> || raw.isEmpty) return null;
+    for (final Object? item in raw) {
+      if (item is! Map<String, Object?>) continue;
+      final Object? start = item['startTime'];
+      if (start is num && start >= 0) return start.round();
+    }
+    return null;
+  }
+
   /// 听歌打卡（/scrobble）：登录后播放计次上报（对齐网易云听歌排行）
   Future<void> scrobble(int id, int sourceId, int timeSec) async {
     await _api.get('/scrobble', <String, String>{

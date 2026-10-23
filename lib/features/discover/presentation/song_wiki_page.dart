@@ -86,30 +86,8 @@ class SongWikiPage extends ConsumerWidget {
             const SizedBox(height: 12),
           ],
 
-          // 音乐百科块（需求：UI 排序对齐服务端 position —— 百科(1)在前、
-          // 回忆坐标(5)在后）
-          _WikiSection(
-            songId: songId,
-            builder: (SongWikiSummary wiki) {
-              if (wiki.groups.isEmpty) return const SizedBox.shrink();
-              return _SectionCard(
-                title: '音乐百科',
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: <Widget>[
-                    for (final WikiGroup g in wiki.groups) ...<Widget>[
-                      _WikiGroupRow(group: g),
-                      if (g != wiki.groups.last) const SizedBox(height: 10),
-                    ],
-                  ],
-                ),
-              );
-            },
-          ),
-          const SizedBox(height: 12),
-
-          // 回忆坐标（服务端数据：首次聆听 + 累计播放；需求：排序重构 +
-          // 首次聆听内容补全 + desc 描述展示）
+          // 回忆坐标（服务端数据：首次聆听 + 累计播放）。
+          // 需求：回忆坐标位置调整 —— 移到音乐百科上方（先回忆坐标、后百科）
           _WikiSection(
             songId: songId,
             builder: (SongWikiSummary wiki) {
@@ -139,6 +117,27 @@ class SongWikiPage extends ConsumerWidget {
                             '${formatCount(wiki.totalPlayCount)} 次',
                         sub: wiki.totalPlayText,
                       ),
+                    ],
+                  ],
+                ),
+              );
+            },
+          ),
+          const SizedBox(height: 12),
+
+          // 音乐百科块（曲风/推荐标签/获奖成就/影视节目/乐评）
+          _WikiSection(
+            songId: songId,
+            builder: (SongWikiSummary wiki) {
+              if (wiki.groups.isEmpty) return const SizedBox.shrink();
+              return _SectionCard(
+                title: '音乐百科',
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    for (final WikiGroup g in wiki.groups) ...<Widget>[
+                      _WikiGroupRow(group: g),
+                      if (g != wiki.groups.last) const SizedBox(height: 10),
                     ],
                   ],
                 ),

@@ -47,9 +47,10 @@ class ParsedLyrics {
   bool get isEmpty => !hasYrc && !hasLrc;
 
   /// 就近匹配允许的最大时间偏差（毫秒）。
-  /// 修复「部分外语歌不显示翻译」：不少歌曲的 tlyric/romalrc 时间轴与
-  /// 原文行存在几十至几百毫秒的整体偏移，精确匹配会整曲 miss。
-  static const int _nearbyToleranceMs = 600;
+  /// Zephyr-Music 处理方式：原文与翻译分开解析后按「最近时间戳」匹配，
+  /// 容忍度 3.0 秒 —— 不少歌曲的 tlyric/romalrc 时间轴与原文行存在几百
+  /// 毫秒甚至跨行的整体偏移，过小的容忍度会导致部分外语歌整曲 miss。
+  static const int _nearbyToleranceMs = 3000;
 
   /// 在排序键 [keys] 中二分查找与 [ms] 最近的键（无键返回 null）
   static int? _nearestKey(List<int> keys, int ms) {

@@ -40,6 +40,7 @@ import '../../settings/domain/settings_models.dart'
 import '../../settings/providers/settings_providers.dart'
     show audioQualityProvider;
 import '../domain/np_settings.dart';
+import '../../../core/utils/platform_actions.dart';
 import '../providers/lyrics_providers.dart'
     show ParsedLyrics, currentLyricsProvider;
 import '../providers/np_settings_providers.dart';
@@ -63,6 +64,29 @@ class FullPlayerPage extends ConsumerStatefulWidget {
 }
 
 class _FullPlayerPageState extends ConsumerState<FullPlayerPage> {
+  @override
+  void initState() {
+    super.initState();
+    // 需求：设置「播放页始终亮屏」—— 进入播放页按开关点亮
+    // FLAG_KEEP_SCREEN_ON；开关变化实时同步；离开播放页（dispose）恢复。
+    ref.listenManual(npSettingsProvider,
+        (NpPlayerSettings? _, NpPlayerSettings next) {
+      unawaited(PlatformActions.keepScreenOn(next.playerKeepScreenOn));
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        unawaited(PlatformActions.keepScreenOn(
+            ref.read(npSettingsProvider).playerKeepScreenOn));
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    // 无论开关状态如何，离开播放页必须恢复自动熄屏
+    unawaited(PlatformActions.keepScreenOn(false));
+    super.dispose();
+  }
   /// 手机端封面/歌词切换：null = 跟随显示模式（both 默认封面）
   bool? _paneOverride;
 
@@ -297,11 +321,11 @@ class _PlayerStackLayoutState extends ConsumerState<_PlayerStackLayout> {
                     padding: EdgeInsets.only(bottom: _overlayHeight),
                     child: LayoutBuilder(
                       builder: (BuildContext ctx, BoxConstraints cons) {
-                        // 封面页歌词预览占位预留，避免溢出
+                        // 封面页歌词预览占位预留，避免溢出（kgka 移植后预览加高）
                         final double reserve = switch (widget.cfg.coverLyrics) {
                           NpCoverLyricsMode.none => 0.0,
-                          NpCoverLyricsMode.one => 52.0,
-                          NpCoverLyricsMode.two => 82.0,
+                          NpCoverLyricsMode.one => 60.0,
+                          NpCoverLyricsMode.two => 102.0,
                         };
                         final double maxCover =
                             (cons.maxHeight - reserve).clamp(0.0, cons.maxHeight);
@@ -414,6 +438,9 @@ class _CoverSwipeAreaState extends ConsumerState<_CoverSwipeArea>
       _incomingCover = null;
       _releaseDx = from;
       _dir = 1;
+      // ⚠️ 必须重置拖动偏移：回弹结束后常规态按 _dragDx 平移渲染，
+      // 残留偏移会让封面永久停在松手位置（「未切歌封面卡住」根因）
+      _dragDx = 0;
     });
     _slide.forward(from: 0);
   }
@@ -421,7 +448,11 @@ class _CoverSwipeAreaState extends ConsumerState<_CoverSwipeArea>
   /// 切歌过渡：旧封面沿拖动方向滑出，新封面从反方向滑入；同时立即切歌
   void _startSwitch(double dx) {
     final PlayerState ps = ref.read(playerProvider);
-    if (!ps.hasQueue) return;
+    if (!ps.hasQueue) {
+      // 无队列无法切歌：按未过阈值回弹，而不是静默返回（否则封面卡在松手位置）
+      _startSpringBack(dx);
+      return;
+    }
     final int len = ps.queue.length;
     final bool backward = dx > 0; // 右滑 → 上一首
     _dir = backward ? 1 : -1;
@@ -452,6 +483,7 @@ class _CoverSwipeAreaState extends ConsumerState<_CoverSwipeArea>
       _outgoingCover = null;
       _incomingCover = null;
       _releaseDx = 0;
+      _dragDx = 0; // 双保险：任何路径残留的拖动偏移一并归零
     });
   }
 
@@ -849,9 +881,9 @@ class _InfoSectionState extends ConsumerState<_InfoSection> {
             .select((AuthState s) => s.likedIds.contains(songId)));
 
     return Padding(
-      // 需求：歌曲名称/歌手位置修复 —— 原先上边距过大导致整块太靠下，
-      // 现上收与封面视觉间距更近
-      padding: const EdgeInsets.fromLTRB(24, 8, 12, 0),
+      // 需求：底部区域呼吸感修复 —— 进度条/信息区/控制键间距全面放宽，
+      // 信息区与进度条不再挤在一起（原 8/0 过于紧凑）
+      padding: const EdgeInsets.fromLTRB(24, 10, 12, 6),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: <Widget>[
@@ -875,21 +907,27 @@ class _InfoSectionState extends ConsumerState<_InfoSection> {
                         ),
                       ),
                     ),
-                    if (vip) ...<Widget>[
+                    if (vip) ...<Widget>[ // 需求：VIP 样式 —— 透明背景 + 白字 + 白色圆角描边
                       const SizedBox(width: 7),
                       Container(
                         padding: const EdgeInsets.symmetric(
-                            horizontal: 5, vertical: 1.5),
+                            horizontal: 5, vertical: 1),
                         decoration: BoxDecoration(
-                          color: AppConstants.brandColor,
-                          borderRadius: BorderRadius.circular(4),
+                          color: Colors.transparent,
+                          borderRadius: BorderRadius.circular(5),
+                          border: Border.all(
+                            color: Colors.white.withValues(alpha: 0.85),
+                            width: 1,
+                          ),
                         ),
                         child: const Text(
                           'VIP',
                           style: TextStyle(
                             color: Colors.white,
-                            fontSize: 11,
+                            fontSize: 10.5,
+                            height: 1.2,
                             fontWeight: FontWeight.w800,
+                            letterSpacing: 0.5,
                           ),
                         ),
                       ),
@@ -1244,20 +1282,24 @@ class _CoverLyricsPreview extends ConsumerWidget {
     final Duration position =
         ref.watch(positionProvider).value ?? Duration.zero;
 
+    // kgka_Music_hl 移植（需求）：主行大字重 + 副行（翻译优先，否则下一行）
+    // —— 主行 22px/w900/行高1.22，副行 16px/w700/白 46%（_PosterLyricPreview
+    // 规格）；对齐方式保留左对齐（需求：kgka 封面页歌词左对齐）。
     final bool two = mode == NpCoverLyricsMode.two;
-    final double height = two ? 62 : 34;
+    final double height = two ? 78 : 40;
 
     if (lyrics.isEmpty) {
       return SizedBox(
         width: width,
         height: height,
-        child: Center(
+        child: Align(
+          alignment: Alignment.centerLeft,
           child: Text(
             '暂无歌词',
             style: TextStyle(
-              color: Colors.white.withValues(alpha: 0.45),
-              fontSize: 14.5,
-              fontWeight: FontWeight.w600,
+              color: Colors.white.withValues(alpha: 0.78),
+              fontSize: 17,
+              fontWeight: FontWeight.w800,
             ),
           ),
         ),
@@ -1282,20 +1324,24 @@ class _CoverLyricsPreview extends ConsumerWidget {
           mainAxisAlignment: MainAxisAlignment.center,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
-            MarqueeText(
-              main,
-              textAlign: TextAlign.left,
-              velocity: 32,
-              style: TextStyle(
-                color: Colors.white.withValues(alpha: 0.94),
-                fontSize: 16.5,
-                height: 1.25,
-                // kgka 观感：非重墨（w600），优雅不压封面
-                fontWeight: FontWeight.w600,
+            // 主行：当前行大字（kgka：22px / w900 / height 1.22）
+            SizedBox(
+              height: 30,
+              child: MarqueeText(
+                main,
+                textAlign: TextAlign.left,
+                velocity: 32,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 22,
+                  height: 1.22,
+                  fontWeight: FontWeight.w900,
+                ),
               ),
             ),
             if (two && sub.isNotEmpty) ...<Widget>[
-              const SizedBox(height: 4),
+              const SizedBox(height: 5),
+              // 副行：翻译优先，否则下一行（kgka：16px / w700 / 白 46%）
               Text(
                 sub,
                 maxLines: 1,
@@ -1303,9 +1349,9 @@ class _CoverLyricsPreview extends ConsumerWidget {
                 textAlign: TextAlign.left,
                 style: TextStyle(
                   color: Colors.white.withValues(alpha: 0.46),
-                  fontSize: 12.5,
-                  height: 1.2,
-                  fontWeight: FontWeight.w600,
+                  fontSize: 16,
+                  height: 1.18,
+                  fontWeight: FontWeight.w700,
                 ),
               ),
             ],
@@ -1323,9 +1369,10 @@ class _ProgressSection extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    // 需求：进度条溢出屏幕外修复 —— 原先贴边渲染，两侧加留白收进安全区
+    // 需求：进度区与上下区块拉开呼吸距离（纵向留白 2 → 10），
+    // 音质标签行不再贴着进度条
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
       child: PlayerProgressBar(
         // 仿网易云：进度行中央为音质标签（可点击弹音质选择）
         centerLabel: const _QualityButton(),
@@ -1382,7 +1429,8 @@ class _ControlBar extends ConsumerWidget {
         s.processing == AppProcessingState.buffering));
 
     return Padding(
-      padding: const EdgeInsets.fromLTRB(10, 4, 10, 0),
+      // 需求：控制键与上方音质标签行拉开间距（4 → 12）
+      padding: const EdgeInsets.fromLTRB(10, 12, 10, 0),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceEvenly,
         children: <Widget>[

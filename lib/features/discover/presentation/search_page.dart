@@ -11,6 +11,7 @@ import '../../../core/api/netease_models.dart';
 import '../../../core/constants/app_constants.dart';
 import '../data/netease_providers.dart';
 import '../../library/domain/track.dart';
+import '../../library/presentation/add_to_playlist_sheet.dart';
 import '../../player/providers/player_providers.dart';
 import 'widgets/song_actions_sheet.dart';
 import 'widgets/song_tile.dart';
@@ -193,11 +194,90 @@ class _SearchPageState extends ConsumerState<SearchPage> {
     }
     return ListView.builder(
       itemCount: _results.length,
-      itemBuilder: (BuildContext context, int index) => SongTile(
-        song: _results[index],
-        onPlay: () => _playAt(index),
-        onMore: () => showSongActionsSheet(context, _results[index].toTrack()),
-        onLongPress: () => showSongActionsSheet(context, _results[index].toTrack()),
+      itemBuilder: (BuildContext context, int index) {
+        final Song s = _results[index];
+        // 需求：搜索页增加滑动快捷操作 —— 左滑 = 添加至下一首播放；
+        // 右滑 = 添加至歌单（与歌单详情页同规则）
+        return Dismissible(
+          key: ValueKey<String>('search_${s.id}'),
+          confirmDismiss: (DismissDirection dir) async {
+            if (dir == DismissDirection.startToEnd) {
+              await showAddToPlaylistSheet(context, ref, <int>[s.id]);
+            } else {
+              final String? err =
+                  await ref.read(playerProvider.notifier).insertNext(s.toTrack());
+              if (!context.mounted) return false;
+              ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                content: Text(err ?? '已添加至下一首播放：${s.name}'),
+              ));
+            }
+            return false; // 动作后回弹，不移除行
+          },
+          background: _SearchSwipeBg(
+            color: const Color(0xFF3D7BFF),
+            icon: Icons.playlist_add_rounded,
+            label: '添加到歌单',
+            alignRight: false,
+          ),
+          secondaryBackground: _SearchSwipeBg(
+            color: AppConstants.brandColor,
+            icon: Icons.low_priority_rounded,
+            label: '下一首播放',
+            alignRight: true,
+          ),
+          child: SongTile(
+            song: s,
+            onPlay: () => _playAt(index),
+            onMore: () => showSongActionsSheet(context, s.toTrack()),
+            onLongPress: () => showSongActionsSheet(context, s.toTrack()),
+          ),
+        );
+      },
+    );
+  }
+}
+
+/// 搜索页滑动背景提示（与歌单详情页 _SwipeBg 同款样式）
+class _SearchSwipeBg extends StatelessWidget {
+  const _SearchSwipeBg({
+    required this.color,
+    required this.icon,
+    required this.label,
+    required this.alignRight,
+  });
+
+  final Color color;
+  final IconData icon;
+  final String label;
+  final bool alignRight;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      color: color,
+      alignment: alignRight ? Alignment.centerRight : Alignment.centerLeft,
+      padding: const EdgeInsets.symmetric(horizontal: 20),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          if (alignRight) ...<Widget>[
+            Text(label,
+                style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600)),
+            const SizedBox(width: 6),
+          ],
+          Icon(icon, color: Colors.white, size: 20),
+          if (!alignRight) ...<Widget>[
+            const SizedBox(width: 6),
+            Text(label,
+                style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600)),
+          ],
+        ],
       ),
     );
   }

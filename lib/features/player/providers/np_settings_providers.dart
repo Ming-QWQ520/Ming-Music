@@ -67,6 +67,10 @@ class NpSettingsNotifier extends Notifier<NpPlayerSettings> {
   void setMiniStyle(MiniPlayerStyle style) =>
       _commit(state.copyWith(miniStyle: style));
 
+  /// 播放页始终亮屏（需求：设置中可开启）
+  void setPlayerKeepScreenOn(bool on) =>
+      _commit(state.copyWith(playerKeepScreenOn: on));
+
   void setBgBlur(double px) => _commit(state.copyWith(bgBlur: px.clamp(0, 40)));
 
   void setBgDim(double pct) =>

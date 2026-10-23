@@ -252,6 +252,22 @@ class SettingsPage extends ConsumerWidget {
                 onChanged: (bool v) =>
                     ref.read(preloadNextProvider.notifier).set(v),
               ),
+              // 需求：播放页始终亮屏
+              SwitchListTile(
+                contentPadding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
+                secondary: const Icon(Icons.brightness_high_rounded, size: 22),
+                title: const Text('播放页始终亮屏', style: TextStyle(fontSize: 15)),
+                subtitle: Text('打开全屏播放页时保持屏幕常亮，离开播放页自动恢复'
+                        '系统熄屏（默认关闭）',
+                    style: TextStyle(
+                        fontSize: 12,
+                        color: theme.colorScheme.onSurfaceVariant)),
+                value: np.playerKeepScreenOn,
+                activeThumbColor: AppConstants.brandColor,
+                onChanged: (bool v) =>
+                    ref.read(npSettingsProvider.notifier).setPlayerKeepScreenOn(v),
+              ),
             ],
           ),
 

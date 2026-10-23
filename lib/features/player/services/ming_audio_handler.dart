@@ -130,6 +130,33 @@ class MingAudioHandler extends BaseAudioHandler with SeekHandler {
     return ja.AudioSource.asset('assets/$src');
   }
 
+  /// 增量插入「下一首播放」（修复：手动插队时播放短暂停顿）。
+  ///
+  /// 旧实现 insertNext 用 loadQueue 重建整个内核队列 —— setAudioSources
+  /// 会重新装载全部音源，当前曲目被重新初始化，出现可感知的停顿；
+  /// 改用 just_audio 的 insertAudioSource 仅在 [atIndex] 处追加一个音源，
+  /// 当前音轨完全不重载，无停顿无跳变。
+  Future<void> insertTrackNext(Track t, {required int atIndex}) async {
+    final int safe = atIndex.clamp(0, _player.audioSources.length);
+    await _player.insertAudioSource(safe, _sourceOf(t));
+    // audio_service 队列同步插入（通知栏/队列面板共用数据源）
+    final List<MediaItem> q = List<MediaItem>.of(queue.value);
+    q.insert(safe.clamp(0, q.length), _mediaItemOf(t));
+    queue.add(q);
+  }
+
+  /// 增量移除队列中 [index] 处曲目（配合 insertTrackNext 去重，不打断播放）。
+  /// 当前播放曲目不可移除（返回 false 交由上层保守处理）。
+  Future<bool> removeTrackAt(int index) async {
+    if (index < 0 || index >= _player.audioSources.length) return false;
+    if (index == _player.currentIndex) return false;
+    await _player.removeAudioSourceAt(index);
+    final List<MediaItem> q = List<MediaItem>.of(queue.value);
+    if (index < q.length) q.removeAt(index);
+    queue.add(q);
+    return true;
+  }
+
   MediaItem _mediaItemOf(Track t) {
     final String? cover = t.cover;
     final bool isUrlCover = cover != null && cover.startsWith('http');
