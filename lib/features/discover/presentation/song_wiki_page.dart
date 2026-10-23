@@ -58,101 +58,27 @@ class SongWikiPage extends ConsumerWidget {
       body: ListView(
         padding: const EdgeInsets.fromLTRB(16, 8, 16, 28),
         children: <Widget>[
-          // 歌曲头
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.center,
+          // 歌曲头（需求：去除本机听歌次数及其功能）
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: <Widget>[
-                    Text(title,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                            fontSize: 22,
-                            fontWeight: FontWeight.w800,
-                            height: 1.25)),
-                    const SizedBox(height: 4),
-                    Text(artist,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                            fontSize: 14,
-                            color: theme.colorScheme.onSurfaceVariant)),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 12),
-              // 本机总听次数（服务端无公开播放次数接口，本机统计闭环）
-              Consumer(builder: (BuildContext ctx, WidgetRef r, Widget? _) {
-                final int count =
-                    r.watch(playStatsProvider)[songId] ?? 0;
-                return Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                  decoration: BoxDecoration(
-                    color: theme.colorScheme.surfaceContainerHighest
-                        .withValues(alpha: 0.5),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Column(
-                    children: <Widget>[
-                      Text('$count',
-                          style: TextStyle(
-                              fontSize: 18,
-                              fontWeight: FontWeight.w800,
-                              color: AppConstants.brandColor)),
-                      const SizedBox(height: 1),
-                      Text('本机听歌次数',
-                          style: TextStyle(
-                              fontSize: 10,
-                              color: theme.colorScheme.onSurfaceVariant)),
-                    ],
-                  ),
-                );
-              }),
+              Text(title,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                      fontSize: 22,
+                      fontWeight: FontWeight.w800,
+                      height: 1.25)),
+              const SizedBox(height: 4),
+              Text(artist,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                      fontSize: 14,
+                      color: theme.colorScheme.onSurfaceVariant)),
             ],
           ),
           const SizedBox(height: 16),
-
-          // 回忆坐标（服务端数据：首次聆听日期 + 累计播放次数，对齐 Zephyr）
-          _WikiSection(
-            songId: songId,
-            builder: (SongWikiSummary wiki) {
-              if (wiki.firstListenDate.isEmpty && wiki.totalPlayCount == 0) {
-                return const SizedBox.shrink();
-              }
-              return _SectionCard(
-                title: '回忆坐标',
-                child: Row(
-                  children: <Widget>[
-                    if (wiki.firstListenDate.isNotEmpty)
-                      Expanded(
-                        child: _MemoryCell(
-                          label: '首次聆听',
-                          main: wiki.firstListenDate,
-                          sub: wiki.firstListenExtra,
-                        ),
-                      ),
-                    if (wiki.totalPlayCount > 0) ...<Widget>[
-                      if (wiki.firstListenDate.isNotEmpty)
-                        const SizedBox(width: 12),
-                      Expanded(
-                        child: _MemoryCell(
-                          label: '累计播放',
-                          main:
-                              '${formatCount(wiki.totalPlayCount)} 次',
-                          sub: wiki.totalPlayText,
-                        ),
-                      ),
-                    ],
-                  ],
-                ),
-              );
-            },
-          ),
-          const SizedBox(height: 12),
 
           // MV 卡（有 MV 才显示；闭环：详情 + 直链 + 播放页）
           if (mvId != null) ...<Widget>[
@@ -160,11 +86,12 @@ class SongWikiPage extends ConsumerWidget {
             const SizedBox(height: 12),
           ],
 
-          // 音乐百科块
+          // 音乐百科块（需求：UI 排序对齐服务端 position —— 百科(1)在前、
+          // 回忆坐标(5)在后）
           _WikiSection(
             songId: songId,
             builder: (SongWikiSummary wiki) {
-              if (wiki.isEmpty) return const SizedBox.shrink();
+              if (wiki.groups.isEmpty) return const SizedBox.shrink();
               return _SectionCard(
                 title: '音乐百科',
                 child: Column(
@@ -173,6 +100,45 @@ class SongWikiPage extends ConsumerWidget {
                     for (final WikiGroup g in wiki.groups) ...<Widget>[
                       _WikiGroupRow(group: g),
                       if (g != wiki.groups.last) const SizedBox(height: 10),
+                    ],
+                  ],
+                ),
+              );
+            },
+          ),
+          const SizedBox(height: 12),
+
+          // 回忆坐标（服务端数据：首次聆听 + 累计播放；需求：排序重构 +
+          // 首次聆听内容补全 + desc 描述展示）
+          _WikiSection(
+            songId: songId,
+            builder: (SongWikiSummary wiki) {
+              final bool hasFirst = wiki.firstListenDate.isNotEmpty ||
+                  wiki.firstListenDesc.isNotEmpty;
+              if (!hasFirst && wiki.totalPlayCount == 0) {
+                return const SizedBox.shrink();
+              }
+              return _SectionCard(
+                title: '回忆坐标',
+                child: Column(
+                  children: <Widget>[
+                    if (hasFirst)
+                      _MemoryCell(
+                        label: '首次聆听',
+                        main: wiki.firstListenDate.isEmpty
+                            ? '—'
+                            : wiki.firstListenDate,
+                        sub: wiki.firstListenExtra,
+                        extra: wiki.firstListenDesc,
+                      ),
+                    if (wiki.totalPlayCount > 0) ...<Widget>[
+                      if (hasFirst) const SizedBox(height: 10),
+                      _MemoryCell(
+                        label: '累计播放',
+                        main:
+                            '${formatCount(wiki.totalPlayCount)} 次',
+                        sub: wiki.totalPlayText,
+                      ),
                     ],
                   ],
                 ),
@@ -209,11 +175,15 @@ class _MemoryCell extends StatelessWidget {
     required this.label,
     required this.main,
     required this.sub,
+    this.extra,
   });
 
   final String label;
   final String main;
   final String sub;
+
+  /// 补充描述（musicFirstListenDto.desc，需求「首次聆听显示补全」）
+  final String? extra;
 
   @override
   Widget build(BuildContext context) {
@@ -233,21 +203,30 @@ class _MemoryCell extends StatelessWidget {
                   fontSize: 11,
                   color: theme.colorScheme.onSurfaceVariant)),
           const SizedBox(height: 4),
+          // 需求「首次聆听显示补全」：主值不再单行截断（日期+时段可能较长），
+          // 允许自动换行完整展示；desc 补充描述（超越百分比等）补全显示
           Text(main,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
               style: const TextStyle(
                   fontSize: 16.5,
                   fontWeight: FontWeight.w800,
-                  color: AppConstants.brandColor)),
+                  color: AppConstants.brandColor,
+                  height: 1.3)),
           if (sub.isNotEmpty) ...<Widget>[
             const SizedBox(height: 2),
             Text(sub,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
                 style: TextStyle(
                     fontSize: 10.5,
+                    height: 1.3,
                     color: theme.colorScheme.onSurfaceVariant)),
+          ],
+          if (extra != null && extra!.isNotEmpty) ...<Widget>[
+            const SizedBox(height: 2),
+            Text(extra!,
+                style: TextStyle(
+                    fontSize: 10.5,
+                    height: 1.3,
+                    color: theme.colorScheme.onSurfaceVariant
+                        .withValues(alpha: 0.8))),
           ],
         ],
       ),

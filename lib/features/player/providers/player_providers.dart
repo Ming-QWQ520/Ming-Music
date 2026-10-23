@@ -33,6 +33,7 @@ import '../../settings/providers/settings_providers.dart'
         sharedPreferencesProvider;
 import '../domain/player_state.dart';
 import '../services/ming_audio_handler.dart';
+import 'cache_providers.dart' show refreshCacheProviders;
 import '../services/queue_persistence.dart';
 import '../services/song_cache.dart';
 
@@ -295,6 +296,7 @@ class PlayerNotifier extends Notifier<PlayerState> {
   /// 需求「只需播放一首缓存一首」：仅对**实际开播**的曲目后台落盘。
   /// 旧实现在队列解析（resolveTracks）时对整个队列批量预缓存 —— 装载一个
   /// 大歌单即缓存全部曲目，占用暴涨；现改为开播触发，队列解析不再写盘。
+  /// 落盘完成同时写入展示元信息（歌名/歌手/封面，缓存列表页与歌名着色用）。
   Future<void> _cacheCurrentTrack() async {
     if (!_ready) return;
     if (!ref.read(listenCacheProvider)) return;
@@ -308,7 +310,18 @@ class PlayerNotifier extends Notifier<PlayerState> {
       final String level = ref.read(audioQualityProvider).apiValue;
       final String? cached = await cache.cachedPathFor(id, level);
       if (cached != null && cached.isNotEmpty) return; // 已缓存
-      await cache.download(id, level, src);
+      final bool ok = await cache.download(id, level, src);
+      if (ok) {
+        unawaited(cache.saveEntryMeta(
+          id,
+          level,
+          title: track.title,
+          artist: track.artist,
+          cover: track.cover ?? '',
+        ));
+        // 缓存列表/歌名着色刷新
+        refreshCacheProviders(ref);
+      }
     } catch (_) {
       // 缓存失败不影响播放
     }
@@ -660,6 +673,12 @@ class PlayerNotifier extends Notifier<PlayerState> {
     for (final Track t in tracks) {
       final int? nid = t.neteaseId;
       if (nid == null || nid <= 0) continue; // 非网易云（自定义直链）：直接可用
+      // 本地文件源直接放行（缓存音乐列表页点播：路径已验证存在，
+      // 不再走网络解析 —— 离线可用且不受当前音质档位影响）
+      if (t.source.isNotEmpty && !t.source.startsWith('http')) {
+        resolvedById[nid] = t;
+        continue;
+      }
       final SongUrlInfo? cached = _urlCache[nid];
       if (cached != null) {
         if (cached.playable) resolvedById[nid] = await _withCacheSource(t, cached);

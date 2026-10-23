@@ -13,6 +13,7 @@
 library;
 
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
@@ -30,6 +31,38 @@ class _CacheMeta {
   final String path;
   final int size;
   final DateTime lastUsedAt;
+}
+
+/// 缓存歌曲条目（缓存列表页展示用，需求：点击数据缓存可查看缓存的音乐）
+class CacheEntry {
+  const CacheEntry({
+    required this.key,
+    required this.songId,
+    required this.level,
+    required this.path,
+    required this.sizeBytes,
+    required this.cachedAt,
+    this.title = '',
+    this.artist = '',
+    this.cover = '',
+  });
+
+  final String key;
+  final int songId;
+  final String level;
+  final String path;
+  final int sizeBytes;
+  final DateTime cachedAt;
+
+  /// 展示元信息（下载时随音频写入 meta.json；旧缓存无元信息时为空）
+  final String title;
+  final String artist;
+  final String cover;
+
+  /// 元信息缺失时以「歌曲 id」兕底显示
+  String get displayTitle =>
+      title.isEmpty ? '歌曲 $songId' : title;
+  String get displayArtist => artist.isEmpty ? '元信息未记录' : artist;
 }
 
 class SongCacheService {
@@ -82,6 +115,61 @@ class SongCacheService {
 
   String _partPath(Directory dir, String key) => '${dir.path}/$key.part';
 
+  String _metaPath(Directory dir) => '${dir.path}/meta.json';
+
+  // ---------------------------------------------------------------- meta
+
+  /// 读取全部条目元信息（key → 展示字段）；文件不存在/损坏返回空表
+  Future<Map<String, Map<String, Object?>>> _readMeta(Directory dir) async {
+    try {
+      final File f = File(_metaPath(dir));
+      if (!f.existsSync()) return const <String, Map<String, Object?>>{};
+      final Object? decoded = jsonDecode(await f.readAsString());
+      if (decoded is! Map<String, Object?>) {
+        return const <String, Map<String, Object?>>{};
+      }
+      return decoded.map<String, Map<String, Object?>>((String k, Object? v) =>
+          MapEntry<String, Map<String, Object?>>(
+              k, v is Map<String, Object?> ? v : const <String, Object?>{}));
+    } catch (_) {
+      return const <String, Map<String, Object?>>{};
+    }
+  }
+
+  Future<void> _writeMeta(Directory dir, Map<String, Map<String, Object?>> meta) async {
+    try {
+      final File f = File(_metaPath(dir));
+      await f.writeAsString(jsonEncode(meta), flush: true);
+    } catch (_) {
+      // 元信息写失败不影响音频缓存
+    }
+  }
+
+  /// 记录/更新一条缓存元信息（下载完成时调用）
+  Future<void> saveEntryMeta(
+    int songId,
+    String level, {
+    required String title,
+    required String artist,
+    required String cover,
+  }) async {
+    try {
+      final Directory dir = await _ensureDir();
+      final String key = keyFor(songId, level);
+      final Map<String, Map<String, Object?>> meta = await _readMeta(dir);
+      final Map<String, Object?> old = meta[key] ?? const <String, Object?>{};
+      meta[key] = <String, Object?>{
+        'id': songId,
+        'level': level,
+        'title': title,
+        'artist': artist,
+        'cover': cover,
+        'at': (old['at'] as num?)?.toInt() ?? DateTime.now().millisecondsSinceEpoch,
+      };
+      await _writeMeta(dir, meta);
+    } catch (_) {}
+  }
+
   // ---------------------------------------------------------------- query
 
   /// 命中返回本地文件绝对路径（可直接交给播放内核 file:// 播放）
@@ -131,6 +219,76 @@ class SongCacheService {
       debugPrint('SongCache.clearAll failed: $e');
       return false;
     }
+  }
+
+  /// 删除单条缓存（缓存列表页；返回是否成功）
+  Future<bool> removeEntry(String key) async {
+    try {
+      final Directory dir = await _ensureDir();
+      final File done = File(_donePath(dir, key));
+      if (done.existsSync()) done.deleteSync();
+      final File part = File(_partPath(dir, key));
+      if (part.existsSync()) part.deleteSync();
+      final Map<String, Map<String, Object?>> meta = await _readMeta(dir);
+      if (meta.containsKey(key)) {
+        meta.remove(key);
+        await _writeMeta(dir, meta);
+      }
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// 已缓存音频的歌曲 id 集合（歌单页歌名缓存状态着色 / 离线可播判断）
+  Future<Set<int>> cachedSongIds() async {
+    final Set<int> ids = <int>{};
+    try {
+      final Directory dir = await _ensureDir();
+      await for (final FileSystemEntity e in dir.list()) {
+        final String name = e.path.split(Platform.pathSeparator).last;
+        if (e is! File || !name.endsWith('.done')) continue;
+        final int under = name.indexOf('_');
+        if (under <= 0) continue;
+        final int? id = int.tryParse(name.substring(0, under));
+        if (id != null) ids.add(id);
+      }
+    } catch (_) {}
+    return ids;
+  }
+
+  /// 缓存条目列表（缓存列表页；按缓存时间倒序）
+  Future<List<CacheEntry>> listEntries() async {
+    final List<CacheEntry> out = <CacheEntry>[];
+    try {
+      final Directory dir = await _ensureDir();
+      final Map<String, Map<String, Object?>> meta = await _readMeta(dir);
+      await for (final FileSystemEntity e in dir.list()) {
+        if (e is! File) continue;
+        final String name = e.path.split(Platform.pathSeparator).last;
+        if (!name.endsWith('.done')) continue;
+        final int under = name.indexOf('_');
+        if (under <= 0) continue;
+        final int? songId = int.tryParse(name.substring(0, under));
+        final String level = name.substring(under + 1, name.length - 5);
+        if (songId == null) continue;
+        final Map<String, Object?> m = meta[name] ?? const <String, Object?>{};
+        out.add(CacheEntry(
+          key: name,
+          songId: songId,
+          level: level,
+          path: e.path,
+          sizeBytes: e.lengthSync(),
+          cachedAt: DateTime.fromMillisecondsSinceEpoch(
+              (m['at'] as num?)?.toInt() ?? e.lastModifiedSync().millisecondsSinceEpoch),
+          title: (m['title'] as String?) ?? '',
+          artist: (m['artist'] as String?) ?? '',
+          cover: (m['cover'] as String?) ?? '',
+        ));
+      }
+    } catch (_) {}
+    out.sort((CacheEntry a, CacheEntry b) => b.cachedAt.compareTo(a.cachedAt));
+    return out;
   }
 
   // ---------------------------------------------------------------- download

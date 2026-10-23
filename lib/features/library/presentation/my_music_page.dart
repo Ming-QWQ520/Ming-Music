@@ -24,6 +24,7 @@ import '../../auth/data/netease_auth_repository.dart'
 import '../../auth/presentation/login_sheet.dart';
 import '../../auth/providers/auth_providers.dart';
 import '../../discover/data/netease_providers.dart';
+import '../../player/presentation/cache_songs_page.dart';
 import '../../player/providers/player_providers.dart';
 
 class MyMusicPage extends ConsumerStatefulWidget {
@@ -893,36 +894,6 @@ class _CacheRowState extends ConsumerState<_CacheRow> {
     return '${(b / 1024 / 1024 / 1024).toStringAsFixed(2)} GB';
   }
 
-  Future<void> _clear() async {
-    final bool? ok = await showDialog<bool>(
-      context: context,
-      builder: (BuildContext ctx) => AlertDialog(
-        title: const Text('清理数据缓存'),
-        content: Text(
-            '将删除已缓存的歌曲音频（当前占用 $_sizeText）。'
-            '清理后离线将无法播放未重新缓存的歌曲，确定继续吗？'),
-        actions: <Widget>[
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(false),
-            child: const Text('取消'),
-          ),
-          FilledButton(
-            style: FilledButton.styleFrom(
-                backgroundColor: AppConstants.brandColor),
-            onPressed: () => Navigator.of(ctx).pop(true),
-            child: const Text('清理'),
-          ),
-        ],
-      ),
-    );
-    if (ok != true) return;
-    await ref.read(songCacheProvider).clearAll();
-    _refresh();
-    if (!mounted) return;
-    ScaffoldMessenger.of(context)
-        .showSnackBar(const SnackBar(content: Text('数据缓存已清理')));
-  }
-
   @override
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
@@ -934,7 +905,11 @@ class _CacheRowState extends ConsumerState<_CacheRow> {
         borderRadius: BorderRadius.circular(16),
         child: InkWell(
           borderRadius: BorderRadius.circular(16),
-          onTap: _clear,
+          // 需求：点击数据缓存 → 查看缓存的音乐列表（清空入口在列表页内）
+          onTap: () => Navigator.of(context).push(
+            MaterialPageRoute<void>(
+                builder: (BuildContext _) => const CacheSongsPage()),
+          ),
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
             child: Row(
@@ -962,7 +937,7 @@ class _CacheRowState extends ConsumerState<_CacheRow> {
                           style: TextStyle(
                               fontSize: 14.5, fontWeight: FontWeight.w600)),
                       const SizedBox(height: 1),
-                      Text('边听边缓存占用：$_sizeText，点击清理',
+                      Text('边听边缓存占用：$_sizeText，点击查看缓存音乐',
                           style: const TextStyle(fontSize: 11)),
                     ],
                   ),

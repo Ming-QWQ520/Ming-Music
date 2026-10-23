@@ -38,6 +38,7 @@ class CoverImage extends StatefulWidget {
     this.size = 48,
     this.radius = 12,
     this.coverSize = CoverSize.small,
+    this.keepOldWhileLoading = false,
   });
 
   /// 网易云 CDN 对 Dart 默认 User-Agent 直接返回 403（实测取证：
@@ -52,6 +53,11 @@ class CoverImage extends StatefulWidget {
   final double size;
   final double radius;
   final CoverSize coverSize;
+
+  /// 需求「切换歌曲时不闪占位」：src 变化时保留旧图继续展示，
+  /// 新图加载完成后再无缝替换（播放页背景/大封面专用；列表复用
+  /// 场景不要开，避免短暂残留上一任条目的封面）。
+  final bool keepOldWhileLoading;
 
   /// 拉取原图字节（供全屏查看/保存至本地使用，走同一套重试）
   static Future<Uint8List?> loadOriginalBytes(String? src) async {
@@ -184,7 +190,10 @@ class _CoverImageState extends State<CoverImage> {
   void didUpdateWidget(CoverImage oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.src != widget.src) {
-      _bytes = null;
+      // keepOldWhileLoading：旧图保留展示，等新图到达再替换（防闪占位）
+      if (!widget.keepOldWhileLoading) {
+        _bytes = null;
+      }
       _failed = false;
       _load();
     }
@@ -198,7 +207,10 @@ class _CoverImageState extends State<CoverImage> {
     if (bytes != null) {
       setState(() => _bytes = bytes);
     } else if (mounted) {
-      setState(() => _failed = true);
+      // 加载失败：仅在未开启保旧图时显示失败占位；保旧图时维持旧画面
+      if (!widget.keepOldWhileLoading || _bytes == null) {
+        setState(() => _failed = true);
+      }
     }
   }
 

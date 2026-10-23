@@ -128,8 +128,14 @@ class _FlatCover extends StatelessWidget {
       child: ClipRRect(
         borderRadius:
             effRadius > 0 ? BorderRadius.circular(effRadius) : BorderRadius.zero,
+        // keepOldWhileLoading：切歌时保留旧封面直到新封面就绪（防闪占位；
+        // 本组件仅用于播放页大封面）
         child: CoverImage(
-            src: cover, size: size, radius: 0, coverSize: CoverSize.large),
+            src: cover,
+            size: size,
+            radius: 0,
+            coverSize: CoverSize.large,
+            keepOldWhileLoading: true),
       ),
     );
 

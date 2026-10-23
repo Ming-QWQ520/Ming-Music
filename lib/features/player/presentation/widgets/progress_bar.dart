@@ -83,7 +83,8 @@ class _PlayerProgressBarState extends ConsumerState<PlayerProgressBar> {
             },
           ),
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 22),
+            // 与 Slider（M3 默认水平内边距 16）对齐：时间文本与轨道端点齐平
+            padding: const EdgeInsets.symmetric(horizontal: 16),
             child: Row(
               children: <Widget>[
                 Text(

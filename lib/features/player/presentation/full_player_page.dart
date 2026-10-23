@@ -616,7 +616,14 @@ class _FrozenCover extends StatelessWidget {
       ),
       child: ClipRRect(
         borderRadius: BorderRadius.circular(radius),
-        child: CoverImage(src: cover, size: size, radius: 0, coverSize: CoverSize.large),
+        child: CoverImage(
+          src: cover,
+          size: size,
+          radius: 0,
+          coverSize: CoverSize.large,
+          // 切歌过渡期新封面加载时保留旧画面（无缝滑入）
+          keepOldWhileLoading: true,
+        ),
       ),
     );
   }
@@ -842,8 +849,9 @@ class _InfoSectionState extends ConsumerState<_InfoSection> {
             .select((AuthState s) => s.likedIds.contains(songId)));
 
     return Padding(
-      // 需求：歌曲名称和歌手名称往下移动一点
-      padding: const EdgeInsets.fromLTRB(24, 22, 12, 0),
+      // 需求：歌曲名称/歌手位置修复 —— 原先上边距过大导致整块太靠下，
+      // 现上收与封面视觉间距更近
+      padding: const EdgeInsets.fromLTRB(24, 8, 12, 0),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: <Widget>[
@@ -1270,11 +1278,13 @@ class _CoverLyricsPreview extends ConsumerWidget {
         switchOutCurve: Curves.easeOutCubic,
         child: Column(
           key: ValueKey<String>('$main|$sub'),
+          // kgka 对齐（需求）：封面页歌词左对齐显示
           mainAxisAlignment: MainAxisAlignment.center,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
             MarqueeText(
               main,
-              textAlign: TextAlign.center,
+              textAlign: TextAlign.left,
               velocity: 32,
               style: TextStyle(
                 color: Colors.white.withValues(alpha: 0.94),
@@ -1290,7 +1300,7 @@ class _CoverLyricsPreview extends ConsumerWidget {
                 sub,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                textAlign: TextAlign.center,
+                textAlign: TextAlign.left,
                 style: TextStyle(
                   color: Colors.white.withValues(alpha: 0.46),
                   fontSize: 12.5,
@@ -1313,8 +1323,9 @@ class _ProgressSection extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    // 需求：进度条溢出屏幕外修复 —— 原先贴边渲染，两侧加留白收进安全区
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 2),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
       child: PlayerProgressBar(
         // 仿网易云：进度行中央为音质标签（可点击弹音质选择）
         centerLabel: const _QualityButton(),
@@ -1625,9 +1636,10 @@ class _BottomStrip extends ConsumerWidget {
     ];
 
     return Padding(
-      // 需求：底部控件位置上移（太靠近底部显得很奇怪）
+      // 需求：底部控件位置上移（太靠近底部显得很奇怪）；本批再度上收，
+      // 让底部浮层更紧凑、信息区随之上移
       padding: EdgeInsets.fromLTRB(
-          math.max(34.0 - buttons.length * 4, 16), 6, 34, 26),
+          math.max(34.0 - buttons.length * 4, 16), 4, 34, 14),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: buttons.isEmpty

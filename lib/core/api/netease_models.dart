@@ -44,6 +44,47 @@ class Song {
 
   bool get isVipOnly => fee == 1;
 
+  /// 封面覆盖拷贝（搜索结果 /song/detail 批量补封面用）
+  Song withCover(String? cover) => Song(
+        id: id,
+        name: name,
+        artists: artists,
+        album: album,
+        coverUrl: cover,
+        durationMs: durationMs,
+        fee: fee,
+        mvId: mvId,
+        artistId: artistId,
+        albumId: albumId,
+      );
+
+  /// 序列化（歌单详情离线缓存用）
+  Map<String, Object?> toJson() => <String, Object?>{
+        'id': id,
+        'name': name,
+        'artists': artists,
+        'album': album,
+        'coverUrl': coverUrl,
+        'durationMs': durationMs,
+        'fee': fee,
+        'mvId': mvId,
+        'artistId': artistId,
+        'albumId': albumId,
+      };
+
+  static Song fromStoredJson(Map<String, Object?> j) => Song(
+        id: (j['id'] as num?)?.toInt() ?? 0,
+        name: (j['name'] as String?) ?? '未知歌曲',
+        artists: (j['artists'] as String?) ?? '未知歌手',
+        album: (j['album'] as String?) ?? '',
+        coverUrl: j['coverUrl'] as String?,
+        durationMs: (j['durationMs'] as num?)?.toInt(),
+        fee: (j['fee'] as num?)?.toInt() ?? 0,
+        mvId: (j['mvId'] as num?)?.toInt(),
+        artistId: (j['artistId'] as num?)?.toInt(),
+        albumId: (j['albumId'] as num?)?.toInt(),
+      );
+
   /// 转为播放队列条目：source 留空，播放前经 /song/url/v1 统一解析
   Track toTrack() => Track(
         id: 'netease_$id',
@@ -194,6 +235,35 @@ class PlaylistMeta {
     if (c is Map<String, Object?>) return c['nickname'] as String?;
     return null;
   }
+
+  /// 序列化（歌单详情离线缓存用）
+  Map<String, Object?> toJson() => <String, Object?>{
+        'id': id,
+        'name': name,
+        'coverUrl': coverUrl,
+        'playCount': playCount,
+        'trackCount': trackCount,
+        'creator': creator,
+        'description': description,
+        'creatorUserId': creatorUserId,
+        'subscribed': subscribed,
+        'creatorAvatarUrl': creatorAvatarUrl,
+        'commentCount': commentCount,
+      };
+
+  static PlaylistMeta fromStoredJson(Map<String, Object?> j) => PlaylistMeta(
+        id: (j['id'] as num?)?.toInt() ?? 0,
+        name: (j['name'] as String?) ?? '歌单',
+        coverUrl: j['coverUrl'] as String?,
+        playCount: (j['playCount'] as num?)?.toInt(),
+        trackCount: (j['trackCount'] as num?)?.toInt(),
+        creator: j['creator'] as String?,
+        description: j['description'] as String?,
+        creatorUserId: (j['creatorUserId'] as num?)?.toInt(),
+        subscribed: j['subscribed'] as bool?,
+        creatorAvatarUrl: j['creatorAvatarUrl'] as String?,
+        commentCount: (j['commentCount'] as num?)?.toInt(),
+      );
 }
 
 /// 歌单详情（meta + 完整曲目）
@@ -202,6 +272,23 @@ class PlaylistDetail {
 
   final PlaylistMeta meta;
   final List<Song> tracks;
+
+  /// 序列化（歌单详情离线缓存用：无网时也可打开歌单查看）
+  Map<String, Object?> toJson() => <String, Object?>{
+        'meta': meta.toJson(),
+        'tracks': <Object?>[for (final Song s in tracks) s.toJson()],
+        'savedAt': DateTime.now().millisecondsSinceEpoch,
+      };
+
+  static PlaylistDetail fromStoredJson(Map<String, Object?> j) =>
+      PlaylistDetail(
+        meta: PlaylistMeta.fromStoredJson(
+            (j['meta'] as Map<String, Object?>?) ?? const <String, Object?>{}),
+        tracks: <Song>[
+          for (final Object? t in (j['tracks'] as List<Object?>? ?? const <Object?>[]))
+            if (t is Map<String, Object?>) Song.fromStoredJson(t),
+        ],
+      );
 }
 
 /// /song/url/v1 单条结果
@@ -393,6 +480,7 @@ class SongWikiSummary {
     this.groups = const <WikiGroup>[],
     this.firstListenDate = '',
     this.firstListenExtra = '',
+    this.firstListenDesc = '',
     this.totalPlayCount = 0,
     this.totalPlayText = '',
   });
@@ -406,13 +494,20 @@ class SongWikiSummary {
   /// 回忆坐标：季节 · 时段（musicFirstListenDto.season / period）
   final String firstListenExtra;
 
+  /// 回忆坐标：首次聆听补充描述（musicFirstListenDto.desc，需求「显示补全」）
+  final String firstListenDesc;
+
   /// 回忆坐标：累计播放次数（musicTotalPlayDto.playCount，服务端真实统计）
   final int totalPlayCount;
 
   /// 回忆坐标：累计播放附加描述（musicTotalPlayDto.text）
   final String totalPlayText;
 
-  bool get isEmpty => groups.isEmpty && totalPlayCount == 0 && firstListenDate.isEmpty;
+  bool get isEmpty =>
+      groups.isEmpty &&
+      totalPlayCount == 0 &&
+      firstListenDate.isEmpty &&
+      firstListenDesc.isEmpty;
 
   static SongWikiSummary fromJson(Map<String, Object?> data) {
     final Object? blocks = data['blocks'] ?? data['data'];
@@ -421,6 +516,7 @@ class SongWikiSummary {
     final List<WikiGroup> groups = <WikiGroup>[];
     String firstDate = '';
     String firstExtra = '';
+    String firstDesc = '';
     int totalPlay = 0;
     String totalText = '';
 
@@ -458,6 +554,7 @@ class SongWikiSummary {
                 if (season.isNotEmpty) season,
                 if (period.isNotEmpty) period,
               ].join(' · ');
+              firstDesc = (fl['desc'] as String?) ?? firstDesc;
             }
             final Object? tp = ext['musicTotalPlayDto'];
             if (tp is Map<String, Object?>) {
@@ -513,6 +610,7 @@ class SongWikiSummary {
       groups: groups,
       firstListenDate: firstDate,
       firstListenExtra: firstExtra,
+      firstListenDesc: firstDesc,
       totalPlayCount: totalPlay,
       totalPlayText: totalText,
     );

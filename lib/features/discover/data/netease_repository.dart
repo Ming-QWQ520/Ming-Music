@@ -35,6 +35,9 @@ class NeteaseRepository {
 
   /// 搜索（对齐 Zephyr-Music：/search 为主，/cloudsearch 兜底 ——
   /// 增强版 API 的 cloudsearch 在部分关键词下返回异常结构导致搜索报错）。
+  /// 需求「搜索页显示每首歌的封面」：旧版 /search 结果的 album 只含
+  /// picId 不含 picUrl —— 封面全灭；对封面缺失的结果批量 /song/detail
+  /// 补全 al.picUrl（一次请求，与网易云客户端行为一致）。
   Future<List<Song>> search(String keywords, {int limit = 30}) async {
     final Map<String, String> params = <String, String>{
       'keywords': keywords,
@@ -42,20 +45,52 @@ class NeteaseRepository {
       'offset': '0',
       'type': '1',
     };
+    List<Song> parsed = const <Song>[];
     try {
       final Map<String, Object?> res = await _api.get('/search', params);
       final Object? result = res['result'];
       final Object? songs =
           (result is Map<String, Object?>) ? result['songs'] : null;
-      final List<Song> parsed = _songsFrom(songs);
-      if (parsed.isNotEmpty) return parsed;
+      parsed = _songsFrom(songs);
     } catch (_) {
       // 主接口抖动 → 走 cloudsearch 兜底
     }
-    final Map<String, Object?> res = await _api.get('/cloudsearch', params);
-    final Object? data = res['data'];
-    final Object? songs = (data is Map<String, Object?>) ? data['songs'] : null;
-    return _songsFrom(songs);
+    if (parsed.isEmpty) {
+      final Map<String, Object?> res = await _api.get('/cloudsearch', params);
+      final Object? data = res['data'];
+      final Object? songs = (data is Map<String, Object?>) ? data['songs'] : null;
+      parsed = _songsFrom(songs);
+    }
+    return _fillMissingCovers(parsed);
+  }
+
+  /// 封面缺失批量补全：对 coverUrl 为空的歌请求 /song/detail（
+  /// 响应含 al.picUrl），按 id 回填；失败静默返回原列表。
+  Future<List<Song>> _fillMissingCovers(List<Song> songs) async {
+    final List<int> missing = <int>[
+      for (final Song s in songs)
+        if ((s.coverUrl == null || s.coverUrl!.isEmpty) && s.id > 0) s.id,
+    ];
+    if (missing.isEmpty) return songs;
+    try {
+      final Map<int, String> covers = <int, String>{};
+      for (int i = 0; i < missing.length; i += 100) {
+        final List<int> chunk =
+            missing.sublist(i, (i + 100).clamp(0, missing.length));
+        final List<Song> filled = await songDetails(chunk);
+        for (final Song f in filled) {
+          if (f.coverUrl != null && f.coverUrl!.isNotEmpty) {
+            covers[f.id] = f.coverUrl!;
+          }
+        }
+      }
+      if (covers.isEmpty) return songs;
+      return <Song>[
+        for (final Song s in songs) s.withCover(covers[s.id] ?? s.coverUrl),
+      ];
+    } catch (_) {
+      return songs;
+    }
   }
 
   /// 搜索建议（/search/suggest，type=mobile 返回 allMatch）
@@ -93,7 +128,10 @@ class NeteaseRepository {
         .toList(growable: false);
   }
 
-  /// 歌单详情（榜单同构，亦复用此接口）
+  /// 歌单详情（榜单同构，亦复用此接口）。
+  /// 需求修复：/playlist/detail 的 tracks 只返回前 8 条 —— 大歌单列表
+  /// 残缺且搜索加入的歌（不在前 8）无封面；按 trackIds 批量
+  /// /song/detail 补全全量曲目（含 al.picUrl）。
   Future<PlaylistDetail> playlistDetail(int id) async {
     final Map<String, Object?> res =
         await _api.get('/playlist/detail', <String, String>{'id': '$id'});
@@ -102,15 +140,51 @@ class NeteaseRepository {
       throw ApiException('歌单不存在或已下架');
     }
     final PlaylistMeta meta = PlaylistMeta.fromJson(playlist);
-    final List<Song> tracks = _songsFrom(playlist['tracks']);
-    // 部分歌单 tracks 只返回前 8 条，trackIds 补全（歌曲名等信息后续按需拉取）
-    if (tracks.isEmpty) {
-      final Object? trackIds = playlist['trackIds'];
-      if (trackIds is List<Object?>) {
-        return PlaylistDetail(meta: meta, tracks: const <Song>[]);
+    List<Song> tracks = _songsFrom(playlist['tracks']);
+    final List<int> trackIds = <int>[
+      for (final Object? t in (playlist['trackIds'] as List<Object?>? ?? const <Object?>[]))
+        if (t is Map<String, Object?>) ((t['id'] as num?)?.toInt() ?? 0),
+    ].where((int v) => v > 0).toList(growable: false);
+
+    if (tracks.isEmpty && trackIds.isNotEmpty) {
+      // tracks 全缺：仅 trackIds —— 分批拉全量
+      tracks = await _songsByIds(trackIds);
+    } else if (tracks.length < trackIds.length) {
+      // tracks 只有前 N 条：补全剩余（保持 trackIds 顺序）
+      final Set<int> have = <int>{for (final Song s in tracks) s.id};
+      final List<int> rest = <int>[
+        for (final int tid in trackIds) if (!have.contains(tid)) tid,
+      ];
+      if (rest.isNotEmpty) {
+        final List<Song> more = await _songsByIds(rest);
+        if (more.isNotEmpty) {
+          final Map<int, Song> byId = <int, Song>{for (final Song s in more) s.id: s};
+          final List<Song> merged = <Song>[...tracks];
+          for (final int tid in trackIds) {
+            if (!have.contains(tid) && byId.containsKey(tid)) {
+              merged.add(byId[tid]!);
+            }
+          }
+          tracks = merged;
+        }
       }
     }
     return PlaylistDetail(meta: meta, tracks: tracks);
+  }
+
+  /// 按 id 批量拉歌曲（/song/detail，100 一批），带封面补全
+  Future<List<Song>> _songsByIds(List<int> ids) async {
+    final List<Song> out = <Song>[];
+    for (int i = 0; i < ids.length; i += 100) {
+      final List<int> chunk = ids.sublist(i, (i + 100).clamp(0, ids.length));
+      try {
+        final List<Song> part = await songDetails(chunk);
+        out.addAll(part);
+      } catch (_) {
+        // 单批失败不阻断整体
+      }
+    }
+    return out;
   }
 
   /// 榜单详情（同歌单接口）

@@ -188,15 +188,61 @@ class _TabChip extends StatelessWidget {
 
 // ---------------------------------------------------------------- 当前播放
 
-class _CurrentPane extends ConsumerWidget {
+class _CurrentPane extends ConsumerStatefulWidget {
   const _CurrentPane({required this.state, required this.count});
 
   final PlayerState state;
   final int count;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<_CurrentPane> createState() => _CurrentPaneState();
+}
+
+class _CurrentPaneState extends ConsumerState<_CurrentPane> {
+  /// 播放列表滚动控制（需求：打开时定位到当前播放歌曲）
+  final ScrollController _scroll = ScrollController();
+
+  /// 单行估算高度（_QueueRow：vertical padding 10×2 + 文本行 ≈ 41px）
+  static const double _rowH = 44;
+
+  @override
+  void initState() {
+    super.initState();
+    // 需求：打开播放列表时定位到当前播放歌曲 —— 当前歌曲上方显示两首
+    WidgetsBinding.instance.addPostFrameCallback((_) => _locate(animate: false));
+  }
+
+  @override
+  void dispose() {
+    _scroll.dispose();
+    super.dispose();
+  }
+
+  /// 滚动到当前播放歌曲：使其上方保留两行可见（近似居中偏上）
+  void _locate({bool animate = true}) {
+    final PlayerState ps = widget.state;
+    if (!ps.hasQueue) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_scroll.hasClients) return;
+      final double max = _scroll.position.maxScrollExtent;
+      final double target =
+          ((ps.index - 2) * _rowH).clamp(0.0, max);
+      if ((target - _scroll.offset).abs() < 1) return;
+      if (animate) {
+        _scroll.animateTo(target,
+            duration: const Duration(milliseconds: 320),
+            curve: Curves.easeOutCubic);
+      } else {
+        _scroll.jumpTo(target);
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
+    final PlayerState state = widget.state;
+    final int count = widget.count;
     if (count == 0) {
       return Padding(
         padding: const EdgeInsets.symmetric(vertical: 56),
@@ -206,63 +252,89 @@ class _CurrentPane extends ConsumerWidget {
         ),
       );
     }
-    return Column(
-      mainAxisSize: MainAxisSize.min,
+    return Stack(
       children: <Widget>[
-        if (state.queueTitle != null)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 6, 20, 0),
-            child: Align(
-              alignment: Alignment.centerLeft,
-              child: Text(
-                '来自：${state.queueTitle}',
-                style: TextStyle(
-                  fontSize: 12.5,
-                  color: theme.colorScheme.onSurfaceVariant,
+        Column(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            if (state.queueTitle != null)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 6, 20, 0),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    '来自：${state.queueTitle}',
+                    style: TextStyle(
+                      fontSize: 12.5,
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
                 ),
               ),
-            ),
-          ),
-        Flexible(
-          // 需求：拖动按键可对歌曲自定义排序
-          child: ReorderableListView.builder(
-            buildDefaultDragHandles: false,
-            padding: const EdgeInsets.only(bottom: 16),
-            itemCount: count,
-            onReorderItem: (int oldIndex, int newIndex) =>
-                ref.read(playerProvider.notifier).reorderQueue(oldIndex, newIndex),
-            proxyDecorator: (Widget child, int index, Animation<double> anim) {
-              return AnimatedBuilder(
-                animation: anim,
-                builder: (BuildContext ctx, Widget? w) => Material(
-                  color: Colors.white
-                      .withValues(alpha: 0.06 * anim.value.clamp(0.0, 1.0)),
-                  borderRadius: BorderRadius.circular(12),
-                  elevation: 0,
-                  child: w,
-                ),
-                child: child,
-              );
-            },
-            itemBuilder: (BuildContext context, int index) {
-              final Track t = state.queue[index];
-              final bool current = index == state.index;
-              return _QueueRow(
-                key: ValueKey<String>('${t.id}_$index'),
-                track: t,
-                current: current,
-                playing: state.playing,
-                index: index,
-                onTap: () async {
-                  Navigator.of(context).pop();
-                  await ref.read(playerProvider.notifier).playAt(index);
+            Flexible(
+              // 需求：拖动按键可对歌曲自定义排序
+              child: ReorderableListView.builder(
+                buildDefaultDragHandles: false,
+                scrollController: _scroll,
+                padding: const EdgeInsets.only(bottom: 16),
+                itemCount: count,
+                onReorderItem: (int oldIndex, int newIndex) =>
+                    ref.read(playerProvider.notifier).reorderQueue(oldIndex, newIndex),
+                proxyDecorator: (Widget child, int index, Animation<double> anim) {
+                  return AnimatedBuilder(
+                    animation: anim,
+                    builder: (BuildContext ctx, Widget? w) => Material(
+                      color: Colors.white
+                          .withValues(alpha: 0.06 * anim.value.clamp(0.0, 1.0)),
+                      borderRadius: BorderRadius.circular(12),
+                      elevation: 0,
+                      child: w,
+                    ),
+                    child: child,
+                  );
                 },
-                onRemove: () =>
-                    ref.read(playerProvider.notifier).removeFromQueue(index),
-                onAddTo: () =>
-                    showAddToPlaylistSheet(context, ref, <int>[t.neteaseId ?? 0]),
-              );
-            },
+                itemBuilder: (BuildContext context, int index) {
+                  final Track t = state.queue[index];
+                  final bool current = index == state.index;
+                  return _QueueRow(
+                    key: ValueKey<String>('${t.id}_$index'),
+                    track: t,
+                    current: current,
+                    playing: state.playing,
+                    index: index,
+                    onTap: () async {
+                      Navigator.of(context).pop();
+                      await ref.read(playerProvider.notifier).playAt(index);
+                    },
+                    onRemove: () =>
+                        ref.read(playerProvider.notifier).removeFromQueue(index),
+                    onAddTo: () =>
+                        showAddToPlaylistSheet(context, ref, <int>[t.neteaseId ?? 0]),
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+        // 需求：定位当前播放歌曲按键（滚动离开当前歌后可一键回位）
+        Positioned(
+          right: 16,
+          bottom: 20,
+          child: Material(
+            color: AppConstants.darkSurface.withValues(alpha: 0.92),
+            shape: const CircleBorder(
+              side: BorderSide(color: Colors.white24, width: 1),
+            ),
+            clipBehavior: Clip.antiAlias,
+            elevation: 2,
+            child: InkWell(
+              onTap: () => _locate(),
+              child: const Padding(
+                padding: EdgeInsets.all(10),
+                child: Icon(Icons.my_location_rounded,
+                    size: 20, color: AppConstants.brandColor),
+              ),
+            ),
           ),
         ),
       ],

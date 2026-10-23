@@ -11,10 +11,15 @@
 ///  - ⋮ 菜单：分享歌单 / 收藏或取消收藏 / 删除歌单（仅自己创建）。
 library;
 
+import 'dart:async' show unawaited;
+import 'dart:convert';
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:path_provider/path_provider.dart';
 
 import '../../../core/api/netease_models.dart';
 import '../../../core/constants/app_constants.dart';
@@ -26,6 +31,7 @@ import '../../comments/providers/comments_providers.dart'
 import '../../library/data/download_service.dart';
 import '../../library/domain/track.dart';
 import '../../library/presentation/add_to_playlist_sheet.dart';
+import '../../player/providers/cache_providers.dart';
 import '../../player/providers/player_providers.dart';
 import '../data/netease_providers.dart';
 import 'widgets/song_actions_sheet.dart';
@@ -55,46 +61,108 @@ class PlaylistDetailPage extends ConsumerStatefulWidget {
 }
 
 class _PlaylistDetailPageState extends ConsumerState<PlaylistDetailPage> {
-  late Future<PlaylistDetail> _future;
+  /// 需求「无网时也可在我的中点击歌单查看」：详情数据落盘
+  /// （applicationSupport/playlist_cache/{id}.json），打开时缓存优先
+  /// 立即渲染，有网后台刷新回写；无网/请求失败时展示离线快照。
+  PlaylistDetail? _data;
+  String? _error;
+  bool _loading = false;
 
   @override
   void initState() {
     super.initState();
-    _future = _load();
+    _initialLoad();
   }
 
-  Future<PlaylistDetail> _load() =>
-      ref.read(neteaseRepositoryProvider).playlistDetail(widget.playlistId);
+  Future<void> _initialLoad() async {
+    final PlaylistDetail? cached = await _readDiskCache();
+    if (!mounted) return;
+    if (cached != null && cached.tracks.isNotEmpty) {
+      setState(() => _data = cached);
+    }
+    _refresh();
+  }
+
+  Future<void> _refresh() async {
+    setState(() => _loading = true);
+    try {
+      final PlaylistDetail fresh = await ref
+          .read(neteaseRepositoryProvider)
+          .playlistDetail(widget.playlistId);
+      unawaited(_writeDiskCache(fresh));
+      if (!mounted) return;
+      setState(() {
+        _data = fresh;
+        _error = null;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      // 已有离线快照时静默（离线场景）；无快照才显示错误页
+      if (_data == null) {
+        setState(() => _error = '$e');
+      }
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  Future<PlaylistDetail?> _readDiskCache() async {
+    try {
+      final Directory dir = await _cacheDir();
+      final File f = File('${dir.path}/${widget.playlistId}.json');
+      if (!f.existsSync()) return null;
+      final Object? decoded = jsonDecode(await f.readAsString());
+      if (decoded is! Map<String, Object?>) return null;
+      return PlaylistDetail.fromStoredJson(decoded);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> _writeDiskCache(PlaylistDetail d) async {
+    try {
+      if (d.tracks.isEmpty) return;
+      final Directory dir = await _cacheDir();
+      final File f = File('${dir.path}/${widget.playlistId}.json');
+      await f.writeAsString(jsonEncode(d.toJson()), flush: true);
+    } catch (_) {}
+  }
+
+  Future<Directory> _cacheDir() async {
+    final Directory support = await getApplicationSupportDirectory();
+    final Directory dir = Directory('${support.path}/playlist_cache');
+    if (!dir.existsSync()) dir.createSync(recursive: true);
+    return dir;
+  }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      body: FutureBuilder<PlaylistDetail>(
-        future: _future,
-        builder: (BuildContext context, AsyncSnapshot<PlaylistDetail> snap) {
-          if (snap.connectionState != ConnectionState.done) {
-            return const Center(
-              child: SizedBox(
-                width: 30,
-                height: 30,
-                child: CircularProgressIndicator(strokeWidth: 2.6),
-              ),
-            );
-          }
-          if (snap.hasError || !snap.hasData) {
-            return _ErrorPanel(onRetry: () {
-              setState(() => _future = _load());
-            });
-          }
-          return _DetailBody(
-            meta: snap.data!.meta,
-            fallbackTitle: widget.title,
-            tracks: snap.data!.tracks,
-            isMine: _isMine(snap.data!.meta),
-            // 长按菜单「移除歌单」成功后刷新详情数据
-            onReload: () => setState(() => _future = _load()),
-          );
-        },
+    final PlaylistDetail? data = _data;
+    if (data != null) {
+      return Scaffold(
+        body: _DetailBody(
+          meta: data.meta,
+          fallbackTitle: widget.title,
+          tracks: data.tracks,
+          isMine: _isMine(data.meta),
+          loading: _loading,
+          // 长按菜单「移除歌单」成功后刷新详情数据
+          onReload: _refresh,
+        ),
+      );
+    }
+    if (_error != null) {
+      return Scaffold(
+        body: _ErrorPanel(onRetry: _refresh, message: _error),
+      );
+    }
+    return const Scaffold(
+      body: Center(
+        child: SizedBox(
+          width: 30,
+          height: 30,
+          child: CircularProgressIndicator(strokeWidth: 2.6),
+        ),
       ),
     );
   }
@@ -118,6 +186,7 @@ class _DetailBody extends ConsumerStatefulWidget {
     required this.tracks,
     required this.isMine,
     required this.onReload,
+    this.loading = false,
   });
 
   final PlaylistMeta meta;
@@ -127,6 +196,9 @@ class _DetailBody extends ConsumerStatefulWidget {
 
   /// 详情数据刷新（长按菜单移除歌曲后回调）
   final VoidCallback onReload;
+
+  /// 离线快照已展示 + 后台刷新中（顶部细线进度提示）
+  final bool loading;
 
   @override
   ConsumerState<_DetailBody> createState() => _DetailBodyState();
@@ -467,6 +539,11 @@ class _DetailBodyState extends ConsumerState<_DetailBody> {
 
     return CustomScrollView(
       slivers: <Widget>[
+        // 离线快照后台刷新中：顶部细线进度提示
+        if (widget.loading)
+          const SliverToBoxAdapter(
+            child: LinearProgressIndicator(minHeight: 2),
+          ),
         // ---------- 顶部悬浮导航（透明，覆盖在封面上） ----------
         SliverAppBar(
           pinned: true,
@@ -981,7 +1058,7 @@ class _BarIcon extends StatelessWidget {
 
 /// 歌单歌曲行（描述.txt：封面缩略图 + 标题 + VIP 标签 + 歌手-专辑），
 /// 支持右滑移除（自有歌单）/ 左滑添加至歌单。
-class _SwipeSongRow extends StatelessWidget {
+class _SwipeSongRow extends ConsumerWidget {
   const _SwipeSongRow({
     super.key,
     required this.song,
@@ -1008,11 +1085,17 @@ class _SwipeSongRow extends StatelessWidget {
   final VoidCallback? onLongPress;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final ThemeData theme = Theme.of(context);
+    // 需求：歌名按缓存状态着色 —— 已缓存正常显示，未缓存暗淡
+    final Set<int> cachedIds =
+        ref.watch(cachedSongIdsProvider).valueOrNull ?? const <int>{};
+    final bool cached = cachedIds.contains(song.id);
     final Color titleColor = playingNow
         ? AppConstants.brandColor
-        : theme.colorScheme.onSurface;
+        : cached
+            ? theme.colorScheme.onSurface
+            : theme.colorScheme.onSurface.withValues(alpha: 0.38);
 
     final Widget row = InkWell(
       onTap: onPlay,
@@ -1212,9 +1295,12 @@ class _SwipeBg extends StatelessWidget {
 // ---------------------------------------------------------------- 错误面板
 
 class _ErrorPanel extends StatelessWidget {
-  const _ErrorPanel({required this.onRetry});
+  const _ErrorPanel({required this.onRetry, this.message});
 
   final VoidCallback onRetry;
+
+  /// 具体错误文案（离线快照不存在时的首载失败）
+  final String? message;
 
   @override
   Widget build(BuildContext context) {
@@ -1225,7 +1311,9 @@ class _ErrorPanel extends StatelessWidget {
           Icon(Icons.cloud_off_rounded,
               size: 44, color: Theme.of(context).colorScheme.onSurfaceVariant),
           const SizedBox(height: 10),
-          const Text('加载失败，请检查网络'),
+          Text(message == null ? '加载失败，请检查网络' : '加载失败：$message',
+              textAlign: TextAlign.center,
+              style: const TextStyle(fontSize: 13)),
           const SizedBox(height: 12),
           OutlinedButton(onPressed: onRetry, child: const Text('重试')),
         ],

@@ -1,13 +1,18 @@
-/// MingMusic 单元测试：LRC 解析 / 二分查找 / 时间格式化 / Track 序列化。
+/// MingMusic 单元测试：LRC 解析 / 二分查找 / 时间格式化 / Track 序列化 /
+/// 翻译就近匹配 / 歌单离线缓存序列化。
 ///
 /// 说明：音频引擎依赖平台通道（AudioService.init），不适合在纯 Dart
 /// 测试环境运行，因此本文件聚焦可确定性验证的核心工具层。
 library;
 
+import 'dart:convert';
+
 import 'package:flutter_test/flutter_test.dart';
+import 'package:ming_music/core/api/netease_models.dart';
 import 'package:ming_music/core/utils/duration_utils.dart';
 import 'package:ming_music/core/utils/lyrics.dart';
 import 'package:ming_music/features/library/domain/track.dart';
+import 'package:ming_music/features/player/providers/lyrics_providers.dart';
 
 void main() {
   group('parseLrc', () {
@@ -126,6 +131,93 @@ void main() {
           Track(id: 'x', title: 'b', artist: 'c', album: 'd', source: 't');
       expect(a, equals(b));
       expect(a.hashCode, b.hashCode);
+    });
+  });
+
+  group('ParsedLyrics 翻译就近匹配', () {
+    test('精确命中', () {
+      final ParsedLyrics lyrics = ParsedLyrics(
+        lrcLines: parseLrc('[00:10.000]Hello world'),
+        translations: <int, String>{10000: '你好世界'},
+      );
+      expect(lyrics.subLineFor(10000), '你好世界');
+    });
+
+    test('时间轴整体偏移时就近命中（≤600ms）', () {
+      // 修复「部分外语歌不显示翻译」：tlyric 与原文相差几十至几百毫秒
+      final ParsedLyrics lyrics = ParsedLyrics(
+        lrcLines: parseLrc('[00:10.000]Hello'),
+        translations: <int, String>{10420: '你好'},
+      );
+      expect(lyrics.subLineFor(10000), '你好');
+    });
+
+    test('超出容忍度不误配', () {
+      final ParsedLyrics lyrics = ParsedLyrics(
+        lrcLines: parseLrc('[00:10.000]Hello'),
+        translations: <int, String>{11200: '你好'},
+      );
+      expect(lyrics.subLineFor(10000), isEmpty);
+    });
+
+    test('多个翻译行取最近的一行', () {
+      final ParsedLyrics lyrics = ParsedLyrics(
+        lrcLines: parseLrc('[00:20.000]Line'),
+        translations: <int, String>{
+          19000: '上一行',
+          20100: '当前行',
+          26000: '下一行',
+        },
+      );
+      expect(lyrics.subLineFor(20000), '当前行');
+    });
+
+    test('无翻译时回退音译', () {
+      final ParsedLyrics lyrics = ParsedLyrics(
+        lrcLines: parseLrc('[00:05.000]アイウエオ'),
+        romanizations: <int, String>{5030: 'aiueo'},
+      );
+      expect(lyrics.subLineFor(5000), 'aiueo');
+    });
+  });
+
+  group('歌单离线缓存序列化', () {
+    test('PlaylistDetail toJson / fromStoredJson 往返一致', () {
+      const PlaylistDetail detail = PlaylistDetail(
+        meta: PlaylistMeta(
+          id: 42,
+          name: '测试歌单',
+          coverUrl: 'https://p1.music.126.net/x.jpg',
+          trackCount: 2,
+          creator: '某人',
+          creatorUserId: 7,
+        ),
+        tracks: <Song>[
+          Song(
+            id: 1,
+            name: '歌一',
+            artists: '甲',
+            album: '专一',
+            coverUrl: 'https://p1.music.126.net/a.jpg',
+            durationMs: 200000,
+            fee: 0,
+          ),
+          Song(id: 2, name: '歌二', artists: '乙 / 丙', album: '', fee: 1),
+        ],
+      );
+      final Map<String, Object?> encoded = detail.toJson();
+      final String json = jsonEncode(encoded); // 必须可 JSON 序列化
+      final PlaylistDetail restored =
+          PlaylistDetail.fromStoredJson(jsonDecode(json) as Map<String, Object?>);
+      expect(restored.meta.id, 42);
+      expect(restored.meta.name, '测试歌单');
+      expect(restored.meta.creatorUserId, 7);
+      expect(restored.tracks.length, 2);
+      expect(restored.tracks[0].name, '歌一');
+      expect(restored.tracks[0].coverUrl, 'https://p1.music.126.net/a.jpg');
+      expect(restored.tracks[0].durationMs, 200000);
+      expect(restored.tracks[1].fee, 1);
+      expect(restored.tracks[1].artists, '乙 / 丙');
     });
   });
 }

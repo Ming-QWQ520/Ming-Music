@@ -76,7 +76,13 @@ class PlayerBackground extends ConsumerWidget {
           ],
         ),
         child: Container(
-          key: ValueKey<Object>('${config.identityKey}|${track?.id ?? 'none'}'),
+          // 需求「切换歌曲时短暂显示首页」修复：key 不再包含 track.id ——
+          // 换歌时不重建背景层（旧实现整层交叉淡化，新图加载期间露出
+          // 深色兜底与页面下方路由的叠影，观感像闪回首页）；封面变化由
+          // _BlurCoverBackground 内部 CoverImage keepOldWhileLoading
+          // 无缝换图（旧图保留到新图就绪），背景类型/渐变/自定义图片
+          // 变化仍走 AnimatedSwitcher 平滑过渡。
+          key: ValueKey<Object>(config.identityKey),
           color: const Color(0xFF0B0A14),
           child: child,
         ),
@@ -114,7 +120,13 @@ class _BlurCoverBackground extends StatelessWidget {
           imageFilter: ImageFilter.blur(sigmaX: blurSigma, sigmaY: blurSigma),
           child: Transform.scale(
             scale: 1.35, // 放大避免模糊边缘露黑
-            child: CoverImage(src: cover, size: 1024, radius: 0),
+            // keepOldWhileLoading：切歌时保留旧模糊图直到新图就绪（无缝）
+            child: CoverImage(
+              src: cover,
+              size: 1024,
+              radius: 0,
+              keepOldWhileLoading: true,
+            ),
           ),
         ),
         // 暗色纱罩保证前景可读性（强度可调）

@@ -1,8 +1,15 @@
 /// 喜欢的歌曲（服务器红心 /likelist → /song/detail 批量补全）。
+/// 需求「无网时也可在我的中点击歌单查看」：成功拉取后快照落盘，
+/// 请求失败时展示离线快照（歌名按缓存状态着色的逻辑同歌单详情页）。
 library;
+
+import 'dart:async' show unawaited;
+import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:path_provider/path_provider.dart';
 
 import '../../../core/api/netease_models.dart';
 import '../../../core/constants/app_constants.dart';
@@ -48,13 +55,59 @@ class _LikedSongsPageState extends ConsumerState<LikedSongsPage> {
       }
       if (!mounted) return;
       setState(() => _songs = out);
+      unawaited(_writeDiskCache(out));
     } catch (e) {
       if (!mounted) return;
+      // 离线快照兜底（需求：无网也可查看喜欢列表）
+      final List<Song>? cached = await _readDiskCache();
+      if (!mounted) return;
+      if (cached != null && cached.isNotEmpty) {
+        setState(() => _songs = cached);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('当前离线，展示上次缓存的歌曲列表')),
+        );
+        return;
+      }
       setState(() => _songs = const <Song>[]);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('喜欢列表加载失败：$e')),
       );
     }
+  }
+
+  Future<Directory> _cacheDir() async {
+    final Directory support = await getApplicationSupportDirectory();
+    final Directory dir = Directory('${support.path}/playlist_cache');
+    if (!dir.existsSync()) dir.createSync(recursive: true);
+    return dir;
+  }
+
+  Future<List<Song>?> _readDiskCache() async {
+    try {
+      final Directory dir = await _cacheDir();
+      final File f = File('${dir.path}/liked.json');
+      if (!f.existsSync()) return null;
+      final Object? decoded = jsonDecode(await f.readAsString());
+      if (decoded is! List<Object?>) return null;
+      return <Song>[
+        for (final Object? s in decoded)
+          if (s is Map<String, Object?>) Song.fromStoredJson(s),
+      ];
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> _writeDiskCache(List<Song> songs) async {
+    try {
+      if (songs.isEmpty) return;
+      final Directory dir = await _cacheDir();
+      final File f = File('${dir.path}/liked.json');
+      await f.writeAsString(
+        jsonEncode(<Object?>[for (final Song s in songs) s.toJson()]),
+        flush: true,
+      );
+    } catch (_) {}
   }
 
   void _playAll(int index) {
