@@ -320,19 +320,23 @@ class _CurrentPaneState extends ConsumerState<_CurrentPane> {
         Positioned(
           right: 16,
           bottom: 20,
-          child: Material(
-            color: AppConstants.darkSurface.withValues(alpha: 0.92),
-            shape: const CircleBorder(
-              side: BorderSide(color: Colors.white24, width: 1),
-            ),
-            clipBehavior: Clip.antiAlias,
-            elevation: 2,
-            child: InkWell(
-              onTap: () => _locate(),
-              child: const Padding(
-                padding: EdgeInsets.all(10),
-                child: Icon(Icons.my_location_rounded,
-                    size: 20, color: AppConstants.brandColor),
+          child: Tooltip(
+            message: '定位当前歌曲',
+            preferBelow: false,
+            child: Material(
+              color: AppConstants.darkSurface.withValues(alpha: 0.92),
+              shape: const CircleBorder(
+                side: BorderSide(color: Colors.white24, width: 1),
+              ),
+              clipBehavior: Clip.antiAlias,
+              elevation: 2,
+              child: InkWell(
+                onTap: () => _locate(),
+                child: const Padding(
+                  padding: EdgeInsets.all(10),
+                  child: Icon(Icons.my_location_rounded,
+                      size: 20, color: AppConstants.brandColor),
+                ),
               ),
             ),
           ),
