@@ -346,6 +346,14 @@ class NeteaseRepository {
 
   // -------------------------------------------------- 音乐云盘
 
+  /// 云盘容量信息（/user/cloud 顶层 count/size/maxSize，分页无关）
+  /// 需求：云盘显示总歌曲数和总容量；我的页登录后显示总歌曲数
+  Future<CloudDriveInfo> cloudInfo() async {
+    final Map<String, Object?> res = await _api.get('/user/cloud',
+        <String, String>{'limit': '1', 'offset': '0'});
+    return CloudDriveInfo.fromJson(res);
+  }
+
   /// 云盘列表（/user/cloud）
   Future<List<CloudSong>> cloudList({int limit = 100, int offset = 0}) async {
     final Map<String, Object?> res = await _api.get('/user/cloud',

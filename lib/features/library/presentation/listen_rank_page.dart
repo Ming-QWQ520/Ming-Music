@@ -162,6 +162,7 @@ class _ListenRankPageState extends ConsumerState<ListenRankPage> {
                 queueTitle: _week ? '听歌排行 · 最近一周' : '听歌排行 · 所有时间',
               ),
           onMore: () => showSongActionsSheet(context, s.toTrack()),
+          onLongPress: () => showSongActionsSheet(context, s.toTrack()),
           trailing: Padding(
             padding: const EdgeInsets.only(right: 12),
             child: Text(

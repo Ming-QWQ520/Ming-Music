@@ -118,8 +118,8 @@ class NpPlayerSettings {
     this.coverScale = 1.0,
     this.coverShadow = true,
     this.squareCoverRadius = false,
-    this.bgBlur = 22,
-    this.bgDim = 55,
+    this.bgBlur = 25,
+    this.bgDim = 75,
     this.lyricFontSize = 17,
     this.lyricLineGap = 14,
     this.lyricAlign = NpLyricAlign.left,
@@ -165,10 +165,10 @@ class NpPlayerSettings {
 
   // ---- 背景 ----
 
-  /// 背景模糊强度 px（0 - 40）
+  /// 背景模糊强度 px（0 - 40；需求默认 25）
   final double bgBlur;
 
-  /// 背景变暗 %（0 - 100）
+  /// 背景变暗 %（0 - 100；需求默认 75）
   final double bgDim;
 
   // ---- 歌词 ----

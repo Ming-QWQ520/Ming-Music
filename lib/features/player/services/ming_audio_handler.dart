@@ -153,31 +153,17 @@ class MingAudioHandler extends BaseAudioHandler with SeekHandler {
 
   Future<Uri?> resolveArtworkUri(String cover) async {
     if (cover.startsWith('http')) {
-      // 优先本地缓存文件（修复通知栏封面 403：部分 CDN 节点拒绝
-      // 系统通知的直连请求），未缓存时回退网络 URL。
-      // 需求「适当放大歌曲封面」：通知栏取原图分辨率（500y500 → 原图），
-      // 系统按 largeIcon 缩放后明显更清晰饱满；原图经磁盘缓存仅下载一次。
+      // 通知栏封面：走有界专用存储（修复通知栏封面 403：系统通知直连网易
+      // CDN 被拒），最多保留 6 个文件自动淘汰，不属于通用封面缓存。
+      // 需求「适当放大歌曲封面」：通知栏取原图分辨率，系统按 largeIcon
+      // 缩放后明显更清晰饱满。
       final Uri? cached = _artworkCache[cover];
       if (cached != null) return cached;
-      try {
-        final File? f =
-            await CoverImage.cachedFileFor(cover, size: CoverSize.original);
-        if (f != null) {
-          final Uri uri = Uri.file(f.path);
-          _artworkCache[cover] = uri;
-          return uri;
-        }
-      } catch (_) {
-        // 原图失败回退 500y500
-        try {
-          final File? f =
-              await CoverImage.cachedFileFor(cover, size: CoverSize.large);
-          if (f != null) {
-            final Uri uri = Uri.file(f.path);
-            _artworkCache[cover] = uri;
-            return uri;
-          }
-        } catch (_) {}
+      final File? f = await NotificationArtCache.fileFor(cover);
+      if (f != null) {
+        final Uri uri = Uri.file(f.path);
+        _artworkCache[cover] = uri;
+        return uri;
       }
       return Uri.parse(cover);
     }

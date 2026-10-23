@@ -1,4 +1,5 @@
 /// 歌曲条目组件：参考图6 歌单列表行 —— 封面/序号 + 标题 + VIP 徽章 + 副标题。
+/// 需求：所有歌曲支持长按弹出统一操作菜单（onLongPress）。
 library;
 
 import 'package:flutter/material.dart';
@@ -41,6 +42,7 @@ class SongTile extends StatelessWidget {
     required this.song,
     this.trackIndex,
     this.onPlay,
+    this.onLongPress,
     this.onMore,
     this.playing = false,
     this.trailing,
@@ -53,6 +55,9 @@ class SongTile extends StatelessWidget {
 
   /// 点击整行 → 播放
   final VoidCallback? onPlay;
+
+  /// 长按整行 → 统一操作菜单（需求：所有歌曲增加长按弹出菜单）
+  final VoidCallback? onLongPress;
 
   /// 右侧三点菜单（详情操作），null 隐藏
   final VoidCallback? onMore;
@@ -82,6 +87,7 @@ class SongTile extends StatelessWidget {
 
     return InkWell(
       onTap: onPlay,
+      onLongPress: onLongPress,
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
         child: Row(

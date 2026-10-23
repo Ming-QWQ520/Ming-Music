@@ -150,6 +150,7 @@ class _RecentSongsPageState extends ConsumerState<RecentSongsPage> {
                     queueTitle: '最近播放',
                   ),
               onMore: () => showSongActionsSheet(context, s.toTrack()),
+              onLongPress: () => showSongActionsSheet(context, s.toTrack()),
             );
           },
         ),

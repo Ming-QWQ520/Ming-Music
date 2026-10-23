@@ -2,15 +2,17 @@
 ///
 /// 布局模式（NpPlayerSettings.miniStyle）：
 ///  - compact 紧凑极简：**嵌入底部导航栏「发现 ⇄ 我的」中间**（需求），
-///    仅封面（圆环进度）+ 小播放键 + 小列表键，点击主体进全屏；
+///    像 kgka_Music_hl 那样**只显示歌曲封面**，周围显示歌曲进度（圆环），
+///    点击主体进全屏；
 ///  - classic / overlay / wide：**悬浮于导航栏上方**（需求：维持之前的
 ///    设计），背景与边框全透明（无 Material 底色 / 无描边），带控制键：
-///    · classic：封面+圆环 + 单行「歌名 - 歌手」 + 播放键 + 列表键；
+///    · classic：封面 + 单行「歌名 - 歌手」 + 播放键 + 列表键
+///      （需求：经典样式播放键周围无进度条显示）；
 ///    · overlay：封面作背景 + 渐变压暗 + 标题叠印 + 播放键 + 列表键；
-///    · wide：封面+圆环 + 歌名/歌手双行 + 播放键 + 列表键 + 底部细进度线。
+///    · wide：封面 + 歌名/歌手双行 + 播放键 + 列表键 + 底部细进度线。
 ///
 /// 通用：
-///  - 进度：播放键四周圆环（顶部中心起点，顺时针）；
+///  - 进度：圆环仅在紧凑极简模式绕封面显示（顶部中心起点，顺时针）；
 ///  - `select` 只订阅 playing / currentTrack / hasQueue；
 ///  - 封面 Hero：与全屏播放页同 tag，路由转场无缝放大（配合背景模糊动画）。
 library;
@@ -210,7 +212,9 @@ class _MiniQueueButton extends ConsumerWidget {
 
 // ------------------------------------------------------- 导航栏中央（紧凑极简）
 
-/// 紧凑极简嵌入导航栏：仅封面（圆环进度绕封面）+ 小播放键 + 小列表键
+/// 紧凑极简嵌入导航栏（需求：像 kgka_Music_hl 那样只显示歌曲封面，
+/// 周围显示歌曲进度）—— 仅封面 + 圆环进度，无播放/列表键，
+/// 点击主体进全屏。
 class _NavCompact extends ConsumerWidget {
   const _NavCompact();
 
@@ -220,35 +224,26 @@ class _NavCompact extends ConsumerWidget {
         ref.watch(playerProvider.select((PlayerState s) => s.currentTrack));
     final String? cover = track?.cover;
 
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.center,
-      mainAxisSize: MainAxisSize.min,
-      children: <Widget>[
-        GestureDetector(
-          onTap: () => openFullPlayer(context),
-          child: SizedBox(
-            width: 46,
-            height: 46,
-            child: Stack(
-              alignment: Alignment.center,
-              children: <Widget>[
-                const Positioned.fill(
-                    child: Padding(
-                  padding: EdgeInsets.all(2),
-                  child: _MiniRingProgress(stroke: 2),
-                )),
-                Hero(
-                  tag: heroTagOf(cover),
-                  child: CoverImage(src: cover, size: 38, radius: 19),
-                ),
-              ],
+    return GestureDetector(
+      onTap: () => openFullPlayer(context),
+      child: SizedBox(
+        width: 46,
+        height: 46,
+        child: Stack(
+          alignment: Alignment.center,
+          children: <Widget>[
+            const Positioned.fill(
+                child: Padding(
+              padding: EdgeInsets.all(2),
+              child: _MiniRingProgress(stroke: 2),
+            )),
+            Hero(
+              tag: heroTagOf(cover),
+              child: CoverImage(src: cover, size: 38, radius: 19),
             ),
-          ),
+          ],
         ),
-        const SizedBox(width: 6),
-        const _MiniPlayButton(size: 34, iconSize: 20, showRing: false),
-        const _MiniQueueButton(size: 30, iconSize: 19),
-      ],
+      ),
     );
   }
 }
@@ -261,7 +256,8 @@ Widget _navAnimated(Widget child, Object key) => child
     .fadeIn(duration: 260.ms, curve: Curves.easeOut)
     .slideY(begin: 0.05, end: 0, duration: 260.ms, curve: Curves.easeOut);
 
-/// 封面（Hero）+ 圆环进度，供各悬浮样式复用
+/// 封面（Hero），供各悬浮样式复用；紧凑极简之外的悬浮条无进度环
+/// （需求：经典样式播放键周围无进度条 —— 圆环仅保留给紧凑极简绕封面）
 class _FloatCover extends ConsumerWidget {
   const _FloatCover({this.size = 46});
 
@@ -281,20 +277,9 @@ class _FloatCover extends ConsumerWidget {
     return GestureDetector(
       onTap: () => openFullPlayer(context),
       child: SizedBox(
-        width: size + 8,
-        height: size + 8,
-        child: Stack(
-          alignment: Alignment.center,
-          children: <Widget>[
-            Positioned.fill(
-              child: Padding(
-                padding: const EdgeInsets.all(4),
-                child: _MiniRingProgress(stroke: 2.2),
-              ),
-            ),
-            image,
-          ],
-        ),
+        width: size,
+        height: size,
+        child: image,
       ),
     );
   }
@@ -302,8 +287,9 @@ class _FloatCover extends ConsumerWidget {
 
 // ---------------------------------------------------------------- 悬浮：经典条
 
-/// 样式 1（悬浮版）：封面+圆环 + 单行「歌名 - 歌手」+ 播放键 + 列表键。
-/// 需求：背景与边框全透明（无 Material 底色、无描边、无阴影）。
+/// 样式 1（悬浮版）：封面 + 单行「歌名 - 歌手」+ 播放键 + 列表键。
+/// 需求：背景与边框全透明（无 Material 底色、无描边、无阴影）；
+/// 播放键周围无进度条显示（本样式无任何进度环/进度线）。
 class _FloatClassic extends ConsumerWidget {
   const _FloatClassic();
 

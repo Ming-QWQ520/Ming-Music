@@ -149,6 +149,7 @@ class _LikedSongsPageState extends ConsumerState<LikedSongsPage> {
             song: songs[index],
             onPlay: () => _playAll(index),
             onMore: () => showSongActionsSheet(context, songs[index].toTrack()),
+            onLongPress: () => showSongActionsSheet(context, songs[index].toTrack()),
           ),
         ),
         const SliverToBoxAdapter(child: SizedBox(height: 24)),

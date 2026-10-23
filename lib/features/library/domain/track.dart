@@ -21,6 +21,8 @@ class Track {
     this.neteaseId,
     this.mvId,
     this.fee = 0,
+    this.artistId,
+    this.albumId,
   });
 
   final String id;
@@ -51,6 +53,12 @@ class Track {
   /// 付费标记：0 免费 / 1 VIP / 4 购买专辑 / 8 低音质免费
   final int fee;
 
+  /// 首位艺人 id（长按菜单「歌手」跳转用；网易云曲目填充）
+  final int? artistId;
+
+  /// 专辑 id（长按菜单「专辑」跳转用）
+  final int? albumId;
+
   bool get isVipOnly => fee == 1;
 
   /// 是否需要解析播放直链（收藏恢复场景：有网易云 id 但无直链）
@@ -79,6 +87,8 @@ class Track {
       isNetwork: isNetwork,
       isCustom: isCustom,
       fee: fee,
+      artistId: artistId,
+      albumId: albumId,
     );
   }
 
@@ -96,6 +106,8 @@ class Track {
         'isNetwork': isNetwork,
         'isCustom': isCustom,
         'fee': fee,
+        'artistId': artistId,
+        'albumId': albumId,
       };
 
   factory Track.fromMap(Map<Object?, Object?> map) => Track(
@@ -112,6 +124,8 @@ class Track {
         isNetwork: map['isNetwork'] as bool? ?? true,
         isCustom: map['isCustom'] as bool? ?? false,
         fee: (map['fee'] as num?)?.toInt() ?? 0,
+        artistId: (map['artistId'] as num?)?.toInt(),
+        albumId: (map['albumId'] as num?)?.toInt(),
       );
 
   @override

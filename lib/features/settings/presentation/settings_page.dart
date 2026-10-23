@@ -5,7 +5,7 @@
 ///  - 外观：主题模式 / 液态玻璃 / 播放页背景；
 ///  - 播放：播放音质 / 播放页自定义 / MV 标识开关（默认开启）；
 ///  - Mini 播放条：样式选择（紧凑极简嵌入导航栏，其余悬浮上方）；
-///  - 缓存：封面缓存占用与清理；
+///  - 缓存：歌曲音频缓存占用与清理（封面不再磁盘缓存）；
 ///  - 数据源 / 关于（仓库链接真实可点，需求：补全无实际作用功能）。
 library;
 
@@ -16,7 +16,6 @@ import 'package:go_router/go_router.dart';
 import '../../../core/constants/app_constants.dart';
 import '../../../core/utils/platform_actions.dart';
 import 'diag_page.dart';
-import '../../../core/widgets/cover_image.dart';
 import '../../auth/providers/auth_providers.dart';
 import '../../player/domain/np_settings.dart';
 import '../../player/presentation/np_settings_sheet.dart';
@@ -228,8 +227,9 @@ class SettingsPage extends ConsumerWidget {
                 secondary: const Icon(Icons.save_alt_rounded, size: 22),
                 title: const Text('边听边缓存', style: TextStyle(fontSize: 15)),
                 subtitle: Text(
-                    '播放时自动缓存歌曲，再次播放秒开且不耗流量；并非下载，'
-                    '缓存仅在下方「缓存」分组清理（默认开启）',
+                    '播放到哪首缓存哪首（只缓存实际播放的歌曲），再次播放'
+                    '秒开且不耗流量；可在「我的」页数据缓存或下方分组清理'
+                    '（默认开启）',
                     style: TextStyle(
                         fontSize: 12,
                         color: theme.colorScheme.onSurfaceVariant)),
@@ -393,7 +393,6 @@ class _CacheGroup extends ConsumerStatefulWidget {
 }
 
 class _CacheGroupState extends ConsumerState<_CacheGroup> {
-  String _sizeText = '计算中…';
   String _songSizeText = '计算中…';
 
   @override
@@ -403,11 +402,11 @@ class _CacheGroupState extends ConsumerState<_CacheGroup> {
   }
 
   Future<void> _refreshSize() async {
-    final int bytes = await CoverImage.cacheSizeBytes();
+    // 需求：封面不再磁盘缓存（仅需内存缓存），设置页只展示歌曲音频缓存；
+    // 通知栏封面走有界专用存储（自动淘汰，不单独列出）
     final int songBytes = await widget.songCache.totalSizeBytes();
     if (!mounted) return;
     setState(() {
-      _sizeText = _fmt(bytes);
       _songSizeText = _fmt(songBytes);
     });
   }
@@ -460,30 +459,12 @@ class _CacheGroupState extends ConsumerState<_CacheGroup> {
           leading: const Icon(Icons.library_music_rounded, size: 22),
           title: const Text('歌曲缓存', style: TextStyle(fontSize: 15)),
           subtitle: Text(
-              '边听边缓存占用：$_songSizeText（仅可在此清理，系统「清除缓存」不影响）',
+              '边听边缓存占用：$_songSizeText（仅可在此清理，系统「清除缓存」不影响；封面不再缓存）',
               style: TextStyle(
                   fontSize: 12,
                   color: Theme.of(context).colorScheme.onSurfaceVariant)),
           trailing: const Icon(Icons.delete_outline_rounded, size: 20),
           onTap: _clearSongCache,
-        ),
-        ListTile(
-          contentPadding:
-              const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
-          leading: const Icon(Icons.image_outlined, size: 22),
-          title: const Text('封面缓存', style: TextStyle(fontSize: 15)),
-          subtitle: Text(_sizeText,
-              style: TextStyle(
-                  fontSize: 12,
-                  color: Theme.of(context).colorScheme.onSurfaceVariant)),
-          trailing: const Icon(Icons.delete_outline_rounded, size: 20),
-          onTap: () async {
-            await CoverImage.clearCache();
-            _refreshSize();
-            if (!mounted) return;
-            ScaffoldMessenger.of(this.context)
-                .showSnackBar(const SnackBar(content: Text('封面缓存已清理')));
-          },
         ),
       ],
     );

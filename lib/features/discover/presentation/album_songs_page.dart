@@ -181,6 +181,7 @@ class _AlbumBody extends ConsumerWidget {
                       queueTitle: '专辑：${detail.meta.name}',
                     ),
                 onMore: () => showSongActionsSheet(context, s.toTrack()),
+                onLongPress: () => showSongActionsSheet(context, s.toTrack()),
               );
             },
           ),

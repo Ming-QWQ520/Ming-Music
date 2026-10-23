@@ -1,7 +1,15 @@
-/// 统一封面组件：网络封面磁盘缓存（md5 命名 + 并发去重）/ 占位渐变。
+/// 统一封面组件：**仅内存缓存**（LRU 上限，会话内有效）+ 占位渐变。
+///
+/// 需求变更（2026-10-23）：**去除封面磁盘缓存** —— 用户反馈封面缓存
+/// 「莫名地多」且无需离线复用，封面改为纯内存缓存（应用退出即释放），
+/// 不再向磁盘写入任何图片文件。
+///
+/// 例外：通知栏封面（系统 MediaStyle 需要本地文件路径，且网易 CDN 会
+/// 拒绝系统通知的直连请求）由 [NotificationArtCache] 提供一个**有界**
+/// （最多 6 个文件、LRU 淘汰）的专用存储，不属于通用封面缓存。
 ///
 /// 网易云封面 URL 支持 `?param=WxH` 缩略参数，按展示尺寸分级下载，
-/// 大幅节省流量（列表 300px / 播放页 500px / 模糊背景原图）。
+/// 大幅节省流量（列表 300px / 播放页 500px / 通知原图）。
 library;
 
 import 'dart:async';
@@ -45,196 +53,10 @@ class CoverImage extends StatefulWidget {
   final double radius;
   final CoverSize coverSize;
 
-  /// 拉取原图字节（供全屏查看/保存至本地使用，走同一套缓存与重试）
-  static Future<Uint8List?> loadOriginalBytes(String? src) =>
-      _CoverImageState.loadOriginalBytes(src);
-
-  /// 按字节嗅探图片 MIME（保存至相册需要）
-  static String sniffMime(Uint8List bytes) => _CoverImageState.sniffMime(bytes);
-
-  /// 封面磁盘缓存命中路径（供通知栏 artUri 使用：直接指向本地缓存文件，
-  /// 避免系统 MediaNotification 拉取网易 CDN 403）。
-  /// 返回 null 表示尚未缓存（调用方可回退网络 URL）。
-  static Future<File?> cachedFileFor(String? src,
-          {CoverSize size = CoverSize.small}) =>
-      _CoverImageState.cachedFileFor(src, size: size);
-
-  /// 封面缓存总字节数（设置页「缓存」展示）
-  static Future<int> cacheSizeBytes() async {
-    try {
-      final Directory dir = await _CoverImageState._cacheDir();
-      if (!dir.existsSync()) return 0;
-      return dir
-          .listSync()
-          .whereType<File>()
-          .fold<int>(0, (int acc, File f) => acc + f.lengthSync());
-    } catch (_) {
-      return 0;
-    }
-  }
-
-  /// 清理封面缓存（设置页「缓存」清理；同时清空内存态 inflight 无需处理）
-  static Future<void> clearCache() async {
-    try {
-      final Directory dir = await _CoverImageState._cacheDir();
-      if (dir.existsSync()) dir.deleteSync(recursive: true);
-    } catch (_) {}
-  }
-
-  @override
-  State<CoverImage> createState() => _CoverImageState();
-}
-
-class _CoverImageState extends State<CoverImage> {
-  File? _cachedFile;
-  bool _failed = false;
-
-  static final Map<String, Future<Uint8List?>> _inflight =
-      <String, Future<Uint8List?>>{};
-
-  @override
-  void initState() {
-    super.initState();
-    _load();
-  }
-
-  @override
-  void didUpdateWidget(CoverImage oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (oldWidget.src != widget.src) {
-      _cachedFile = null;
-      _failed = false;
-      _load();
-    }
-  }
-
-  Future<void> _load() async {
-    final String? src = widget.src;
-    if (src == null || src.isEmpty || !src.startsWith('http')) return;
-    final Uint8List? bytes = await _fetchBytes(src, widget.coverSize);
-    if (!mounted || src != widget.src) return;
-    if (bytes != null) {
-      final Directory dir = await _cacheDir();
-      final String key = _fileName(src, widget.coverSize);
-      final File file = File('${dir.path}/$key');
-      if (!file.existsSync()) {
-        await file.writeAsBytes(bytes, flush: true);
-      }
-      if (!mounted || src != widget.src) return;
-      setState(() => _cachedFile = file);
-    } else if (mounted) {
-      setState(() => _failed = true);
-    }
-  }
-
-  /// 封面磁盘缓存命中路径（见 CoverImage.cachedFileFor）
-  static Future<File?> cachedFileFor(String? src,
-      {CoverSize size = CoverSize.small}) async {
-    if (src == null || src.isEmpty || !src.startsWith('http')) return null;
-    try {
-      final Directory dir = await _cacheDir();
-      final File file = File('${dir.path}/${_fileName(src, size)}');
-      if (file.existsSync() && file.lengthSync() > 0) return file;
-      // 未命中：主动触发一次下载（异步等待），保证通知栏封面可用
-      final Uint8List? bytes = await _fetchBytes(src, size);
-      if (bytes != null) {
-        final File f2 = File('${dir.path}/${_fileName(src, size)}');
-        if (f2.existsSync()) return f2;
-      }
-    } catch (_) {}
-    return null;
-  }
-
-  static Future<Directory> _cacheDir() async {
-    final Directory base = await getApplicationCacheDirectory();
-    final Directory dir = Directory('${base.path}/covers');
-    if (!dir.existsSync()) dir.createSync(recursive: true);
-    return dir;
-  }
-
-  static String _fileName(String url, CoverSize size) {
-    final String key = '${size.param ?? 'raw'}:$url';
-    return crypto.md5.convert(key.codeUnits).toString();
-  }
-
-  /// 下载 + 并发去重 + 磁盘命中短路 + 多级重试。
-  ///
-  /// 网易云 CDN 部分节点对 ?param 缩略参数会返回 403/404（部分歌曲封面无法
-  /// 加载的根因），按 缩略图 → 原图 → 小缩略图 三级重试。
-  static Future<Uint8List?> _fetchBytes(String url, CoverSize size) async {
-    try {
-      final Directory dir = await _cacheDir();
-      final File file = File('${dir.path}/${_fileName(url, size)}');
-      if (file.existsSync()) {
-        final Uint8List existing = await file.readAsBytes();
-        if (existing.isNotEmpty) return existing;
-      }
-    } catch (_) {}
-
-    final String rawUrl = url.startsWith('http://')
-        ? url.replaceFirst('http://', 'https://')
-        : url; // CDN 明文直链统一 https（Android 9+ 拦截 http）
-
-    // 重试阶梯：指定尺寸 → 原图 → 120 小图（部分特殊尺寸仅小图可访问）
-    final List<String> candidates = <String>[
-      if (size.param != null && !rawUrl.contains('?param=')) '$rawUrl?param=${size.param}',
-      rawUrl,
-      if (!rawUrl.contains('?param=')) '$rawUrl?param=120y120',
-    ];
-
-    for (final String candidate in candidates) {
-      final Uint8List? bytes = await _download(candidate);
-      if (bytes != null) {
-        // 任一档成功均落到原始 key 的缓存位，下次直接命中
-        try {
-          final Directory dir = await _cacheDir();
-          final File file = File('${dir.path}/${_fileName(url, size)}');
-          if (!file.existsSync()) {
-            await file.writeAsBytes(bytes, flush: true);
-          }
-        } catch (_) {}
-        return bytes;
-      }
-    }
-    return null;
-  }
-
-  /// 网易云 CDN 对 Dart 默认 User-Agent 直接返回 403（实测取证）。
-  /// 所有网易 CDN 图片请求必须携带浏览器 UA。
-  static const String kImageUserAgent = CoverImage.kImageUserAgent;
-
-  static Future<Uint8List?> _download(String sizedUrl) {
-    return _inflight.putIfAbsent(sizedUrl, () async {
-      try {
-        final HttpClient client = HttpClient()
-          ..connectionTimeout = const Duration(seconds: 12);
-        final HttpClientRequest req = await client.getUrl(Uri.parse(sizedUrl));
-        req.headers.set(HttpHeaders.userAgentHeader, kImageUserAgent);
-        final HttpClientResponse resp = await req.close();
-        if (resp.statusCode != 200) {
-          await resp.drain<Object?>();
-          return null;
-        }
-        final Uint8List bytes = Uint8List.fromList(
-          await resp.fold<List<int>>(
-            <int>[],
-            (List<int> acc, List<int> chunk) => acc..addAll(chunk),
-          ),
-        );
-        return bytes.isEmpty ? null : bytes;
-      } catch (e) {
-        debugPrint('封面下载失败 $sizedUrl: $e');
-        return null;
-      } finally {
-        scheduleMicrotask(() => _inflight.remove(sizedUrl));
-      }
-    });
-  }
-
-  /// 拉取原图字节（供全屏查看/保存至本地使用，走同一套缓存与重试）
+  /// 拉取原图字节（供全屏查看/保存至本地使用，走同一套重试）
   static Future<Uint8List?> loadOriginalBytes(String? src) async {
     if (src == null || src.isEmpty || !src.startsWith('http')) return null;
-    return _fetchBytes(src, CoverSize.original);
+    return fetchBytes(src, CoverSize.original);
   }
 
   /// 按字节嗅探图片 MIME（保存至相册需要）
@@ -249,10 +71,135 @@ class _CoverImageState extends State<CoverImage> {
         bytes[3] == 0x47) {
       return 'image/png';
     }
-    if (bytes.length >= 3 && bytes[0] == 0x47 && bytes[1] == 0x49 && bytes[2] == 0x46) {
+    if (bytes.length >= 3 &&
+        bytes[0] == 0x47 &&
+        bytes[1] == 0x49 &&
+        bytes[2] == 0x46) {
       return 'image/gif';
     }
     return 'image/webp';
+  }
+
+  @override
+  State<CoverImage> createState() => _CoverImageState();
+}
+
+// ---------------------------------------------------------------- 内存缓存
+
+/// 封面字节内存缓存（需求：去除封面磁盘缓存后的会话内缓存层）。
+/// 简单 FIFO 上限淘汰：超过 [_maxEntries] 清掉最早写入的一半。
+class _CoverMemoryCache {
+  static const int _maxEntries = 192;
+
+  static final Map<String, Uint8List> _mem = <String, Uint8List>{};
+
+  static Uint8List? get(String key) => _mem[key];
+
+  static void put(String key, Uint8List bytes) {
+    if (_mem.length >= _maxEntries) {
+      final List<String> stale = _mem.keys.take(_maxEntries ~/ 2).toList();
+      for (final String k in stale) {
+        _mem.remove(k);
+      }
+    }
+    _mem[key] = bytes;
+  }
+
+  static void clear() => _mem.clear();
+}
+
+/// 并发去重（同一 URL 只发一次请求）
+final Map<String, Future<Uint8List?>> _kInflight =
+    <String, Future<Uint8List?>>{};
+
+/// 下载 + 并发去重 + 内存命中短路 + 多级重试。
+///
+/// 网易云 CDN 部分节点对 ?param 缩略参数会返回 403/404（部分歌曲封面无法
+/// 加载的根因），按 缩略图 → 原图 → 小缩略图 三级重试。
+Future<Uint8List?> fetchBytes(String url, CoverSize size) async {
+  final String rawUrl = url.startsWith('http://')
+      ? url.replaceFirst('http://', 'https://')
+      : url; // CDN 明文直链统一 https（Android 9+ 拦截 http）
+
+  final String memKey = '${size.param ?? 'raw'}:$rawUrl';
+  final Uint8List? cached = _CoverMemoryCache.get(memKey);
+  if (cached != null) return cached;
+
+  // 重试阶梯：指定尺寸 → 原图 → 120 小图（部分特殊尺寸仅小图可访问）
+  final List<String> candidates = <String>[
+    if (size.param != null && !rawUrl.contains('?param=')) '$rawUrl?param=${size.param}',
+    rawUrl,
+    if (!rawUrl.contains('?param=')) '$rawUrl?param=120y120',
+  ];
+
+  for (final String candidate in candidates) {
+    final Uint8List? bytes = await _download(candidate);
+    if (bytes != null) {
+      _CoverMemoryCache.put(memKey, bytes);
+      return bytes;
+    }
+  }
+  return null;
+}
+
+Future<Uint8List?> _download(String sizedUrl) {
+  return _kInflight.putIfAbsent(sizedUrl, () async {
+    try {
+      final HttpClient client = HttpClient()
+        ..connectionTimeout = const Duration(seconds: 12);
+      final HttpClientRequest req = await client.getUrl(Uri.parse(sizedUrl));
+      req.headers.set(HttpHeaders.userAgentHeader, CoverImage.kImageUserAgent);
+      final HttpClientResponse resp = await req.close();
+      if (resp.statusCode != 200) {
+        await resp.drain<Object?>();
+        return null;
+      }
+      final Uint8List bytes = Uint8List.fromList(
+        await resp.fold<List<int>>(
+          <int>[],
+          (List<int> acc, List<int> chunk) => acc..addAll(chunk),
+        ),
+      );
+      return bytes.isEmpty ? null : bytes;
+    } catch (e) {
+      debugPrint('封面下载失败 $sizedUrl: $e');
+      return null;
+    } finally {
+      scheduleMicrotask(() => _kInflight.remove(sizedUrl));
+    }
+  });
+}
+
+class _CoverImageState extends State<CoverImage> {
+  Uint8List? _bytes;
+  bool _failed = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  @override
+  void didUpdateWidget(CoverImage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.src != widget.src) {
+      _bytes = null;
+      _failed = false;
+      _load();
+    }
+  }
+
+  Future<void> _load() async {
+    final String? src = widget.src;
+    if (src == null || src.isEmpty || !src.startsWith('http')) return;
+    final Uint8List? bytes = await fetchBytes(src, widget.coverSize);
+    if (!mounted || src != widget.src) return;
+    if (bytes != null) {
+      setState(() => _bytes = bytes);
+    } else if (mounted) {
+      setState(() => _failed = true);
+    }
   }
 
   @override
@@ -275,9 +222,9 @@ class _CoverImageState extends State<CoverImage> {
     );
 
     Widget image;
-    if (_cachedFile != null) {
-      image = Image.file(
-        _cachedFile!,
+    if (_bytes != null) {
+      image = Image.memory(
+        _bytes!,
         width: widget.size,
         height: widget.size,
         fit: BoxFit.cover,
@@ -301,5 +248,93 @@ class _CoverImageState extends State<CoverImage> {
       borderRadius: BorderRadius.circular(widget.radius),
       child: image,
     );
+  }
+}
+
+// ------------------------------------------------ 通知栏封面（有界磁盘存储）
+
+/// 通知栏封面专用存储（需求「去除封面缓存」的例外通道）：
+///
+/// 系统 MediaStyle 通知要求 artUri 指向本地文件（网易 CDN 会拒绝系统通知
+/// 的直连请求 → 403 → 通知无封面）。本存储：
+///  - 仅服务通知栏，目录独立（` caches/notif_art/`）；
+///  - **有界**：最多保留 [maxFiles] 个文件，写入后按修改时间淘汰旧文件，
+///    空间占用有硬上限（约 6 张原图），不再随浏览无限增长。
+class NotificationArtCache {
+  NotificationArtCache._();
+
+  static const int maxFiles = 6;
+
+  static Future<Directory>? _dirFuture;
+
+  static Future<Directory> _dir() {
+    return _dirFuture ??= () async {
+      final Directory base = await getApplicationCacheDirectory();
+      final Directory dir = Directory('${base.path}/notif_art');
+      if (!dir.existsSync()) dir.createSync(recursive: true);
+      return dir;
+    }();
+  }
+
+  static String _fileName(String url) =>
+      crypto.md5.convert(url.codeUnits).toString();
+
+  /// 取通知栏封面文件：磁盘命中直接用；未命中下载（原图 → 500y500）后落盘。
+  /// 失败返回 null（调用方回退网络 URL）。
+  static Future<File?> fileFor(String? src) async {
+    if (src == null || src.isEmpty || !src.startsWith('http')) return null;
+    try {
+      final Directory dir = await _dir();
+      final File done = File('${dir.path}/${_fileName(src)}');
+      if (done.existsSync() && done.lengthSync() > 0) {
+        return done;
+      }
+      Uint8List? bytes = await fetchBytes(src, CoverSize.original);
+      bytes ??= await fetchBytes(src, CoverSize.large);
+      if (bytes == null || bytes.isEmpty) return null;
+      await done.writeAsBytes(bytes, flush: true);
+      unawaited(_prune(dir));
+      return done;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// LRU 收敛：超过 maxFiles 删除最旧文件
+  static Future<void> _prune(Directory dir) async {
+    try {
+      final List<FileSystemEntity> files = dir.listSync().whereType<File>().toList()
+        ..sort((FileSystemEntity a, FileSystemEntity b) =>
+            File(a.path).lastModifiedSync().compareTo(
+                File(b.path).lastModifiedSync()));
+      for (int i = 0; i < files.length - maxFiles; i++) {
+        try {
+          files[i].deleteSync();
+        } catch (_) {}
+      }
+    } catch (_) {}
+  }
+
+  /// 占用统计（设置/我的页缓存展示）
+  static Future<int> sizeBytes() async {
+    try {
+      final Directory dir = await _dir();
+      if (!dir.existsSync()) return 0;
+      return dir
+          .listSync()
+          .whereType<File>()
+          .fold<int>(0, (int acc, File f) => acc + f.lengthSync());
+    } catch (_) {
+      return 0;
+    }
+  }
+
+  /// 清理（清缓存入口）
+  static Future<void> clear() async {
+    _CoverMemoryCache.clear();
+    try {
+      final Directory dir = await _dir();
+      if (dir.existsSync()) dir.deleteSync(recursive: true);
+    } catch (_) {}
   }
 }

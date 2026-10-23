@@ -16,7 +16,9 @@
 ///  - 手势：下滑收起播放页。
 library;
 
+import 'dart:async' show unawaited;
 import 'dart:math' as math;
+import 'dart:ui' as ui show lerpDouble;
 
 import 'package:flutter/material.dart' hide RepeatMode;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -25,6 +27,8 @@ import 'package:go_router/go_router.dart';
 import '../../../core/constants/app_constants.dart';
 import '../../../core/utils/lyrics.dart' show activeLyricIndex;
 import '../../../core/utils/yrc_lyrics.dart' show activeYrcIndex;
+import '../../../core/widgets/cover_image.dart'
+    show CoverImage, CoverSize, fetchBytes;
 import '../../../core/widgets/marquee_text.dart';
 import '../../auth/providers/auth_providers.dart';
 import '../../comments/providers/comments_providers.dart'
@@ -277,12 +281,14 @@ class _PlayerStackLayoutState extends ConsumerState<_PlayerStackLayout> {
             child: widget.showLyrics
                 ? Padding(
                     key: const ValueKey<String>('lyrics'),
-                    // 歌词铺满全高（含浮层背后），滚动居中由 bottomInset 避让
-                    padding: EdgeInsets.zero,
+                    // 需求：歌词不再全透明穿行 —— 只在歌曲名称上方、
+                    // 底部信息栏下沿之上的区域显示（与封面分支同构的
+                    // 底部避让，歌词不再延伸到信息区背后）
+                    padding: EdgeInsets.only(bottom: _overlayHeight),
                     child: KaraokeLyricsView(
                       key: const ValueKey<String>('lyrics-view'),
                       onToggleView: widget.onToggleLyrics,
-                      bottomInset: _overlayHeight,
+                      bottomInset: 0,
                     ),
                   )
                 : Padding(
@@ -325,12 +331,13 @@ class _PlayerStackLayoutState extends ConsumerState<_PlayerStackLayout> {
   }
 }
 
-/// 封面手势区（需求）：
-///  - 左右滑动**不显示相邻封面**：拖动时封面轻微视差缩小，上方叠「刷新布局」
-///    （随拖动进度旋转的刷新箭头 + 「松手切换」提示），松手超过阈值触发切歌，
-///    切换期间显示加载圈；
-///  - 单击封面 → 切换歌词视图（需求：播放界面单击查看歌词）；
-///  - 长按封面 → 全屏查看 + 保存。
+/// 封面手势区（需求重构：滑动切歌无感化）：
+///  - 封面 1:1 跟手平滑移动（不再视差缩水），无「松手切换」提示浮层、
+///    无刷新图标、无「正在切换」遮罩 —— 整个过程不露出背景与歌词；
+///  - 松手超过阈值：旧封面沿拖动方向平滑滑出屏幕，同时新封面从反方向
+///    平滑滑入（相邻封面取自播放队列并预取，画面全程无空档）；
+///  - 未过阈值：封面平滑回弹；
+///  - 单击封面 → 切换歌词视图；长按封面 → 全屏查看 + 保存。
 class _CoverSwipeArea extends ConsumerStatefulWidget {
   const _CoverSwipeArea({
     required this.cfg,
@@ -346,38 +353,127 @@ class _CoverSwipeArea extends ConsumerStatefulWidget {
   ConsumerState<_CoverSwipeArea> createState() => _CoverSwipeAreaState();
 }
 
-class _CoverSwipeAreaState extends ConsumerState<_CoverSwipeArea> {
+class _CoverSwipeAreaState extends ConsumerState<_CoverSwipeArea>
+    with SingleTickerProviderStateMixin {
   /// 触发切歌的拖动阈值
   static const double _triggerDistance = 88;
 
-  double _dragDx = 0;
-  bool _switching = false;
+  /// 滑出/滑入共用动画（切歌过程 = 旧封面滑出 + 新封面滑入同时进行）
+  late final AnimationController _slide = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 300),
+    value: 1,
+  )..addStatusListener((AnimationStatus st) {
+      if (st == AnimationStatus.completed) _onSlideDone();
+    });
 
-  bool get _overlaying => _switching || _dragDx.abs() > 8;
+  double _dragDx = 0;
+
+  /// 切歌方向：1 = 右滑（上一首，旧封面从右侧出）；-1 = 左滑（下一首）
+  int _dir = 1;
+
+  /// 滑出阶段的旧封面 / 滑入阶段的新封面（null = 非过渡态）
+  String? _outgoingCover;
+  String? _incomingCover;
+
+  /// 松手时的拖动偏移（滑出动画起点）
+  double _releaseDx = 0;
+
+  bool get _transitioning => _outgoingCover != null;
+
+  @override
+  void dispose() {
+    _slide.dispose();
+    super.dispose();
+  }
+
+  // ---------------------------------------------------------------- 手势
 
   void _onDragUpdate(DragUpdateDetails d) {
-    if (_switching) return;
+    if (_transitioning) return; // 过渡中忽略新拖动，避免抖动
     setState(() => _dragDx += d.delta.dx);
+    // 拖动开始即预取相邻封面（内存缓存），保证滑入画面无空档
+    _prefetchNeighbors();
   }
 
   Future<void> _onDragEnd(DragEndDetails d) async {
-    if (_switching) return;
+    if (_transitioning) return;
     final double dx = _dragDx;
-    _dragDx = 0;
     if (dx.abs() < _triggerDistance) {
-      setState(() {}); // 未过阈值：回弹
+      // 未过阈值：平滑回弹
+      _startSpringBack(dx);
       return;
     }
-    setState(() => _switching = true);
-    final PlayerNotifier notifier = ref.read(playerProvider.notifier);
-    // 右滑 → 上一首；左滑 → 下一首（对齐网易云方向）
-    if (dx > 0) {
-      await notifier.previous();
-    } else {
-      await notifier.next();
-    }
-    if (mounted) setState(() => _switching = false);
+    _startSwitch(dx);
   }
+
+  /// 平滑回弹（未过阈值）
+  void _startSpringBack(double from) {
+    setState(() {
+      _outgoingCover = ref.read(playerProvider).currentTrack?.cover;
+      _incomingCover = null;
+      _releaseDx = from;
+      _dir = 1;
+    });
+    _slide.forward(from: 0);
+  }
+
+  /// 切歌过渡：旧封面沿拖动方向滑出，新封面从反方向滑入；同时立即切歌
+  void _startSwitch(double dx) {
+    final PlayerState ps = ref.read(playerProvider);
+    if (!ps.hasQueue) return;
+    final int len = ps.queue.length;
+    final bool backward = dx > 0; // 右滑 → 上一首
+    _dir = backward ? 1 : -1;
+    final int neighborIndex = backward
+        ? (ps.index - 1 + len) % len
+        : (ps.index + 1) % len;
+    final String? outCover = ps.currentTrack?.cover;
+    final String? inCover = ps.queue[neighborIndex].cover;
+    setState(() {
+      _outgoingCover = outCover;
+      _incomingCover = inCover;
+      _releaseDx = dx;
+      _dragDx = 0;
+    });
+    _slide.forward(from: 0);
+    // 音频切歌与动画并行：内核队列已预解析直链，seek 即播
+    final PlayerNotifier notifier = ref.read(playerProvider.notifier);
+    if (backward) {
+      unawaited(notifier.previous());
+    } else {
+      unawaited(notifier.next());
+    }
+  }
+
+  void _onSlideDone() {
+    if (!mounted || !_transitioning) return;
+    setState(() {
+      _outgoingCover = null;
+      _incomingCover = null;
+      _releaseDx = 0;
+    });
+  }
+
+  // ---------------------------------------------------------------- 预取
+
+  /// 预取相邻封面（播放页大图档位），命中内存缓存后滑入无空档
+  void _prefetchNeighbors() {
+    final PlayerState ps = ref.read(playerProvider);
+    if (!ps.hasQueue || ps.queue.length <= 1) return;
+    final int len = ps.queue.length;
+    for (final int idx in <int>[
+      (ps.index + 1) % len,
+      (ps.index - 1 + len) % len,
+    ]) {
+      final String? c = ps.queue[idx].cover;
+      if (c != null && c.startsWith('http')) {
+        unawaited(fetchBytes(c, CoverSize.large));
+      }
+    }
+  }
+
+  // ---------------------------------------------------------------- 渲染
 
   @override
   Widget build(BuildContext context) {
@@ -388,6 +484,8 @@ class _CoverSwipeAreaState extends ConsumerState<_CoverSwipeArea> {
     // 需求：封面页歌词预览（借鉴 kgka_Music_hl）—— 封面下方显示当前行，
     // 可选一行/两行，默认一行；占位高度在封面尺寸计算时预留，避免溢出。
     final bool showPreview = widget.cfg.coverLyrics != NpCoverLyricsMode.none;
+
+    final double side = widget.size + 48; // 完全滑出屏幕所需距离
 
     return Center(
       child: GestureDetector(
@@ -401,93 +499,73 @@ class _CoverSwipeAreaState extends ConsumerState<_CoverSwipeArea> {
             SizedBox(
               width: widget.size,
               height: widget.size,
-              child: Stack(
-                alignment: Alignment.center,
-                children: <Widget>[
-              // 封面：拖动视差 + 轻微缩小
-              Transform.translate(
-                offset: Offset(_dragDx * 0.22, 0),
-                child: Transform.scale(
-                  scale: 1 - 0.06 * p,
-                  child: CoverArtView(
-                    style: widget.cfg.coverStyle,
-                    cover: track?.cover,
-                    playing: ps.playing,
-                    size: widget.size,
-                    scale: widget.cfg.coverScale,
-                    shadow: widget.cfg.coverShadow,
-                    squareRadius: widget.cfg.squareCoverRadius,
-                    onLongPress: track?.cover == null
-                        ? null
-                        : () => showCoverViewer(
-                              context,
-                              cover: track!.cover,
-                              title: '${track.title} - ${track.artist}',
-                            ),
-                  ),
-                ),
-              ),
-              // 刷新布局（需求：滑动时不显示上一首/下一首封面）
-              if (_overlaying)
-                Positioned.fill(
-                  child: IgnorePointer(
-                    child: AnimatedOpacity(
-                      opacity: _switching ? 1 : p.clamp(0.35, 1.0),
-                      duration: const Duration(milliseconds: 140),
-                      child: Container(
-                        margin: EdgeInsets.all(widget.size * 0.04),
-                        decoration: BoxDecoration(
-                          color: Colors.black.withValues(alpha: 0.46),
-                          borderRadius: BorderRadius.circular(28),
+              child: AnimatedBuilder(
+                animation: _slide,
+                builder: (BuildContext ctx, Widget? _) {
+                  final double t = _slide.value.clamp(0.0, 1.0);
+
+                  // ---- 过渡态：切歌（旧滑出+新滑入）/ 回弹（旧封面回中心）
+                  if (_outgoingCover != null) {
+                    final bool isSwitch = _incomingCover != null;
+                    // 切歌：旧封面滑出屏幕 + 新封面从反方向滑入；
+                    // 回弹：旧封面从松手位置平滑回到中心
+                    final double outEnd = isSwitch ? _dir * side : 0.0;
+                    final double outX = ui.lerpDouble(
+                        _releaseDx, outEnd, Curves.easeOutCubic.transform(t))!;
+
+                    return Stack(
+                      alignment: Alignment.center,
+                      children: <Widget>[
+                        Transform.translate(
+                          offset: Offset(outX, 0),
+                          child: _FrozenCover(
+                            cover: _outgoingCover,
+                            size: widget.size,
+                            style: widget.cfg.coverStyle,
+                          ),
                         ),
-                        alignment: Alignment.center,
-                        child: _switching
-                            ? const Column(
-                                mainAxisSize: MainAxisSize.min,
-                                children: <Widget>[
-                                  SizedBox(
-                                    width: 36,
-                                    height: 36,
-                                    child: CircularProgressIndicator(
-                                      strokeWidth: 2.6,
-                                      color: Colors.white,
-                                    ),
-                                  ),
-                                  SizedBox(height: 10),
-                                  Text('正在切换…',
-                                      style: TextStyle(
-                                          color: Colors.white,
-                                          fontSize: 12.5,
-                                          fontWeight: FontWeight.w600)),
-                                ],
-                              )
-                            : Column(
-                                mainAxisSize: MainAxisSize.min,
-                                children: <Widget>[
-                                  Transform.rotate(
-                                    angle: p * math.pi * 2,
-                                    child: const Icon(
-                                      Icons.refresh_rounded,
-                                      size: 44,
-                                      color: Colors.white,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 10),
-                                  Text(
-                                    _dragDx > 0 ? '松手回到上一首' : '松手切换到下一首',
-                                    style: const TextStyle(
-                                        color: Colors.white,
-                                        fontSize: 12.5,
-                                        fontWeight: FontWeight.w600),
-                                  ),
-                                ],
-                              ),
+                        if (isSwitch)
+                          Transform.translate(
+                            offset: Offset(
+                                ui.lerpDouble(
+                                    -_dir * side, 0.0,
+                                    Curves.easeOutCubic.transform(t))!,
+                                0),
+                            child: _FrozenCover(
+                              cover: _incomingCover,
+                              size: widget.size,
+                              style: widget.cfg.coverStyle,
+                            ),
+                          ),
+                      ],
+                    );
+                  }
+
+                  // ---- 常规态：封面 1:1 跟手（平滑移动）+ 轻微缩放反馈
+                  return Transform.translate(
+                    offset: Offset(_dragDx, 0),
+                    child: Transform.scale(
+                      scale: 1 - 0.04 * p,
+                      child: CoverArtView(
+                        style: widget.cfg.coverStyle,
+                        cover: track?.cover,
+                        playing: ps.playing,
+                        size: widget.size,
+                        scale: widget.cfg.coverScale,
+                        shadow: widget.cfg.coverShadow,
+                        squareRadius: widget.cfg.squareCoverRadius,
+                        onLongPress: track?.cover == null
+                            ? null
+                            : () => showCoverViewer(
+                                  context,
+                                  cover: track!.cover,
+                                  title: '${track.title} - ${track.artist}',
+                                ),
                       ),
                     ),
-                  ),
-                ),
-              ],
-            ),
+                  );
+                },
+              ),
             ),
             // 需求：封面页歌词预览（kgka 风格：当前行大字 + 副行，可选一行/两行）
             if (showPreview) ...<Widget>[
@@ -499,6 +577,46 @@ class _CoverSwipeAreaState extends ConsumerState<_CoverSwipeArea> {
             ],
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// 过渡态的静态封面（不做 Hero/暂停缩放/长按，纯画面）：
+/// 与 CoverArtView 相同的投影观感，图像走 CoverImage 内存缓存即时渲染。
+class _FrozenCover extends StatelessWidget {
+  const _FrozenCover({
+    required this.cover,
+    required this.size,
+    required this.style,
+  });
+
+  final String? cover;
+  final double size;
+  final NpCoverStyle style;
+
+  @override
+  Widget build(BuildContext context) {
+    final double radius = switch (style) {
+      NpCoverStyle.square => 0,
+      NpCoverStyle.circle => size / 2,
+    };
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        borderRadius: radius > 0 ? BorderRadius.circular(radius) : null,
+        boxShadow: <BoxShadow>[
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.45),
+            blurRadius: 32,
+            offset: const Offset(0, 12),
+          ),
+        ],
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(radius),
+        child: CoverImage(src: cover, size: size, radius: 0, coverSize: CoverSize.large),
       ),
     );
   }
@@ -1159,10 +1277,11 @@ class _CoverLyricsPreview extends ConsumerWidget {
               textAlign: TextAlign.center,
               velocity: 32,
               style: TextStyle(
-                color: Colors.white,
+                color: Colors.white.withValues(alpha: 0.94),
                 fontSize: 16.5,
                 height: 1.25,
-                fontWeight: FontWeight.w700,
+                // kgka 观感：非重墨（w600），优雅不压封面
+                fontWeight: FontWeight.w600,
               ),
             ),
             if (two && sub.isNotEmpty) ...<Widget>[

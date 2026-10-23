@@ -37,8 +37,9 @@ class DiscoverPage extends ConsumerWidget {
               const SizedBox(width: 8),
             ],
           ),
-          const SliverToBoxAdapter(child: _ToplistsSection()),
+          // 需求：发现顶部增加 Zephyr-Music 推荐页顶部的歌单（样式一致）
           const SliverToBoxAdapter(child: _PersonalizedSection()),
+          const SliverToBoxAdapter(child: _ToplistsSection()),
           const SliverToBoxAdapter(child: _HotWordsSection()),
           const SliverToBoxAdapter(child: SizedBox(height: 24)),
         ],
@@ -149,6 +150,8 @@ class _ToplistCard extends StatelessWidget {
 
 // ---------------------------------------------------------------- 推荐歌单
 
+/// 推荐歌单（需求：对齐 Zephyr-Music 推荐页顶部样式 —— 方形圆角封面、
+/// 播放量角标在左上、标题两行下方，三卡屏宽可见）
 class _PersonalizedSection extends ConsumerWidget {
   const _PersonalizedSection();
 
@@ -170,13 +173,13 @@ class _PersonalizedSection extends ConsumerWidget {
           );
         }
         return Padding(
-          padding: const EdgeInsets.only(top: 24),
+          padding: const EdgeInsets.only(top: 8),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
               const _SectionHeader(title: '推荐歌单'),
               SizedBox(
-                height: 178,
+                height: 168,
                 child: ListView.separated(
                   scrollDirection: Axis.horizontal,
                   padding: const EdgeInsets.symmetric(horizontal: 20),
@@ -220,7 +223,7 @@ class _PlaylistCard extends StatelessWidget {
         extra: meta,
       ),
       child: SizedBox(
-        width: 122,
+        width: 118,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
@@ -228,29 +231,29 @@ class _PlaylistCard extends StatelessWidget {
               children: <Widget>[
                 CoverImage(
                   src: meta.coverUrl,
-                  size: 122,
-                  radius: 12,
+                  size: 118,
+                  radius: 8,
                 ),
+                // Zephyr/网易云样式：播放量角标左上（播放图标 + 万/亿计数）
                 Positioned(
-                  top: 6,
-                  right: 6,
+                  top: 5,
+                  left: 6,
                   child: Container(
                     padding: const EdgeInsets.symmetric(
                         horizontal: 5, vertical: 1.5),
                     decoration: BoxDecoration(
-                      color: Colors.black.withValues(alpha: 0.45),
-                      borderRadius: BorderRadius.circular(8),
+                      color: Colors.black.withValues(alpha: 0.35),
+                      borderRadius: BorderRadius.circular(9),
                     ),
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: <Widget>[
-                        const Icon(Icons.headphones_rounded,
-                            color: Colors.white, size: 11),
-                        const SizedBox(width: 2),
+                        const Icon(Icons.play_arrow_rounded,
+                            color: Colors.white, size: 12),
                         Text(
                           _playCountText(),
                           style: const TextStyle(
-                              color: Colors.white, fontSize: 10),
+                              color: Colors.white, fontSize: 10.5),
                         ),
                       ],
                     ),
@@ -265,7 +268,7 @@ class _PlaylistCard extends StatelessWidget {
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
                 color: theme.colorScheme.onSurface,
-                fontSize: 13,
+                fontSize: 12.5,
                 height: 1.3,
               ),
             ),

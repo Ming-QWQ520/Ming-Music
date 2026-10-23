@@ -16,7 +16,7 @@ import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
-import '../../../core/api/netease_models.dart' show PlaylistMeta;
+import '../../../core/api/netease_models.dart' show PlaylistMeta, CloudDriveInfo;
 import '../../../core/constants/app_constants.dart';
 import '../../../core/widgets/cover_image.dart';
 import '../../auth/data/netease_auth_repository.dart'
@@ -24,6 +24,7 @@ import '../../auth/data/netease_auth_repository.dart'
 import '../../auth/presentation/login_sheet.dart';
 import '../../auth/providers/auth_providers.dart';
 import '../../discover/data/netease_providers.dart';
+import '../../player/providers/player_providers.dart';
 
 class MyMusicPage extends ConsumerStatefulWidget {
   const MyMusicPage({super.key});
@@ -156,8 +157,9 @@ class _MyMusicPageState extends ConsumerState<MyMusicPage> {
               onLogin: () => _openLogin(context),
             ),
             const SizedBox(height: 6),
-            // 2x2 功能宫格（kgka）
-            const _QuickGrid(),
+            // 2x2 功能宫格（kgka）；喜欢的音乐直接开「我喜欢的音乐」歌单
+            // （需求：与创建歌单中的我喜欢的音乐完全一致 —— 同排序同样式）
+            _QuickGrid(likedPlaylist: _likedPlaylist),
             const SizedBox(height: 10),
             // 功能行：听歌排行榜
             const _RankRow(),
@@ -184,6 +186,9 @@ class _MyMusicPageState extends ConsumerState<MyMusicPage> {
                 ),
               ],
               const _CloudDriveItem(),
+              const SizedBox(height: 8),
+              // 需求：我的页增加数据缓存入口（无网环境体验保障，可在此清理）
+              const _CacheRow(),
             ],
             const SizedBox(height: 12),
             Center(
@@ -212,6 +217,16 @@ class _MyMusicPageState extends ConsumerState<MyMusicPage> {
         .where((NeteaseUserPlaylist p) =>
             p.creatorUserId != myUid && p.creatorUserId != 0)
         .toList(growable: false);
+  }
+
+  /// 「我喜欢的音乐」歌单（网易云约定：用户第一个创建的歌单；
+  /// 需求：喜欢的音乐入口与创建歌单中的我喜欢的音乐为同一页面）
+  NeteaseUserPlaylist? get _likedPlaylist {
+    final List<NeteaseUserPlaylist> created = _createdList;
+    for (final NeteaseUserPlaylist p in created) {
+      if (p.name.contains('喜欢的音乐')) return p;
+    }
+    return created.isEmpty ? null : created.first;
   }
 }
 
@@ -382,8 +397,12 @@ class _ProfileHeader extends ConsumerWidget {
 
 /// 2x2 功能宫格（kgka _LibraryQuickGrid）：渐变图标块 + 标题 + 副标题，
 /// 按压 AnimatedScale(0.95)。
+/// 需求：喜欢的音乐 = 「我喜欢的音乐」歌单本身（同排序同封面样式），
+/// 歌单未加载时回退旧喜欢列表页。
 class _QuickGrid extends ConsumerWidget {
-  const _QuickGrid();
+  const _QuickGrid({this.likedPlaylist});
+
+  final NeteaseUserPlaylist? likedPlaylist;
 
   static const List<List<Color>> _gradients = <List<Color>>[
     <Color>[Color(0xFFFF85A1), Color(0xFFFF3366)], // 喜欢：红粉
@@ -409,7 +428,23 @@ class _QuickGrid extends ConsumerWidget {
                   gradient: _gradients[0],
                   title: '喜欢的音乐',
                   subtitle: likeSub,
-                  onTap: () => context.push('/liked-songs'),
+                  onTap: () {
+                    final NeteaseUserPlaylist? p = likedPlaylist;
+                    if (p != null) {
+                      context.push(
+                        '/playlist/${p.id}?name=${Uri.encodeComponent(p.name)}',
+                        extra: PlaylistMeta(
+                          id: p.id,
+                          name: p.name,
+                          coverUrl: p.coverUrl,
+                          trackCount: p.trackCount,
+                          creatorUserId: p.creatorUserId,
+                        ),
+                      );
+                    } else {
+                      context.push('/liked-songs');
+                    }
+                  },
                 ),
               ),
               const SizedBox(width: 10),
@@ -734,12 +769,43 @@ class _PlaylistRowTile extends StatelessWidget {
 
 // ---------------------------------------------------------------- 云盘项
 
-class _CloudDriveItem extends StatelessWidget {
+/// 我的云盘行（需求：登录后显示总歌曲数）
+class _CloudDriveItem extends ConsumerStatefulWidget {
   const _CloudDriveItem();
+
+  @override
+  ConsumerState<_CloudDriveItem> createState() => _CloudDriveItemState();
+}
+
+class _CloudDriveItemState extends ConsumerState<_CloudDriveItem> {
+  int? _count;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _loadCount());
+  }
+
+  Future<void> _loadCount() async {
+    final AuthState auth = ref.read(authProvider);
+    if (!auth.loggedIn) return;
+    try {
+      final CloudDriveInfo info =
+          await ref.read(neteaseRepositoryProvider).cloudInfo();
+      if (!mounted) return;
+      setState(() => _count = info.count);
+    } catch (_) {
+      // 云盘信息获取失败静默（行内仍可进入云盘页查看）
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
+    final AuthState auth = ref.watch(authProvider);
+    final String subtitle = auth.loggedIn && _count != null
+        ? '$_count 首歌曲，随时随地同步云端音乐资产'
+        : '随时随地，同步云端音乐资产';
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
       child: Material(
@@ -769,16 +835,135 @@ class _CloudDriveItem extends StatelessWidget {
                           size: 20, color: Colors.white),
                 ),
                 const SizedBox(width: 12),
-                const Expanded(
+                Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: <Widget>[
-                      Text('我的云盘',
+                      const Text('我的云盘',
                           style: TextStyle(
                               fontSize: 14.5, fontWeight: FontWeight.w600)),
-                      SizedBox(height: 1),
-                      Text('随时随地，同步云端音乐资产',
-                          style: TextStyle(fontSize: 11)),
+                      const SizedBox(height: 1),
+                      Text(subtitle, style: const TextStyle(fontSize: 11)),
+                    ],
+                  ),
+                ),
+                Icon(Icons.chevron_right_rounded,
+                    size: 19, color: theme.colorScheme.onSurfaceVariant),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------- 数据缓存
+
+/// 数据缓存行（需求：我的页增加数据缓存，展示占用并可清理，
+/// 保障无网环境播放已缓存歌曲的体验）
+class _CacheRow extends ConsumerStatefulWidget {
+  const _CacheRow();
+
+  @override
+  ConsumerState<_CacheRow> createState() => _CacheRowState();
+}
+
+class _CacheRowState extends ConsumerState<_CacheRow> {
+  String _sizeText = '计算中…';
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _refresh());
+  }
+
+  Future<void> _refresh() async {
+    final int bytes = await ref.read(songCacheProvider).totalSizeBytes();
+    if (!mounted) return;
+    setState(() => _sizeText = _fmt(bytes));
+  }
+
+  static String _fmt(int b) {
+    if (b <= 0) return '0 B';
+    if (b < 1024 * 1024) return '${(b / 1024).toStringAsFixed(0)} KB';
+    if (b < 1024 * 1024 * 1024) {
+      return '${(b / 1024 / 1024).toStringAsFixed(1)} MB';
+    }
+    return '${(b / 1024 / 1024 / 1024).toStringAsFixed(2)} GB';
+  }
+
+  Future<void> _clear() async {
+    final bool? ok = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext ctx) => AlertDialog(
+        title: const Text('清理数据缓存'),
+        content: Text(
+            '将删除已缓存的歌曲音频（当前占用 $_sizeText）。'
+            '清理后离线将无法播放未重新缓存的歌曲，确定继续吗？'),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+                backgroundColor: AppConstants.brandColor),
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('清理'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    await ref.read(songCacheProvider).clearAll();
+    _refresh();
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+        .showSnackBar(const SnackBar(content: Text('数据缓存已清理')));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 0),
+      child: Material(
+        color:
+            theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
+        borderRadius: BorderRadius.circular(16),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(16),
+          onTap: _clear,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            child: Row(
+              children: <Widget>[
+                Container(
+                  width: 38,
+                  height: 38,
+                  decoration: BoxDecoration(
+                    gradient: const LinearGradient(
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                      colors: <Color>[Color(0xFFFFCC80), Color(0xFFEF6C00)],
+                    ),
+                    borderRadius: BorderRadius.circular(11),
+                  ),
+                  child: const Icon(Icons.storage_rounded,
+                      size: 20, color: Colors.white),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: <Widget>[
+                      const Text('数据缓存',
+                          style: TextStyle(
+                              fontSize: 14.5, fontWeight: FontWeight.w600)),
+                      const SizedBox(height: 1),
+                      Text('边听边缓存占用：$_sizeText，点击清理',
+                          style: const TextStyle(fontSize: 11)),
                     ],
                   ),
                 ),

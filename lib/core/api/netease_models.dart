@@ -19,6 +19,8 @@ class Song {
     this.durationMs,
     this.fee = 0,
     this.mvId,
+    this.artistId,
+    this.albumId,
   });
 
   final int id;
@@ -33,6 +35,12 @@ class Song {
 
   /// MV id（song/detail 的 mv 字段，非零表示有 MV；/simi/song 旧版字段同名）
   final int? mvId;
+
+  /// 首位艺人 id（长按菜单「歌手」跳转 /artist/:id 用）
+  final int? artistId;
+
+  /// 专辑 id（长按菜单「专辑」跳转 /album/:id 用）
+  final int? albumId;
 
   bool get isVipOnly => fee == 1;
 
@@ -50,6 +58,8 @@ class Song {
         isNetwork: true,
         isCustom: false,
         fee: fee,
+        artistId: artistId,
+        albumId: albumId,
       );
 
   static Song fromCloudJson(Map<String, Object?> j) {
@@ -63,7 +73,27 @@ class Song {
           (j['dt'] as num?)?.toInt() ?? (j['duration'] as num?)?.toInt(),
       fee: (j['fee'] as num?)?.toInt() ?? 0,
       mvId: (j['mv'] as num?)?.toInt(),
+      artistId: _firstArtistId(j),
+      albumId: _albumId(j),
     );
+  }
+
+  static int? _firstArtistId(Map<String, Object?> j) {
+    final List<Object?>? ar = (j['ar'] ?? j['artists']) as List<Object?>?;
+    if (ar == null || ar.isEmpty) return null;
+    final Object? first = ar.first;
+    if (first is Map<String, Object?>) {
+      return (first['id'] as num?)?.toInt();
+    }
+    return null;
+  }
+
+  static int? _albumId(Map<String, Object?> j) {
+    final Object? al = j['al'] ?? j['album'];
+    if (al is Map<String, Object?>) {
+      return (al['id'] as num?)?.toInt();
+    }
+    return null;
   }
 
   static String _joinArtists(Map<String, Object?> j) {
@@ -581,6 +611,30 @@ class CloudSong {
       fileName: name,
     );
   }
+}
+
+/// 音乐云盘容量信息（/user/cloud 顶层字段）
+class CloudDriveInfo {
+  const CloudDriveInfo({
+    this.count = 0,
+    this.size = 0,
+    this.maxSize = 0,
+  });
+
+  /// 云盘歌曲总数（分页无关的顶层 count）
+  final int count;
+
+  /// 已用容量（字节）
+  final int size;
+
+  /// 云盘总容量（字节，60GB 级别按账号等级不同）
+  final int maxSize;
+
+  static CloudDriveInfo fromJson(Map<String, Object?> j) => CloudDriveInfo(
+        count: (j['count'] as num?)?.toInt() ?? 0,
+        size: (j['size'] as num?)?.toInt() ?? 0,
+        maxSize: (j['maxSize'] as num?)?.toInt() ?? 0,
+      );
 }
 
 /// 专辑详情（/album）

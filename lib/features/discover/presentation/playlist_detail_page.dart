@@ -91,6 +91,8 @@ class _PlaylistDetailPageState extends ConsumerState<PlaylistDetailPage> {
             fallbackTitle: widget.title,
             tracks: snap.data!.tracks,
             isMine: _isMine(snap.data!.meta),
+            // 长按菜单「移除歌单」成功后刷新详情数据
+            onReload: () => setState(() => _future = _load()),
           );
         },
       ),
@@ -115,12 +117,16 @@ class _DetailBody extends ConsumerStatefulWidget {
     required this.fallbackTitle,
     required this.tracks,
     required this.isMine,
+    required this.onReload,
   });
 
   final PlaylistMeta meta;
   final String fallbackTitle;
   final List<Song> tracks;
   final bool isMine;
+
+  /// 详情数据刷新（长按菜单移除歌曲后回调）
+  final VoidCallback onReload;
 
   @override
   ConsumerState<_DetailBody> createState() => _DetailBodyState();
@@ -633,7 +639,18 @@ class _DetailBodyState extends ConsumerState<_DetailBody> {
                 playingNow: playingNow,
                 canRemove: widget.isMine,
                 onPlay: () => _playAll(index),
-                onMore: () => showSongActionsSheet(context, s.toTrack()),
+                onMore: () => showSongActionsSheet(
+                  context,
+                  s.toTrack(),
+                  playlistId: widget.meta.id,
+                  onRemoved: widget.onReload,
+                ),
+                onLongPress: () => showSongActionsSheet(
+                  context,
+                  s.toTrack(),
+                  playlistId: widget.meta.id,
+                  onRemoved: widget.onReload,
+                ),
                 onRemove: widget.isMine
                     ? () => _removeTrack(s.id, s.name)
                     : null,
@@ -975,6 +992,7 @@ class _SwipeSongRow extends StatelessWidget {
     required this.onMore,
     required this.onRemove,
     required this.onAddTo,
+    this.onLongPress,
   });
 
   final Song song;
@@ -986,6 +1004,9 @@ class _SwipeSongRow extends StatelessWidget {
   final VoidCallback? onRemove;
   final VoidCallback onAddTo;
 
+  /// 需求：所有歌曲长按弹出统一操作菜单
+  final VoidCallback? onLongPress;
+
   @override
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
@@ -995,6 +1016,7 @@ class _SwipeSongRow extends StatelessWidget {
 
     final Widget row = InkWell(
       onTap: onPlay,
+      onLongPress: onLongPress,
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
         child: Row(

@@ -224,6 +224,8 @@ class PlayerNotifier extends Notifier<PlayerState> {
       state = state.copyWith(index: i);
       // 切歌后同步通知栏红心状态（需求：通知栏增加红心）
       _syncNotificationLike();
+      // 需求「只需播放一首缓存一首」：仅在实际开播的曲目上后台落盘
+      unawaited(_cacheCurrentTrack());
     });
     _processingSub = _handler.player.processingStateStream
         .map(_mapProcessing)
@@ -286,6 +288,30 @@ class PlayerNotifier extends Notifier<PlayerState> {
         songId > 0 &&
         ref.read(authProvider).likedIds.contains(songId);
     _handler.setLiked(liked);
+  }
+
+  // ------------------------------------------------------- 播放即缓存
+
+  /// 需求「只需播放一首缓存一首」：仅对**实际开播**的曲目后台落盘。
+  /// 旧实现在队列解析（resolveTracks）时对整个队列批量预缓存 —— 装载一个
+  /// 大歌单即缓存全部曲目，占用暴涨；现改为开播触发，队列解析不再写盘。
+  Future<void> _cacheCurrentTrack() async {
+    if (!_ready) return;
+    if (!ref.read(listenCacheProvider)) return;
+    final Track? track = state.currentTrack;
+    final int? id = track?.neteaseId;
+    if (id == null || id <= 0) return;
+    final String src = track!.source;
+    if (src.isEmpty || !src.startsWith('http')) return; // 本地/已缓存路径
+    try {
+      final SongCacheService cache = ref.read(songCacheProvider);
+      final String level = ref.read(audioQualityProvider).apiValue;
+      final String? cached = await cache.cachedPathFor(id, level);
+      if (cached != null && cached.isNotEmpty) return; // 已缓存
+      await cache.download(id, level, src);
+    } catch (_) {
+      // 缓存失败不影响播放
+    }
   }
 
   // ------------------------------------------------------------ 持久化
@@ -551,6 +577,39 @@ class PlayerNotifier extends Notifier<PlayerState> {
     }
   }
 
+  /// 长按菜单「下一首播放」（需求）：解析后插入当前曲目之后，
+  /// **不打断当前播放**（保留进度与播放状态，仅重建内核队列）。
+  /// 返回 null 表示成功，否则为错误信息。
+  Future<String?> insertNext(Track track) async {
+    if (!state.hasQueue) return '当前没有播放队列';
+    try {
+      List<Track> resolved = await resolveTracks(<Track>[track]);
+      if (resolved.isEmpty) resolved = <Track>[track]; // 离线也允许入队，播放时再解析
+      final Track target = resolved.first;
+      final List<Track> q = List<Track>.of(state.queue);
+      final int existing = q.indexWhere((Track t) => t.id == target.id);
+      int index = state.index;
+      if (existing >= 0) {
+        if (existing == index + 1) return null; // 已是下一首：幂等
+        q.removeAt(existing);
+        if (existing < index) index--;
+      }
+      q.insert((index + 1).clamp(0, q.length), target);
+      state = state.copyWith(queue: q, index: index);
+      final Duration pos = _handler.player.position;
+      final bool wasPlaying = state.playing;
+      await _handler
+          .loadQueue(q, initialIndex: state.index.clamp(0, q.length - 1));
+      if (pos > Duration.zero) await _handler.seek(pos);
+      if (wasPlaying) await _handler.play();
+      _schedulePersist();
+      _schedulePreload();
+      return null;
+    } catch (e) {
+      return '插入失败：$e';
+    }
+  }
+
   /// 相似歌曲插播：解析后插入当前曲目之后并立即切换播放。
   /// 返回 null 表示成功，否则为错误信息。
   Future<String?> playSimilarNext(Track track) async {
@@ -583,44 +642,76 @@ class PlayerNotifier extends Notifier<PlayerState> {
 
   /// 批量解析网易云直链：命中内存缓存直接复用，未命中的批量请求。
   /// 不可播（VIP 拿不到链接）的曲目剔除，试听片段保留（freeTrial）。
-  /// 需求「边听边缓存」：磁盘缓存命中直接改用本地文件；未命中后台落盘。
+  ///
+  /// 需求「离线可播」：直链未解析时**先查磁盘缓存**，命中直接改用本地
+  /// 文件并跳过网络请求 —— 断网时旧实现强制请求 /song/url 失败，导致
+  /// 已缓存歌曲也无法播放。
+  /// 需求「只缓存播放的歌」：解析不再触发预下载（开播时才落盘）。
+  /// 直链批量请求失败（断网/接口异常）不再整体抛出：返回已命中的部分，
+  /// 播放队列/离线场景保留可用曲目。
   Future<List<Track>> resolveTracks(List<Track> tracks) async {
-    final List<Track> out = <Track>[];
+    final SongCacheService cache = ref.read(songCacheProvider);
+    final bool cacheOn = ref.read(listenCacheProvider);
+    final String level = ref.read(audioQualityProvider).apiValue;
+
+    final Map<int, Track> resolvedById = <int, Track>{};
     final Map<int, Track> pending = <int, Track>{};
 
     for (final Track t in tracks) {
-      if (t.neteaseId == null) {
-        out.add(t); // 非网易云（自定义直链）：直接可用
-        continue;
-      }
-      final SongUrlInfo? cached = _urlCache[t.neteaseId!];
+      final int? nid = t.neteaseId;
+      if (nid == null || nid <= 0) continue; // 非网易云（自定义直链）：直接可用
+      final SongUrlInfo? cached = _urlCache[nid];
       if (cached != null) {
-        if (cached.playable) out.add(await _withCacheSource(t, cached));
+        if (cached.playable) resolvedById[nid] = await _withCacheSource(t, cached);
         continue; // 缓存命中但不可播：剔除（VIP 灰曲）
       }
-      pending[t.neteaseId!] = t;
+      if (cacheOn) {
+        try {
+          final String? path = await cache.cachedPathFor(nid, level);
+          if (path != null && path.isNotEmpty) {
+            resolvedById[nid] = t.copyWith(source: path);
+            continue;
+          }
+        } catch (_) {}
+      }
+      pending[nid] = t;
     }
 
     if (pending.isNotEmpty) {
-      final NeteaseRepository repo = ref.read(neteaseRepositoryProvider);
-      final String level = ref.read(audioQualityProvider).apiValue;
-      final List<SongUrlInfo> urls =
-          await repo.songUrls(pending.keys.toList(), level: level);
-      for (final SongUrlInfo u in urls) {
-        final Track? t = pending[u.id];
-        if (t == null) continue;
-        _urlCache[u.id] = u;
-        if (u.playable) {
-          out.add(await _withCacheSource(t, u));
+      try {
+        final NeteaseRepository repo = ref.read(neteaseRepositoryProvider);
+        final List<SongUrlInfo> urls =
+            await repo.songUrls(pending.keys.toList(), level: level);
+        for (final SongUrlInfo u in urls) {
+          final Track? t = pending[u.id];
+          if (t == null) continue;
+          _urlCache[u.id] = u;
+          if (u.playable) {
+            resolvedById[u.id] = await _withCacheSource(t, u);
+          }
         }
+      } catch (e) {
+        debugPrint('resolveTracks: 直链批量解析失败（离线？）：$e');
+      }
+    }
+
+    // 按入参顺序组装（保持队列顺序稳定），解析失败的曲目剔除
+    final List<Track> out = <Track>[];
+    for (final Track t in tracks) {
+      final int? nid = t.neteaseId;
+      if (nid == null || nid <= 0) {
+        out.add(t);
+      } else {
+        final Track? r = resolvedById[nid];
+        if (r != null) out.add(r);
       }
     }
     return out;
   }
 
   /// 缓存感知的播放源选择：
-  ///  - 边听边缓存开启：磁盘命中 → 本地文件（秒开）；未命中 → 网络 URL
-  ///    播放同时后台落盘（再次播放即命中）；
+  ///  - 边听边缓存开启：磁盘命中 → 本地文件（秒开）；
+  ///  - 未命中：网络 URL（落盘延后到开播时，见 _cacheCurrentTrack）；
   ///  - 关闭：直接用网络 URL。
   Future<Track> _withCacheSource(Track t, SongUrlInfo u) async {
     final int id = t.neteaseId!;
@@ -632,8 +723,6 @@ class PlayerNotifier extends Notifier<PlayerState> {
       if (path != null && path.isNotEmpty) {
         return t.copyWith(source: path);
       }
-      // 未命中：播放与缓存下载并行（后台 .part → 原子改名）
-      unawaited(cache.download(id, level, u.url));
     } catch (_) {
       // 缓存层异常不影响播放
     }
@@ -900,6 +989,22 @@ class PlayerNotifier extends Notifier<PlayerState> {
   Future<void> _jumpTo(int index) async {
     if (!state.hasQueue) return;
     final int safe = index.clamp(0, state.queue.length - 1);
+    // 目标曲目直链缺失（恢复队列/离线降级场景）：单曲按需解析 ——
+    // 缓存命中（离线）得本地路径可播；彻底失败则提示，不再让内核空源报错
+    if (state.queue[safe].needsUrlResolve) {
+      final List<Track> one =
+          await resolveTracks(<Track>[state.queue[safe]]);
+      if (one.isNotEmpty) {
+        final List<Track> q = List<Track>.of(state.queue);
+        q[safe] = one.first;
+        state = state.copyWith(queue: q);
+      }
+      if (state.queue[safe].needsUrlResolve) {
+        state = state.copyWith(
+            error: '该歌曲暂无法播放（离线且未缓存，联网后重试）');
+        return;
+      }
+    }
     state = state.copyWith(index: safe);
     await _handler.player.seek(Duration.zero, index: safe);
     if (!state.playing) {

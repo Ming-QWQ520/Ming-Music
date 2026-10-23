@@ -12,6 +12,7 @@ import '../../../core/widgets/cover_image.dart';
 import '../../library/domain/track.dart';
 import '../../player/providers/player_providers.dart';
 import '../data/netease_providers.dart' show neteaseRepositoryProvider;
+import 'widgets/song_actions_sheet.dart';
 
 class ArtistSongsPage extends ConsumerStatefulWidget {
   const ArtistSongsPage({
@@ -135,6 +136,9 @@ class _ArtistSongsPageState extends ConsumerState<ArtistSongsPage> {
                       )
                     : null,
                 onTap: () => _play(s),
+                // 需求：所有歌曲长按弹出统一操作菜单
+                onLongPress: () =>
+                    showSongActionsSheet(context, s.toTrack()),
               );
             },
           );

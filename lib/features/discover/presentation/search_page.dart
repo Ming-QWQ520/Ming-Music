@@ -197,6 +197,7 @@ class _SearchPageState extends ConsumerState<SearchPage> {
         song: _results[index],
         onPlay: () => _playAt(index),
         onMore: () => showSongActionsSheet(context, _results[index].toTrack()),
+        onLongPress: () => showSongActionsSheet(context, _results[index].toTrack()),
       ),
     );
   }

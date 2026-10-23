@@ -1,6 +1,8 @@
-/// 播放进度条：
+/// 播放进度条（需求：Apple Music 样式）：
+///  - 无头部圆点（thumb/overlay 全隐藏），进度条为一个整体圆角条；
+///  - 手动拖动时进度条平滑变粗（缩放变大），松手回弹到常规粗细；
 ///  - 只订阅 positionProvider / durationProvider 两个高频流，
-///    并用 RepaintBoundary 把重绘隔离在本组件内（避坑指南 3）；
+///    并用 RepaintBoundary 把重绘隔离在本组件内；
 ///  - 拖动期间使用本地预览值，松手才真正 seek。
 library;
 
@@ -25,6 +27,13 @@ class PlayerProgressBar extends ConsumerStatefulWidget {
 class _PlayerProgressBarState extends ConsumerState<PlayerProgressBar> {
   double? _previewMs;
 
+  /// 是否正在拖动（Apple Music：拖动时条变粗）
+  bool _dragging = false;
+
+  /// 常规/拖动态的条高（Apple Music 观感：4 → 8）
+  static const double _kRestHeight = 4;
+  static const double _kDragHeight = 8;
+
   @override
   Widget build(BuildContext context) {
     final double positionMs =
@@ -40,25 +49,38 @@ class _PlayerProgressBarState extends ConsumerState<PlayerProgressBar> {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: <Widget>[
-          SliderTheme(
-            data: SliderTheme.of(context).copyWith(
-              activeTrackColor: Colors.white.withValues(alpha: 0.9),
-              inactiveTrackColor: Colors.white.withValues(alpha: 0.22),
-              thumbColor: Colors.white,
-              overlayColor: Colors.white.withValues(alpha: 0.14),
-              trackHeight: 3.5,
-            ),
-            child: Slider(
-              value: value,
-              max: safeDuration,
-              onChanged: (double v) => setState(() => _previewMs = v),
-              onChangeEnd: (double v) {
-                _previewMs = null;
-                ref
-                    .read(playerProvider.notifier)
-                    .seek(Duration(milliseconds: v.round()));
-              },
-            ),
+          // 需求：拖动时进度条缩放变大 —— trackHeight 用隐式动画平滑过渡
+          TweenAnimationBuilder<double>(
+            tween: Tween<double>(
+                end: _dragging ? _kDragHeight : _kRestHeight),
+            duration: const Duration(milliseconds: 180),
+            curve: Curves.easeOutCubic,
+            builder: (BuildContext ctx, double height, _) {
+              return SliderTheme(
+                data: SliderTheme.of(context).copyWith(
+                  // Apple Music：无圆点，条为一个整体
+                  thumbShape: SliderComponentShape.noThumb,
+                  overlayShape: SliderComponentShape.noOverlay,
+                  trackShape: const RoundedRectSliderTrackShape(),
+                  trackHeight: height,
+                  activeTrackColor: Colors.white.withValues(alpha: 0.9),
+                  inactiveTrackColor: Colors.white.withValues(alpha: 0.25),
+                ),
+                child: Slider(
+                  value: value,
+                  max: safeDuration,
+                  onChanged: (double v) =>
+                      setState(() { _previewMs = v; _dragging = true; }),
+                  onChangeEnd: (double v) {
+                    setState(() => _dragging = false);
+                    _previewMs = null;
+                    ref
+                        .read(playerProvider.notifier)
+                        .seek(Duration(milliseconds: v.round()));
+                  },
+                ),
+              );
+            },
           ),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 22),

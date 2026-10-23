@@ -23,6 +23,7 @@ class CloudDrivePage extends ConsumerStatefulWidget {
 
 class _CloudDrivePageState extends ConsumerState<CloudDrivePage> {
   List<CloudSong>? _songs;
+  CloudDriveInfo? _info;
   String? _error;
   int? _deletingId;
 
@@ -38,10 +39,16 @@ class _CloudDrivePageState extends ConsumerState<CloudDrivePage> {
       _songs = null;
     });
     try {
-      final List<CloudSong> songs =
-          await ref.read(neteaseRepositoryProvider).cloudList();
+      // 需求：云盘显示总歌曲数和总容量（count/size/maxSize 与列表同时拉取）
+      final List<dynamic> r = await Future.wait<dynamic>(<Future<dynamic>>[
+        ref.read(neteaseRepositoryProvider).cloudList(),
+        ref.read(neteaseRepositoryProvider).cloudInfo(),
+      ]);
       if (!mounted) return;
-      setState(() => _songs = songs);
+      setState(() {
+        _songs = r[0] as List<CloudSong>;
+        _info = r[1] as CloudDriveInfo;
+      });
     } catch (e) {
       if (!mounted) return;
       setState(() => _error = '$e');
@@ -176,8 +183,30 @@ class _CloudDrivePageState extends ConsumerState<CloudDrivePage> {
     }
     return Column(
       children: <Widget>[
+        // 需求：云盘顶部显示总歌曲数与总容量
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+          child: Row(
+            children: <Widget>[
+              Icon(Icons.cloud_rounded,
+                  size: 18,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  '共 ${_info?.count ?? songs.length} 首 · 已用 ${_sizeTotal(_info?.size ?? 0)}'
+                  '${(_info?.maxSize ?? 0) > 0 ? ' / ${_sizeTotal(_info!.maxSize)}' : ''}',
+                  style: TextStyle(
+                    fontSize: 12.5,
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
           child: Row(
             children: <Widget>[
               CircleAvatar(
@@ -262,6 +291,16 @@ class _CloudDrivePageState extends ConsumerState<CloudDrivePage> {
     if (bytes <= 0) return '未知大小';
     final double mb = bytes / 1024 / 1024;
     if (mb >= 1) return '${mb.toStringAsFixed(1)}MB';
+    return '${(bytes / 1024).round()}KB';
+  }
+
+  /// 容量展示（GB/MB 自适应；需求：云盘显示总容量）
+  static String _sizeTotal(int bytes) {
+    if (bytes <= 0) return '0B';
+    final double gb = bytes / 1024 / 1024 / 1024;
+    if (gb >= 1) return '${gb.toStringAsFixed(gb >= 10 ? 0 : 1)}GB';
+    final double mb = bytes / 1024 / 1024;
+    if (mb >= 1) return '${mb.toStringAsFixed(0)}MB';
     return '${(bytes / 1024).round()}KB';
   }
 }
