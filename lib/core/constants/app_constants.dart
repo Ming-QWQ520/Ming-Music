@@ -7,7 +7,7 @@ class AppConstants {
   AppConstants._();
 
   static const String appName = 'MingMusic';
-  static const String appVersion = '1.1.0';
+  static const String appVersion = '0.1.0';
   static const String repoUrl = 'https://github.com/Ming-QWQ520/Ming-Music';
 
   /// 网易云 API 域名（文档：https://musicapi.mingqwq.top/docs/）
