@@ -127,13 +127,17 @@ class NpPlayerSettings {
     this.lyricLineGap = 14,
     this.lyricAlign = NpLyricAlign.left,
     this.showTranslation = true,
-    this.lyricFade = 0.55,
-    this.lyricBlur = 0,
+    // 第十三批需求：非活跃行淡出/模糊对齐 Zephyr-Music（RNP 按行距公式）——
+    // 淡出 1.0 = 纯 Zephyr 衰减曲线（相邻行全亮，远处衰减到下限 0.3）；
+    // 模糊改为强度倍率（1.0 = Zephyr 标准 blurByOffset，0 = 关闭）
+    this.lyricFade = 1.0,
+    this.lyricBlur = 1.0,
     this.yrcPlayed = const Color(0xFFFFFFFF),
     this.yrcUnplayed = const Color(0x66FFFFFF),
     this.highlightPlayed = false,
     this.lyricAlwaysCenter = false,
-    this.coverLyrics = NpCoverLyricsMode.one,
+    // 第十三批需求：封面页歌词预览默认两行（旧默认一行）
+    this.coverLyrics = NpCoverLyricsMode.two,
     this.heartEffect = true,
     this.showMvBadge = true,
     this.playerKeepScreenOn = false,
@@ -143,7 +147,7 @@ class NpPlayerSettings {
     this.stripButtons = kStripButtonDefaults,
   });
 
-  static const int version = 1;
+  static const int version = 2;
 
   static const NpPlayerSettings defaults = NpPlayerSettings();
 
@@ -188,10 +192,10 @@ class NpPlayerSettings {
   /// 显示翻译副行
   final bool showTranslation;
 
-  /// 非活跃行淡出强度（0 - 1）
+  /// 非活跃行淡出强度（0 - 1；1.0 = 纯 Zephyr 按行距衰减曲线）
   final double lyricFade;
 
-  /// 非活跃行模糊 px（0 - 10）
+  /// 非活跃行模糊强度倍率（0 - 3；1.0 = Zephyr 标准 blurByOffset）
   final double lyricBlur;
 
   /// 逐字已唱颜色
@@ -208,7 +212,7 @@ class NpPlayerSettings {
   final bool lyricAlwaysCenter;
 
   /// 封面页歌词（需求：借鉴 kgka_Music_hl —— 封面下方显示当前行歌词，
-  /// 可选 一行/两行，默认一行）
+  /// 可选 一行/两行；第十三批起默认两行）
   final NpCoverLyricsMode coverLyrics;
 
   /// 红心动效（喜欢时心形迸发动画）
@@ -313,6 +317,13 @@ class NpPlayerSettings {
             .toList() ??
         List<String>.of(kStripButtonDefaults);
 
+    // 版本迁移（v2，第十三批需求）：
+    //  - 非活跃行淡出/模糊改用 Zephyr（RNP）按行距公式，旧档统一升到
+    //    新标准（淡出 1.0 / 模糊倍率 1.0），用户后续可再自行调整；
+    //  - 封面页歌词预览默认从一行升为两行（旧档存的 'one' 升级）。
+    final int storedVersion = (map['_v'] as num?)?.toInt() ?? 1;
+    final bool migrateToV2 = storedVersion < 2;
+
     return NpPlayerSettings(
       displayMode: NpDisplayMode.values.firstWhere(
         (NpDisplayMode m) => m.name == map['displayMode'],
@@ -341,16 +352,22 @@ class NpPlayerSettings {
       showTranslation: map['showTranslation'] is bool
           ? map['showTranslation']! as bool
           : defaults.showTranslation,
-      lyricFade: clampD(map['lyricFade'], 0, 1, defaults.lyricFade),
-      lyricBlur: clampD(map['lyricBlur'], 0, 10, defaults.lyricBlur),
+      lyricFade: migrateToV2
+          ? defaults.lyricFade
+          : clampD(map['lyricFade'], 0, 1, defaults.lyricFade),
+      lyricBlur: migrateToV2
+          ? defaults.lyricBlur
+          : clampD(map['lyricBlur'], 0, 3, defaults.lyricBlur),
       yrcPlayed: colorOf(map['yrcPlayed'], defaults.yrcPlayed),
       yrcUnplayed: colorOf(map['yrcUnplayed'], defaults.yrcUnplayed),
       highlightPlayed: map['highlightPlayed'] == true,
       lyricAlwaysCenter: map['lyricAlwaysCenter'] == true,
-      coverLyrics: NpCoverLyricsMode.values.firstWhere(
-        (NpCoverLyricsMode m) => m.name == map['coverLyrics'],
-        orElse: () => defaults.coverLyrics,
-      ),
+      coverLyrics: migrateToV2
+          ? NpCoverLyricsMode.two
+          : NpCoverLyricsMode.values.firstWhere(
+              (NpCoverLyricsMode m) => m.name == map['coverLyrics'],
+              orElse: () => defaults.coverLyrics,
+            ),
       heartEffect: map['heartEffect'] is bool
           ? map['heartEffect']! as bool
           : defaults.heartEffect,

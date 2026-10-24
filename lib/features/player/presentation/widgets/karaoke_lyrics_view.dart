@@ -19,6 +19,8 @@
 ///  - 进入歌词页首次定位 jumpTo 直显当前行（固定行为），切歌平滑跟随。
 library;
 
+import 'dart:math' as math;
+
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
@@ -230,6 +232,8 @@ class _KaraokeLyricsViewState extends ConsumerState<KaraokeLyricsView> {
                   subLine: line.isMetadata
                       ? ''
                       : lyrics.subLineFor(line.start.inMilliseconds),
+                  // RNP 距离：无活动行（间奏）时按序号衰减
+                  distance: active < 0 ? index + 1 : (index - active).abs(),
                   onSeek: _seek,
                 );
               },
@@ -260,6 +264,8 @@ class _KaraokeLyricsViewState extends ConsumerState<KaraokeLyricsView> {
               align: cfg.lyricAlign,
               fade: cfg.lyricFade,
               blur: cfg.lyricBlur,
+              // RNP 距离：无活动行（间奏）时按序号衰减
+              distance: active < 0 ? index + 1 : (index - active).abs(),
               gapV: _gapV(cfg),
               onSeek: _seek,
             ),
@@ -351,32 +357,44 @@ class _KaraokeLyricsViewState extends ConsumerState<KaraokeLyricsView> {
 /// 行内水平 padding（左右各 28）
 const double _kRowHPadding = 28;
 
-/// 非活跃行效果（需求修复：非活跃行淡出与模糊此前未实际生效）：
-///  - 淡出：透明度随「非活跃行淡出」设置降低（对齐逐行行公式）；
-///  - 模糊：ImageFilter.blur 高斯模糊非活动行文本（设置 > 0 时启用）；
+/// 非活跃行效果（第十三批需求：对齐 Zephyr-Music / RNP 按行距公式）——
+/// 旧实现是全部非活跃行统一透明度+统一模糊，观感与 Zephyr 差异大
+/// （相邻行也被压暗）；现改为随「与活动行的距离」平滑衰减：
+///  - 淡出 opacityByOffset：|d|<=1 → 1（相邻行不淡出）；否则
+///    max(1 - 0.25*(d-1), 0.3)，再由设置滑杆整体缩放
+///    `alpha = 1 - fade*(1 - rnp)`（fade 默认 1.0 = 纯 Zephyr 曲线）；
+///  - 模糊 blurByOffset：min(0.2 + 0.3*d, 1.2)px × 设置倍率
+///    （倍率默认 1.0 = Zephyr 标准模糊）；
 /// RepaintBoundary 隔离模糊层，避免滚动时全列表重绘。
 Widget _applyInactiveEffect(
   Widget child, {
   required double fade,
   required double blur,
   required bool active,
+  required int distance,
 }) {
-  if (active) return child;
+  if (active || distance <= 0) return child;
   Widget result = child;
-  if (blur > 0) {
+  // RNP blurByOffset：随距离递增、上限 1.2px，乘设置倍率
+  final double sigma =
+      (0.2 + 0.3 * distance).clamp(0.0, 1.2) * blur.clamp(0.0, 3.0);
+  if (sigma > 0.02) {
     result = RepaintBoundary(
       child: ImageFiltered(
         imageFilter: ui.ImageFilter.blur(
-          sigmaX: blur,
-          sigmaY: blur,
+          sigmaX: sigma,
+          sigmaY: sigma,
           tileMode: ui.TileMode.decal,
         ),
         child: result,
       ),
     );
   }
-  // 淡出强度公式与 _LrcRow 一致：强度 0 → alpha 0.45；强度 1 → alpha 0.05
-  final double alpha = (0.05 + (1 - fade) * 0.40).clamp(0.05, 1.0);
+  // RNP opacityByOffset：相邻行全亮，远处衰减到下限 0.3，
+  // fade 滑杆控制整体淡出强度（0 = 全部不透明）
+  final double rnp =
+      distance <= 1 ? 1.0 : math.max(1 - 0.25 * (distance - 1), 0.3);
+  final double alpha = (1 - fade.clamp(0.0, 1.0) * (1 - rnp)).clamp(0.0, 1.0);
   if (alpha < 1.0) {
     result = Opacity(opacity: alpha, child: result);
   }
@@ -395,6 +413,7 @@ class _YrcRow extends ConsumerStatefulWidget {
     required this.cfg,
     required this.width,
     required this.subLine,
+    required this.distance,
     required this.onSeek,
   });
 
@@ -404,6 +423,9 @@ class _YrcRow extends ConsumerStatefulWidget {
   final NpPlayerSettings cfg;
   final double width;
   final String subLine;
+
+  /// 与活动行的距离（RNP 淡出/模糊衰减输入）
+  final int distance;
   final ValueChanged<Duration> onSeek;
 
   @override
@@ -554,13 +576,13 @@ class _YrcRowState extends ConsumerState<_YrcRow>
       ],
     );
 
-    // 需求修复：非活跃行淡出与模糊实际生效（此前仅逐行行有淡出，
-    // 逐字行无任何非活跃效果）
+    // 第十三批需求：非活跃行效果对齐 Zephyr（RNP 按行距衰减）
     rowContent = _applyInactiveEffect(
       rowContent,
       fade: cfg.lyricFade,
       blur: cfg.lyricBlur,
       active: widget.active,
+      distance: widget.distance,
     );
 
     return GestureDetector(
@@ -701,6 +723,7 @@ class _LrcRow extends StatelessWidget {
     required this.align,
     required this.fade,
     required this.blur,
+    required this.distance,
     required this.gapV,
     required this.onSeek,
   });
@@ -717,8 +740,11 @@ class _LrcRow extends StatelessWidget {
   final NpLyricAlign align;
   final double fade;
 
-  /// 非活跃行模糊 px（需求修复：模糊此前无实际效果）
+  /// 非活跃行模糊倍率（1.0 = Zephyr 标准，0 = 关闭）
   final double blur;
+
+  /// 与活动行的距离（RNP 淡出/模糊衰减输入）
+  final int distance;
   final double gapV;
   final ValueChanged<Duration> onSeek;
 
@@ -732,11 +758,13 @@ class _LrcRow extends StatelessWidget {
     final String sub = showSubLine ? subLine : '';
     final bool showSub = sub.isNotEmpty;
 
+    // 第十三批需求：非活跃行颜色不再内嵌统一淡出（旧公式把相邻行也
+    // 压得很暗），透明度交给 _applyInactiveEffect 的 RNP 距离衰减统一处理
     final Color mainColor = active
         ? Colors.white
         : played
-            ? Colors.white.withValues(alpha: 0.72)
-            : Colors.white.withValues(alpha: 0.05 + (1 - fade) * 0.40);
+            ? Colors.white.withValues(alpha: 0.85)
+            : Colors.white;
 
     Widget rowContent = Column(
       mainAxisAlignment: MainAxisAlignment.center,
@@ -760,9 +788,10 @@ class _LrcRow extends StatelessWidget {
             maxLines: 2,
             overflow: TextOverflow.ellipsis,
             style: TextStyle(
+              // 副行透明度同样交给 RNP 距离衰减
               color: active || played
                   ? Colors.white.withValues(alpha: 0.68)
-                  : Colors.white.withValues(alpha: 0.45),
+                  : Colors.white.withValues(alpha: 0.62),
               fontSize: 12.5,
               height: 1.3,
             ),
@@ -770,13 +799,14 @@ class _LrcRow extends StatelessWidget {
       ],
     );
 
-    // 需求修复：非活跃行模糊实际生效（淡出已有，此前缺模糊）
+    // 第十三批需求：非活跃行模糊/淡出对齐 Zephyr（RNP 距离衰减）
     if (!active) {
       rowContent = _applyInactiveEffect(
         rowContent,
         fade: fade,
         blur: blur,
         active: false,
+        distance: distance,
       );
     }
 

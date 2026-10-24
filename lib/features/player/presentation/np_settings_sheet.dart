@@ -330,11 +330,13 @@ class _LyricsPane extends ConsumerWidget {
               ref.read(npSettingsProvider.notifier).setLyricFade(v),
         ),
         _SliderRow(
+          // 第十三批需求：模糊改倍率语义（对齐 Zephyr blurByOffset，
+          // 1.0 = 标准按行距轻微模糊，0 = 关闭，最大 3 倍）
           label: '非活跃行模糊',
-          value: cfg.lyricBlur / 10,
-          display: '${cfg.lyricBlur.round()}px',
+          value: cfg.lyricBlur / 3,
+          display: 'x${cfg.lyricBlur.toStringAsFixed(1)}',
           onChanged: (double v) =>
-              ref.read(npSettingsProvider.notifier).setLyricBlur(v * 10),
+              ref.read(npSettingsProvider.notifier).setLyricBlur(v * 3),
         ),
         _SwitchRow(
           label: '高亮已播放歌词',

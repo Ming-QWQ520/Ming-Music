@@ -1267,7 +1267,7 @@ class _CoverLyricsPreview extends ConsumerWidget {
   final NpCoverLyricsMode mode;
   final double width;
 
-  /// 解析当前行：主行（逐字/普通）+ 副行。
+  /// 解析当前行：主行（逐字/普通）+ 副行 + 主行时间戳（滚动切换 key）。
   ///
   /// 需求（kgka_Music_hl 对齐）：
   ///  - 双行模式副行规则（不随「显示翻译」设置变化）：
@@ -1275,11 +1275,11 @@ class _CoverLyricsPreview extends ConsumerWidget {
   ///    无翻译时显示下一非空行 —— 中文歌 = 两行原文；
   ///  - 原文（主行）有逐字歌词（yrc）时主行走逐字播放动画（[_KaraokeText]），
   ///    无逐字（LRC / 元数据行 / 空行）回退跑马灯。
-  ({YrcLine? karaoke, String main, String sub}) _resolve(
+  ({YrcLine? karaoke, String main, String sub, int mainTime}) _resolve(
       ParsedLyrics lyrics, Duration position) {
     if (lyrics.hasYrc) {
       final int idx = activeYrcIndex(lyrics.yrcLines, position);
-      if (idx < 0) return (karaoke: null, main: '', sub: '');
+      if (idx < 0) return (karaoke: null, main: '', sub: '', mainTime: -1);
       final YrcLine cur = lyrics.yrcLines[idx];
       String sub = '';
       if (!cur.isMetadata) {
@@ -1302,10 +1302,11 @@ class _CoverLyricsPreview extends ConsumerWidget {
         karaoke: cur.isMetadata || cur.words.isEmpty ? null : cur,
         main: cur.text,
         sub: sub,
+        mainTime: cur.start.inMilliseconds,
       );
     }
     final int idx = activeLyricIndex(lyrics.lrcLines, position);
-    if (idx < 0) return (karaoke: null, main: '', sub: '');
+    if (idx < 0) return (karaoke: null, main: '', sub: '', mainTime: -1);
     final LyricLine cur = lyrics.lrcLines[idx];
     String sub = '';
     final String t = lyrics.subLineFor(cur.time.inMilliseconds);
@@ -1321,7 +1322,12 @@ class _CoverLyricsPreview extends ConsumerWidget {
         }
       }
     }
-    return (karaoke: null, main: cur.text, sub: sub);
+    return (
+      karaoke: null,
+      main: cur.text,
+      sub: sub,
+      mainTime: cur.time.inMilliseconds
+    );
   }
 
   @override
@@ -1351,7 +1357,7 @@ class _CoverLyricsPreview extends ConsumerWidget {
       );
     }
 
-    final ({YrcLine? karaoke, String main, String sub}) line =
+    final ({YrcLine? karaoke, String main, String sub, int mainTime}) line =
         _resolve(lyrics, position);
     final String main = line.main.isEmpty ? '···' : line.main;
     final String sub = two ? line.sub : '';
@@ -1360,19 +1366,23 @@ class _CoverLyricsPreview extends ConsumerWidget {
     return SizedBox(
       width: width,
       height: height,
-      child: AnimatedSwitcher(
-        duration: const Duration(milliseconds: 260),
-        switchInCurve: Curves.easeOutCubic,
-        switchOutCurve: Curves.easeOutCubic,
-        child: Column(
-          key: ValueKey<String>('$main|$sub'),
-          // kgka 对齐（需求）：封面页歌词左对齐显示
-          mainAxisAlignment: MainAxisAlignment.center,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: <Widget>[
-            // 主行：当前行大字（kgka：22px / w900 / height 1.22）；
-            // 有逐字歌词 → 逐字播放动画（需求）
-            SizedBox(
+      // 第十三批需求：封面页歌词随播放自动滚动 —— 主/副行独立滚动
+      // 切换（新行从下方滑入把旧行顶上去），逐字行动画不被打断
+      //（行不变时 key 不变，AnimatedSwitcher 不重建）。
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          // 主行：当前行大字（kgka：22px / w900 / height 1.22）；
+          // 有逐字歌词 → 逐字播放动画（需求）
+          AnimatedSwitcher(
+            duration: const Duration(milliseconds: 320),
+            switchInCurve: Curves.easeOutCubic,
+            switchOutCurve: Curves.easeInCubic,
+            transitionBuilder: (Widget child, Animation<double> anim) =>
+                _rollTransition(child, anim, ValueKey<int>(line.mainTime)),
+            child: SizedBox(
+              key: ValueKey<int>(line.mainTime),
               height: 30,
               width: width,
               child: useKaraoke
@@ -1389,11 +1399,19 @@ class _CoverLyricsPreview extends ConsumerWidget {
                       ),
                     ),
             ),
-            if (two && sub.isNotEmpty) ...<Widget>[
-              const SizedBox(height: 5),
-              // 副行：翻译优先，否则下一行（kgka：16px / w700 / 白 46%）
-              Text(
+          ),
+          if (two && sub.isNotEmpty) ...<Widget>[
+            const SizedBox(height: 5),
+            // 副行：翻译优先，否则下一行（kgka：16px / w700 / 白 46%）
+            AnimatedSwitcher(
+              duration: const Duration(milliseconds: 320),
+              switchInCurve: Curves.easeOutCubic,
+              switchOutCurve: Curves.easeInCubic,
+              transitionBuilder: (Widget child, Animation<double> anim) =>
+                  _rollTransition(child, anim, ValueKey<String>(sub)),
+              child: Text(
                 sub,
+                key: ValueKey<String>(sub),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 textAlign: TextAlign.left,
@@ -1404,12 +1422,36 @@ class _CoverLyricsPreview extends ConsumerWidget {
                   fontWeight: FontWeight.w700,
                 ),
               ),
-            ],
+            ),
           ],
-        ),
+        ],
       ),
     );
   }
+}
+
+/// 封面页歌词预览的滚动切换过渡（第十三批需求：自动滚动效果）——
+/// 新行从下方滑入淡入，旧行向上滑出淡出；[currentKey] 用于区分
+/// 进入/退出行（退出方向反转形成上滚视觉）。裁剪防止相邻行溢出。
+Widget _rollTransition(
+  Widget child,
+  Animation<double> anim,
+  Key currentKey,
+) {
+  final bool isIncoming = child.key == currentKey;
+  final Tween<Offset> slide = Tween<Offset>(
+    begin: isIncoming ? const Offset(0, 0.55) : const Offset(0, -0.55),
+    end: Offset.zero,
+  );
+  return ClipRect(
+    child: FadeTransition(
+      opacity: anim,
+      child: SlideTransition(
+        position: slide.animate(anim),
+        child: child,
+      ),
+    ),
+  );
 }
 
 /// 逐字卡拉OK主行（需求：原文有逐字歌词时封面页歌词需有逐字播放动画）。
@@ -1598,7 +1640,9 @@ class _ProgressSection extends ConsumerWidget {
   }
 }
 
-/// 音质标签按钮：点击弹出音质选择，切换后全队列重解析并保留进度续播
+/// 音质标签按钮：点击弹出音质选择，切换后全队列重解析并保留进度续播。
+/// 第十三批需求：只显示音质名（标准/较高/极高/无损，去掉「音质」后缀），
+/// 短文案也进一步降低进度行中央标签的宽度变化感。
 class _QualityButton extends ConsumerWidget {
   const _QualityButton();
 
@@ -1617,10 +1661,10 @@ class _QualityButton extends ConsumerWidget {
         ),
         child: Text(
           switch (quality) {
-            AudioQuality.standard => '标准音质',
-            AudioQuality.higher => '较高音质',
-            AudioQuality.exhigh => '极高音质',
-            AudioQuality.lossless => '无损音质',
+            AudioQuality.standard => '标准',
+            AudioQuality.higher => '较高',
+            AudioQuality.exhigh => '极高',
+            AudioQuality.lossless => '无损',
           },
           style: TextStyle(
             color: Colors.white.withValues(alpha: 0.55),
@@ -1902,8 +1946,8 @@ class _BottomStrip extends ConsumerWidget {
     // 音量条 + 设置键（音量条在设置键左侧，Expanded 拉伸）。
     if (cfg.stripButtons.contains('volume')) {
       return Padding(
-        // 第十二批需求：进度条以上控件区继续上移 —— 底边距 18 → 28
-        padding: const EdgeInsets.fromLTRB(24, 2, 18, 28),
+        // 第十三批需求：进度条以上控件区继续上移 —— 底边距 28 → 38
+        padding: const EdgeInsets.fromLTRB(24, 2, 18, 38),
         child: Row(
           children: <Widget>[
             const Expanded(child: _VolumeStripButton()),
@@ -1920,11 +1964,11 @@ class _BottomStrip extends ConsumerWidget {
     ];
 
     return Padding(
-      // 需求：底部控件位置继续上移（第十二批：进度条以上的控件区仍
-      // 偏低 —— 底边距 18 → 28，整层浮层再度抬高，信息区/进度条/控制键
+      // 需求：底部控件位置继续上移（第十三批：进度条以上的控件区仍
+      // 偏低 —— 底边距 28 → 38，整层浮层再度抬高，信息区/进度条/控制键
       // 随之上移）
       padding: EdgeInsets.fromLTRB(
-          math.max(34.0 - buttons.length * 4, 16), 2, 34, 28),
+          math.max(34.0 - buttons.length * 4, 16), 2, 34, 38),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: buttons.isEmpty ? <Widget>[const SizedBox.shrink()] : buttons,

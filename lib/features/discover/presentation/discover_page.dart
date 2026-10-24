@@ -110,7 +110,9 @@ class _QuickEntries extends ConsumerWidget {
         covers: dailyCovers.valueOrNull,
         dayNumber: '${DateTime.now().day}',
         fallbackColors: const <Color>[Color(0xFFE2483D), Color(0xFFB31F1F)],
-        onTap: () => _openDaily(context, ref),
+        // 第十三批需求：点击卡片打开歌单查看；右下播放键直接播放
+        onTap: () => context.push('/daily'),
+        onPlay: () => _openDaily(context, ref),
       ),
       _QuickCard(
         title: '私人漫游',
@@ -152,12 +154,13 @@ class _QuickEntries extends ConsumerWidget {
       ),
     ];
 
-    // 参考图样式：横向滑动卡片带（卡宽 156 × 高 96，间距 10）
+    // 参考图样式：横向滑动卡片带（第十三批需求：内容比例改 3:4 竖版 ——
+    // 卡宽 117 × 高 156，间距 10，与 Zephyr 推荐页封面比例一致）
     return SizedBox(
-      height: 110,
+      height: 172,
       child: ListView.separated(
         scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.fromLTRB(16, 6, 16, 8),
+        padding: const EdgeInsets.fromLTRB(16, 6, 16, 10),
         itemCount: cards.length,
         separatorBuilder: (_, __) => const SizedBox(width: 10),
         itemBuilder: (BuildContext context, int index) => cards[index],
@@ -179,7 +182,8 @@ class _QuickEntries extends ConsumerWidget {
     showLoginSheet(context);
   }
 
-  /// 每日推荐（需求：/recommend/songs → 入队播放全部）
+  /// 每日推荐播放（需求：/recommend/songs → 入队播放全部；
+  /// 第十三批起卡片本体改为打开歌单详情，播放由右下播放键触发）
   Future<void> _openDaily(BuildContext context, WidgetRef ref) async {
     if (!ref.read(authProvider).loggedIn) {
       _requireLogin(context, ref);
@@ -290,17 +294,19 @@ class _QuickEntries extends ConsumerWidget {
   }
 }
 
-/// 顶部个性化入口卡（Zephyr 参考图样式，156×96 / radius 16）：
+/// 顶部个性化入口卡（Zephyr 参考图样式，第十三批需求：3:4 竖版 ——
+/// 卡宽 117 × 高 156 / radius 16）：
 ///  - 铺底优先级：2x2 封面拼贴（每日推荐）→ 单封面 → 渐变 + 中央图标/日期；
 ///  - 底部黑渐变压暗保证文字可读；
 ///  - 左下：标题（w800 白）+ 副标题（白 75%）；右下：圆形播放键
-///   （白 22% 底 + 白色播放三角，与整卡共用入口行为）。
+///   （[onPlay] 独立回调，缺省回退整卡行为）。
 class _QuickCard extends StatelessWidget {
   const _QuickCard({
     required this.title,
     required this.subtitle,
     required this.fallbackColors,
     required this.onTap,
+    this.onPlay,
     this.coverUrl,
     this.covers,
     this.icon,
@@ -315,6 +321,9 @@ class _QuickCard extends StatelessWidget {
 
   final VoidCallback onTap;
 
+  /// 右下播放键独立回调（每日推荐：卡片打开详情，播放键直接播放）
+  final VoidCallback? onPlay;
+
   /// 单封面铺底（私人雷达 / 雷达歌单）
   final String? coverUrl;
 
@@ -327,8 +336,9 @@ class _QuickCard extends StatelessWidget {
   /// 每日推荐日期数字（拼贴缺失时的回退视觉）
   final String? dayNumber;
 
-  static const double _w = 156;
-  static const double _h = 96;
+  /// 3:4 竖版（第十三批需求）：117 × 156 = 0.75
+  static const double _w = 117;
+  static const double _h = 156;
 
   @override
   Widget build(BuildContext context) {
@@ -366,8 +376,8 @@ class _QuickCard extends StatelessWidget {
               ),
               Positioned(
                 left: 12,
-                right: 42,
-                bottom: 9,
+                right: 44,
+                bottom: 11,
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -397,13 +407,14 @@ class _QuickCard extends StatelessWidget {
                   ],
                 ),
               ),
-              // 右下圆形播放键（参考图同款：半透明白圆 + 白色三角）
+              // 右下圆形播放键（参考图同款：半透明白圆 + 白色三角；
+              // onPlay 独立，缺省回退整卡行为）
               Positioned(
-                right: 8,
-                bottom: 7,
+                right: 9,
+                bottom: 9,
                 child: GestureDetector(
                   behavior: HitTestBehavior.opaque,
-                  onTap: onTap,
+                  onTap: onPlay ?? onTap,
                   child: Container(
                     width: 27,
                     height: 27,

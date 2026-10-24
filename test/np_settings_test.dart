@@ -150,8 +150,11 @@ void main() {
       });
       expect(legacy.displayMode, NpDisplayMode.both);
       expect(legacy.highlightPlayed, isFalse);
-      // 需求：封面页歌词默认一行
-      expect(legacy.coverLyrics, NpCoverLyricsMode.one);
+      // 第十三批需求：v1 旧档迁移到 v2 —— 封面页歌词默认升为两行，
+      // 非活跃行淡出/模糊升为 Zephyr（RNP）标准（fade 1.0 / blur 1.0）
+      expect(legacy.coverLyrics, NpCoverLyricsMode.two);
+      expect(legacy.lyricFade, 1.0);
+      expect(legacy.lyricBlur, 1.0);
       expect(legacy.lyricAlwaysCenter, isFalse);
       expect(legacy.heartEffect, isTrue);
     });

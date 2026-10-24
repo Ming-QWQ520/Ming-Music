@@ -548,6 +548,11 @@ class PlayerNotifier extends Notifier<PlayerState> {
   ///  1. 批量解析播放直链（VIP 灰曲自动剔除并提示）；
   ///  2. 装载内核队列并从 [startIndex] 开始播放；
   ///  3. [isFm] 私人漫游标记：临近队尾自动补歌（对齐 Zephyr-Music）。
+  ///
+  /// 第十三批需求「来源污染」修复：queueTitle/isFm 不再在解析前预写 ——
+  /// 旧流程先置「每日推荐」再解析，解析失败（全 VIP/网络抖动）时队列
+  /// 仍是旧队列而顶部来源已变成新名，播放页顶栏来源与实际内容不符；
+  /// 现在延迟到 loadQueue 成功后一并写入，失败时来源保持不变。
   Future<void> playSongs(
     List<Track> tracks, {
     int startIndex = 0,
@@ -559,9 +564,6 @@ class PlayerNotifier extends Notifier<PlayerState> {
     state = state.copyWith(
       processing: AppProcessingState.loading,
       clearError: true,
-      queueTitle: queueTitle,
-      clearQueueTitle: queueTitle == null,
-      isFm: isFm,
     );
     try {
       final List<Track> resolved = await resolveTracks(tracks);
@@ -602,6 +604,10 @@ class PlayerNotifier extends Notifier<PlayerState> {
         index: startIdx,
         loaded: true,
         processing: AppProcessingState.buffering,
+        // 装载成功后才写入来源（防污染，见方法注释）
+        queueTitle: queueTitle,
+        clearQueueTitle: queueTitle == null,
+        isFm: isFm,
       );
       await _handler.loadQueue(resolved, initialIndex: startIdx);
       await _handler.play();
