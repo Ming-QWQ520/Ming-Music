@@ -19,6 +19,7 @@
 ///  - 进入歌词页首次定位 jumpTo 直显当前行（固定行为），切歌平滑跟随。
 library;
 
+import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
@@ -88,6 +89,10 @@ class _KaraokeLyricsViewState extends ConsumerState<KaraokeLyricsView> {
   final ScrollController _scroll = ScrollController();
   DateTime _suppressUntil = DateTime.fromMillisecondsSinceEpoch(0);
   int _lastActive = -2;
+
+  /// 边缘扩散淡出的滚动偏移快照：滚动偏移变化超过阈值时触发重建，
+  /// 重算各行距上下边界的接近度（第十五批需求）
+  double _lastEdgeOffset = -1;
 
   /// 首次定位是否已完成（directShow 用 jumpTo，之后切歌用 animateTo）
   bool _initialJumpDone = false;
@@ -209,6 +214,23 @@ class _KaraokeLyricsViewState extends ConsumerState<KaraokeLyricsView> {
             listPadding = EdgeInsets.only(bottom: widget.bottomInset + 24);
           }
 
+          // 第十五批需求：非活跃行淡出 = 以上下歌词边界为起点向当前
+          // 播放行扩散的轻模糊感 —— 按行中心距视口边界的接近度算出
+          // 每行 edgeT（0 = 清晰，1 = 贴边），传入行组件施加模糊/减淡。
+          final double scrollOff = _scroll.hasClients ? _scroll.offset : 0;
+          final double edgeZone = (viewportH * 0.34).clamp(90.0, 280.0);
+          double edgeTOf(int index) {
+            if (index < 0 || index >= heights.length) return 0;
+            double top = listPadding.top;
+            for (int i = 0; i < index; i++) {
+              top += heights[i];
+            }
+            final double center = top + heights[index] / 2 - scrollOff;
+            final double dist = math.min(
+                math.max(center, 0.0), math.max(viewportH - center, 0.0));
+            return (1 - dist / edgeZone).clamp(0.0, 1.0);
+          }
+
           if (lyrics.hasYrc) {
             final List<YrcLine> lines = lyrics.yrcLines;
             final int active = activeYrcIndex(lines, position);
@@ -230,6 +252,7 @@ class _KaraokeLyricsViewState extends ConsumerState<KaraokeLyricsView> {
                   subLine: line.isMetadata
                       ? ''
                       : lyrics.subLineFor(line.start.inMilliseconds),
+                  edgeT: index == active ? 0 : edgeTOf(index),
                   onSeek: _seek,
                 );
               },
@@ -261,6 +284,7 @@ class _KaraokeLyricsViewState extends ConsumerState<KaraokeLyricsView> {
               fade: cfg.lyricFade,
               blur: cfg.lyricBlur,
               gapV: _gapV(cfg),
+              edgeT: index == active ? 0 : edgeTOf(index),
               onSeek: _seek,
             ),
           );
@@ -283,6 +307,14 @@ class _KaraokeLyricsViewState extends ConsumerState<KaraokeLyricsView> {
                   (n is ScrollUpdateNotification && n.dragDetails != null);
           if (dragged) {
             _onUserScroll();
+          }
+          // 第十五批需求：淡出 = 边界向当前行扩散的模糊感 —— 滚动时
+          // 各行距边界距离变化，偏移量超过阈值后重建重算边缘强度
+          if ((n is ScrollUpdateNotification || n is ScrollEndNotification) &&
+              _scroll.hasClients &&
+              (_scroll.offset - _lastEdgeOffset).abs() > 2.5) {
+            _lastEdgeOffset = _scroll.offset;
+            setState(() {});
           }
           return false;
         },
@@ -372,26 +404,31 @@ class _KaraokeLyricsViewState extends ConsumerState<KaraokeLyricsView> {
 /// 行内水平 padding（左右各 28）
 const double _kRowHPadding = 28;
 
-/// 非活跃行效果（第十四批需求修复观感）：旧 v13 实现按「与活动行的
-/// 距离」辐射衰减（近亮远暗 + 越远越糊），用户反馈「以当前播放行向外
-/// 辐射从亮变暗，观感不好」——现改回**统一强度**：
-///  - 淡出：所有非活跃行同一透明度 alpha = 1 - fade*0.55
-///    （fade 滑杆 0..1 控制非活跃行整体亮度，默认 1.0 → 0.45 经典灰）；
-///  - 模糊：直接以设置 px 施加（Zephyr 默认 lyricBlur=0 = 关闭，
-///    第十四批起默认值同步为 0，需要时可开到 3px）；
-///  - 上下边缘自然消隐交给歌词视口的 ShaderMask（Zephyr NpLyrics
-///    同款 mask-image，见 _LyricsEdgeMask）。
+/// 非活跃行效果（第十五批需求重定义「淡出」）：
+///
+///  - 淡出 = **以上下歌词边界为起点、向当前播放行扩散的轻模糊感**：
+///    距边界越近模糊越明显（最高 sigma ≈ 2.8px × fade），到边缘
+///    扩散区（视口高度 34%）尽头恢复清晰 —— 即用户所述「让歌词
+///    上下边界有淡淡的模糊感」；[edgeT] 为行中心距边界的接近度
+///    （0 = 清晰，1 = 贴边），由列表层按滚动偏移实时计算；
+///  - 淡出滑杆同时控制非活跃行整体压暗（alpha = 1 - fade×0.55，
+///    默认 1.0 → 0.45 经典灰，维持当前行视觉层级）；
+///  - 模糊（lyricBlur）保留为统一额外模糊，默认 0 = 关闭；
+///  - 当前播放行永不受影响（active 时直通）。
 /// RepaintBoundary 隔离模糊层，避免滚动时全列表重绘。
 Widget _applyInactiveEffect(
   Widget child, {
   required double fade,
   required double blur,
   required bool active,
+  double edgeT = 0,
 }) {
   if (active) return child;
   Widget result = child;
-  // 统一模糊：设置值即 sigma，不再随距离递增
-  final double sigma = blur.clamp(0.0, 3.0);
+  // 边界扩散模糊（淡出主体）+ 统一额外模糊（设置项，默认 0）
+  final double fadeV = fade.clamp(0.0, 1.0);
+  final double edgeSigma = edgeT.clamp(0.0, 1.0) * 2.8 * fadeV;
+  final double sigma = (blur.clamp(0.0, 3.0) + edgeSigma).clamp(0.0, 4.5);
   if (sigma > 0.02) {
     result = RepaintBoundary(
       child: ImageFiltered(
@@ -404,8 +441,10 @@ Widget _applyInactiveEffect(
       ),
     );
   }
-  // 统一淡出：全部非活跃行同一透明度（不再按行距辐射渐暗）
-  final double alpha = (1 - fade.clamp(0.0, 1.0) * 0.55).clamp(0.0, 1.0);
+  // 统一压暗 + 越贴边越透（与 ShaderMask 边缘渐隐同向叠加）
+  final double baseAlpha = (1 - fadeV * 0.55).clamp(0.0, 1.0);
+  final double edgeAlpha = 1 - edgeT.clamp(0.0, 1.0) * 0.28 * fadeV;
+  final double alpha = (baseAlpha * edgeAlpha).clamp(0.0, 1.0);
   if (alpha < 1.0) {
     result = Opacity(opacity: alpha, child: result);
   }
@@ -424,6 +463,7 @@ class _YrcRow extends ConsumerStatefulWidget {
     required this.cfg,
     required this.width,
     required this.subLine,
+    required this.edgeT,
     required this.onSeek,
   });
 
@@ -433,6 +473,10 @@ class _YrcRow extends ConsumerStatefulWidget {
   final NpPlayerSettings cfg;
   final double width;
   final String subLine;
+
+  /// 行中心距视口边界的接近度（0 清晰 → 1 贴边，边界扩散模糊用）
+  final double edgeT;
+
   final ValueChanged<Duration> onSeek;
 
   @override
@@ -583,12 +627,13 @@ class _YrcRowState extends ConsumerState<_YrcRow>
       ],
     );
 
-    // 第十四批需求：非活跃行统一淡出/模糊（不再按行距辐射衰减）
+    // 第十五批需求：非活跃行淡出 = 边界向当前行扩散的轻模糊感
     rowContent = _applyInactiveEffect(
       rowContent,
       fade: cfg.lyricFade,
       blur: cfg.lyricBlur,
       active: widget.active,
+      edgeT: widget.edgeT,
     );
 
     return GestureDetector(
@@ -730,6 +775,7 @@ class _LrcRow extends StatelessWidget {
     required this.fade,
     required this.blur,
     required this.gapV,
+    required this.edgeT,
     required this.onSeek,
   });
 
@@ -747,6 +793,9 @@ class _LrcRow extends StatelessWidget {
 
   /// 非活跃行模糊强度（px，0 = 关闭；第十四批起不再按行距递增）
   final double blur;
+
+  /// 行中心距视口边界的接近度（0 清晰 → 1 贴边，边界扩散模糊用）
+  final double edgeT;
 
   final double gapV;
   final ValueChanged<Duration> onSeek;
@@ -803,13 +852,14 @@ class _LrcRow extends StatelessWidget {
       ],
     );
 
-    // 第十四批需求：非活跃行统一模糊/淡出（不再按行距辐射衰减）
+    // 第十五批需求：非活跃行淡出 = 边界向当前行扩散的轻模糊感
     if (!active) {
       rowContent = _applyInactiveEffect(
         rowContent,
         fade: fade,
         blur: blur,
         active: false,
+        edgeT: edgeT,
       );
     }
 

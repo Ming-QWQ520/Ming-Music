@@ -10,9 +10,9 @@
 ///    歌名过长平滑跑马灯（尽头停留 3s 重新滚动）；MV 徽标仅文本可开关；
 ///  - 歌词页：单击切换封面/歌词；双击歌词行 seek；左右滑切歌；
 ///  - 播放键：双环描边样式（无白色填充底）；
-///  - 红心：喜欢切换 + 可选迸发动效；切歌时节流刷新喜欢列表（保障点亮）；
+///  - 红心：喜欢切换（第十五批需求：迸发动效已移除）；切歌时节流刷新喜欢列表；
 ///  - 底部功能条：按「播放页底部功能自定义」勾选渲染，长按气泡提示，
-///    底部间距上移（需求：太靠近底部显得奇怪）；
+///    第十五批需求：下移并与上方控制键同宽对齐；
 ///  - 手势：下滑收起播放页。
 library;
 
@@ -829,9 +829,6 @@ class _InfoSection extends ConsumerStatefulWidget {
 }
 
 class _InfoSectionState extends ConsumerState<_InfoSection> {
-  /// 红心迸发动效触发器
-  bool _burst = false;
-
   int _lastSongId = 0;
   DateTime _lastLikeRefresh = DateTime.fromMillisecondsSinceEpoch(0);
 
@@ -860,21 +857,13 @@ class _InfoSectionState extends ConsumerState<_InfoSection> {
   Future<void> _toggleLike(Track track) async {
     final int songId = track.neteaseId ?? 0;
     if (songId <= 0) return;
-    final NpPlayerSettings cfg = ref.read(npSettingsProvider);
-    final bool liked = ref.read(authProvider).likedIds.contains(songId);
+    // 第十五批需求：红心动效已移除，仅保留喜欢切换（乐观更新）
     final String? error =
         await ref.read(authProvider.notifier).toggleLikeSong(songId);
     if (!mounted) return;
     if (error != null) {
       ScaffoldMessenger.of(context)
           .showSnackBar(SnackBar(content: Text(error)));
-      return;
-    }
-    if (cfg.heartEffect && !liked) {
-      setState(() => _burst = true);
-      Future<void>.delayed(const Duration(milliseconds: 620), () {
-        if (mounted) setState(() => _burst = false);
-      });
     }
   }
 
@@ -981,23 +970,10 @@ class _InfoSectionState extends ConsumerState<_InfoSection> {
           _PlayerIconButton(
             tooltip: liked ? '取消喜欢' : '喜欢',
             onTap: track == null ? null : () => _toggleLike(track),
-            child: Stack(
-              clipBehavior: Clip.none,
-              children: <Widget>[
-                Icon(
-                  liked
-                      ? Icons.favorite_rounded
-                      : Icons.favorite_border_rounded,
-                  size: 22,
-                  color: liked ? AppConstants.brandColor : tint,
-                ),
-                if (_burst)
-                  Positioned.fill(
-                    child: IgnorePointer(
-                      child: _HeartBurst(color: AppConstants.brandColor),
-                    ),
-                  ),
-              ],
+            child: Icon(
+              liked ? Icons.favorite_rounded : Icons.favorite_border_rounded,
+              size: 22,
+              color: liked ? AppConstants.brandColor : tint,
             ),
           ),
           const SizedBox(width: 10),
@@ -1125,96 +1101,6 @@ class _PlayerIconButtonState extends State<_PlayerIconButton> {
   }
 }
 
-/// 红心迸发：一个放大的心形从实心向外扩散淡出
-class _HeartBurst extends StatefulWidget {
-  const _HeartBurst({required this.color});
-
-  final Color color;
-
-  @override
-  State<_HeartBurst> createState() => _HeartBurstState();
-}
-
-class _HeartBurstState extends State<_HeartBurst>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _ctrl = AnimationController(
-    vsync: this,
-    duration: const Duration(milliseconds: 600),
-  )..forward();
-
-  @override
-  void dispose() {
-    _ctrl.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AnimatedBuilder(
-      animation: _ctrl,
-      builder: (BuildContext ctx, Widget? _) {
-        final double t = Curves.easeOutCubic.transform(_ctrl.value);
-        return CustomPaint(
-          painter: _HeartBurstPainter(
-            color: widget.color,
-            progress: t,
-          ),
-        );
-      },
-    );
-  }
-}
-
-class _HeartBurstPainter extends CustomPainter {
-  const _HeartBurstPainter({required this.color, required this.progress});
-
-  final Color color;
-  final double progress;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    // 外圈扩散环
-    final Paint ring = Paint()
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 2.4 * (1 - progress)
-      ..color = color.withValues(alpha: (1 - progress) * 0.9);
-    canvas.drawCircle(
-      Offset(size.width / 2, size.height / 2),
-      size.shortestSide * (0.5 + progress * 0.9),
-      ring,
-    );
-
-    // 中心放大的心
-    final Paint heart = Paint()
-      ..color = color.withValues(alpha: (1 - progress) * 0.65)
-      ..style = PaintingStyle.fill;
-    final double s = size.shortestSide * (0.28 + progress * 0.34);
-    final Path p = Path()
-      ..moveTo(size.width / 2, size.height / 2 + s * 0.32)
-      ..cubicTo(
-        size.width / 2 - s * 1.1,
-        size.height / 2 - s * 0.45,
-        size.width / 2 - s * 0.34,
-        size.height / 2 - s * 1.05,
-        size.width / 2,
-        size.height / 2 - s * 0.42,
-      )
-      ..cubicTo(
-        size.width / 2 + s * 0.34,
-        size.height / 2 - s * 1.05,
-        size.width / 2 + s * 1.1,
-        size.height / 2 - s * 0.45,
-        size.width / 2,
-        size.height / 2 + s * 0.32,
-      );
-    canvas.drawPath(p, heart);
-  }
-
-  @override
-  bool shouldRepaint(_HeartBurstPainter oldDelegate) =>
-      oldDelegate.progress != progress;
-}
-
 // ---------------------------------------------------------------- MV 入口
 
 /// MV 胶囊（需求：只显示 MV 不显示播放键，适当缩小；设置可开关，默认开启）
@@ -1269,19 +1155,22 @@ class _CoverLyricsPreview extends ConsumerWidget {
   final NpCoverLyricsMode mode;
   final double width;
 
-  /// 解析当前行：主行（逐字/普通）+ 副行 + 主行时间戳（滚动切换 key）。
+  /// 解析当前行：主行（逐字/普通）+ 副行 + 主行时间戳（滚动切换 key）
+  /// + 行尾时间（无逐字时按行时长映射滚动进度）。
   ///
   /// 需求（kgka_Music_hl 对齐）：
   ///  - 双行模式副行规则（不随「显示翻译」设置变化）：
   ///    翻译/音译存在时显示翻译 —— 非中文歌 = 一行原文 + 一行翻译；
   ///    无翻译时显示下一非空行 —— 中文歌 = 两行原文；
   ///  - 原文（主行）有逐字歌词（yrc）时主行走逐字播放动画（[_KaraokeText]），
-  ///    无逐字（LRC / 元数据行 / 空行）回退跑马灯。
-  ({YrcLine? karaoke, String main, String sub, int mainTime}) _resolve(
-      ParsedLyrics lyrics, Duration position) {
+  ///    无逐字（LRC / 元数据行 / 空行）回退进度同步滚动（[_SyncScrollText]）。
+  ({YrcLine? karaoke, String main, String sub, int mainTime, int mainEnd})
+      _resolve(ParsedLyrics lyrics, Duration position) {
     if (lyrics.hasYrc) {
       final int idx = activeYrcIndex(lyrics.yrcLines, position);
-      if (idx < 0) return (karaoke: null, main: '', sub: '', mainTime: -1);
+      if (idx < 0) {
+        return (karaoke: null, main: '', sub: '', mainTime: -1, mainEnd: -1);
+      }
       final YrcLine cur = lyrics.yrcLines[idx];
       String sub = '';
       if (!cur.isMetadata) {
@@ -1300,15 +1189,23 @@ class _CoverLyricsPreview extends ConsumerWidget {
           }
         }
       }
+      // 行尾：下一行起始（无下一行 → +8s 兜底）；逐字行由
+      // [_KaraokeText] 按词时间映射，不消费 mainEnd
+      final int end = idx + 1 < lyrics.yrcLines.length
+          ? lyrics.yrcLines[idx + 1].start.inMilliseconds
+          : cur.start.inMilliseconds + 8000;
       return (
         karaoke: cur.isMetadata || cur.words.isEmpty ? null : cur,
         main: cur.text,
         sub: sub,
         mainTime: cur.start.inMilliseconds,
+        mainEnd: end,
       );
     }
     final int idx = activeLyricIndex(lyrics.lrcLines, position);
-    if (idx < 0) return (karaoke: null, main: '', sub: '', mainTime: -1);
+    if (idx < 0) {
+      return (karaoke: null, main: '', sub: '', mainTime: -1, mainEnd: -1);
+    }
     final LyricLine cur = lyrics.lrcLines[idx];
     String sub = '';
     final String t = lyrics.subLineFor(cur.time.inMilliseconds);
@@ -1324,11 +1221,15 @@ class _CoverLyricsPreview extends ConsumerWidget {
         }
       }
     }
+    final int end = idx + 1 < lyrics.lrcLines.length
+        ? lyrics.lrcLines[idx + 1].time.inMilliseconds
+        : cur.time.inMilliseconds + 8000;
     return (
       karaoke: null,
       main: cur.text,
       sub: sub,
-      mainTime: cur.time.inMilliseconds
+      mainTime: cur.time.inMilliseconds,
+      mainEnd: end,
     );
   }
 
@@ -1359,8 +1260,13 @@ class _CoverLyricsPreview extends ConsumerWidget {
       );
     }
 
-    final ({YrcLine? karaoke, String main, String sub, int mainTime}) line =
-        _resolve(lyrics, position);
+    final ({
+      YrcLine? karaoke,
+      String main,
+      String sub,
+      int mainTime,
+      int mainEnd
+    }) line = _resolve(lyrics, position);
     final String main = line.main.isEmpty ? '···' : line.main;
     final String sub = two ? line.sub : '';
     final bool useKaraoke = line.karaoke != null && line.main.isNotEmpty;
@@ -1371,6 +1277,9 @@ class _CoverLyricsPreview extends ConsumerWidget {
       // 第十三批需求：封面页歌词随播放自动滚动 —— 主/副行独立滚动
       // 切换（新行从下方滑入把旧行顶上去），逐字行动画不被打断
       //（行不变时 key 不变，AnimatedSwitcher 不重建）。
+      // 第十五批需求：主行横向滚动与播放进度同步（评估点 = 进度 +1s，
+      // 提前 1s 滚动）—— 逐字行走 [_KaraokeText] 词级映射，逐行走
+      // [_SyncScrollText] 行时长映射。
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1388,17 +1297,14 @@ class _CoverLyricsPreview extends ConsumerWidget {
               height: 30,
               width: width,
               child: useKaraoke
-                  ? _KaraokeText(line: line.karaoke!)
-                  : MarqueeText(
-                      main,
-                      textAlign: TextAlign.left,
-                      velocity: 32,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 22,
-                        height: 1.22,
-                        fontWeight: FontWeight.w900,
-                      ),
+                  ? _KaraokeText(line: line.karaoke!, width: width)
+                  : _SyncScrollText(
+                      text: main,
+                      width: width,
+                      lineStart: Duration(
+                          milliseconds: line.mainTime.clamp(0, 1 << 31)),
+                      lineEnd: Duration(
+                          milliseconds: math.max(line.mainEnd, line.mainTime)),
                     ),
             ),
           ),
@@ -1463,10 +1369,17 @@ Widget _rollTransition(
 /// 进度 = positionProvider 流（200ms 粒度）+ Ticker 每帧向未来线性外推
 /// （播放中每帧推进，暂停停在流位置）；排版与逐字 x 区间按行文本缓存，
 /// 行不变不重排 —— 每帧开销仅为一次宽度裁剪更新。
+///
+/// 第十五批需求：行文本超宽时整体横向滚动与播放进度同步 —— 滚动偏移
+/// 按「已唱像素宽度 / 整行宽度」映射（评估点 = 当前进度 +1s，即提前
+/// 1s 滚动），阅读窗口随演唱位置向右推进，已唱区域始终可见。
 class _KaraokeText extends ConsumerStatefulWidget {
-  const _KaraokeText({required this.line});
+  const _KaraokeText({required this.line, required this.width});
 
   final YrcLine line;
+
+  /// 可视宽度（超宽部分随进度横向滚动露出）
+  final double width;
 
   @override
   ConsumerState<_KaraokeText> createState() => _KaraokeTextState();
@@ -1580,31 +1493,179 @@ class _KaraokeTextState extends ConsumerState<_KaraokeText>
         ? _streamPos + DateTime.now().difference(_streamAt)
         : _streamPos;
 
+    // 第十五批需求：超宽行的横向滚动与播放进度同步（提前 1s）：
+    // 已唱像素宽度（含 1s 前瞻）占整行宽度的比例 → 映射到溢出宽度。
+    final double textWidth = _painter?.width ?? 0;
+    final double overflow = math.max(0.0, textWidth - widget.width);
+    double scrollX = 0;
+    if (overflow > 0 && textWidth > 0) {
+      final double sungAhead = _sungWidth(pos + const Duration(seconds: 1));
+      final double frac = (sungAhead / textWidth).clamp(0.0, 1.0);
+      scrollX = overflow * frac;
+    }
+
     return ClipRect(
-      child: Stack(
+      // OverflowBox 在外层解除宽度约束：双层文本按整行固有宽度排版，
+      // Transform 左移露出超宽部分，最外层 ClipRect 裁剪到可视宽度
+      //（旧实现 Text 被约束在可视宽度内自行截断，平移无法露出右侧内容）
+      child: OverflowBox(
         alignment: Alignment.centerLeft,
-        clipBehavior: Clip.hardEdge,
-        children: <Widget>[
-          // 未唱层：整行白 40%
-          Text(
-            widget.line.text,
+        minWidth: 0,
+        maxWidth: double.infinity,
+        child: Transform.translate(
+          offset: Offset(-scrollX, 0),
+          child: Stack(
+            alignment: Alignment.centerLeft,
+            clipBehavior: Clip.none,
+            children: <Widget>[
+              // 未唱层：整行白 40%
+              Text(
+                widget.line.text,
+                maxLines: 1,
+                softWrap: false,
+                style:
+                    style.copyWith(color: Colors.white.withValues(alpha: 0.4)),
+              ),
+              // 已唱层：白色，按已唱像素宽度揭示
+              ClipRect(
+                clipper: _WidthClipper(width: _sungWidth(pos)),
+                child: Text(
+                  widget.line.text,
+                  maxLines: 1,
+                  softWrap: false,
+                  style: style,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// 封面页歌词主行的进度同步横向滚动（第十五批需求，逐行歌词 / 无逐字
+/// 数据的行回退此组件）：
+///
+///  - 行文本不超宽 → 静止显示（与旧行为一致，无跑马灯空转）；
+///  - 超宽 → 滚动偏移 = 溢出宽度 × 行内进度；行内进度按播放进度
+///    线性映射（评估点 = 当前进度 +1s，即「滚动契机提前 1s」），
+///    阅读窗口随演唱推进向右移动，与逐字模式的滚动观感一致；
+///  - Ticker 驱动平滑滚动（暂停停表），替代旧的匀速跑马灯
+///   （MarqueeText 速度与播放进度无关，用户反馈「未根据播放进度
+///    同步向右滚动」）。
+class _SyncScrollText extends ConsumerStatefulWidget {
+  const _SyncScrollText({
+    required this.text,
+    required this.width,
+    required this.lineStart,
+    required this.lineEnd,
+  });
+
+  final String text;
+  final double width;
+  final Duration lineStart;
+  final Duration lineEnd;
+
+  @override
+  ConsumerState<_SyncScrollText> createState() => _SyncScrollTextState();
+}
+
+class _SyncScrollTextState extends ConsumerState<_SyncScrollText>
+    with SingleTickerProviderStateMixin {
+  late final Ticker _ticker;
+  Duration _streamPos = Duration.zero;
+  DateTime _streamAt = DateTime.now();
+
+  TextPainter? _painter;
+  String? _layoutKey;
+
+  @override
+  void initState() {
+    super.initState();
+    _ticker = createTicker((Duration _) {
+      if (mounted) setState(() {});
+    })
+      ..start();
+  }
+
+  @override
+  void dispose() {
+    _ticker.dispose();
+    _painter?.dispose();
+    _painter = null;
+    super.dispose();
+  }
+
+  void _ensureLayout(TextStyle style) {
+    final String key = '${widget.text}'
+        '|${style.fontSize}|${style.fontWeight?.value ?? 0}';
+    if (_layoutKey == key && _painter != null) return;
+    _layoutKey = key;
+    _painter?.dispose();
+    _painter = TextPainter(
+      text: TextSpan(text: widget.text, style: style),
+      textDirection: TextDirection.ltr,
+      maxLines: 1,
+    )..layout(maxWidth: double.infinity);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    ref.listen<AsyncValue<Duration>>(positionProvider,
+        (AsyncValue<Duration>? _, AsyncValue<Duration> v) {
+      final Duration? p = v.value;
+      if (p != null) {
+        _streamPos = p;
+        _streamAt = DateTime.now();
+      }
+    });
+    final bool playing =
+        ref.watch(playerProvider.select((PlayerState s) => s.playing));
+    if (playing && !_ticker.isActive) _ticker.start();
+    if (!playing && _ticker.isActive) _ticker.stop();
+
+    const TextStyle style = TextStyle(
+      color: Colors.white,
+      fontSize: 22,
+      height: 1.22,
+      fontWeight: FontWeight.w900,
+    );
+    _ensureLayout(style);
+
+    final Duration pos = playing
+        ? _streamPos + DateTime.now().difference(_streamAt)
+        : _streamPos;
+
+    final double textWidth = _painter?.width ?? 0;
+    final double overflow = math.max(0.0, textWidth - widget.width);
+    double scrollX = 0;
+    if (overflow > 0) {
+      // 滚动进度评估点 = 当前进度 +1s（需求：提前 1s 滚动）
+      final Duration ahead = pos + const Duration(seconds: 1);
+      final int span =
+          widget.lineEnd.inMilliseconds - widget.lineStart.inMilliseconds;
+      final double frac = span > 0
+          ? ((ahead.inMilliseconds - widget.lineStart.inMilliseconds) / span)
+              .clamp(0.0, 1.0)
+          : 0.0;
+      scrollX = overflow * frac;
+    }
+
+    return ClipRect(
+      child: OverflowBox(
+        alignment: Alignment.centerLeft,
+        minWidth: 0,
+        maxWidth: double.infinity,
+        child: Transform.translate(
+          offset: Offset(-scrollX, 0),
+          child: Text(
+            widget.text,
             maxLines: 1,
             softWrap: false,
-            overflow: TextOverflow.clip,
-            style: style.copyWith(color: Colors.white.withValues(alpha: 0.4)),
+            style: style,
           ),
-          // 已唱层：白色，按已唱像素宽度揭示
-          ClipRect(
-            clipper: _WidthClipper(width: _sungWidth(pos)),
-            child: Text(
-              widget.line.text,
-              maxLines: 1,
-              softWrap: false,
-              overflow: TextOverflow.clip,
-              style: style,
-            ),
-          ),
-        ],
+        ),
       ),
     );
   }
@@ -1692,8 +1753,11 @@ class _ControlBar extends ConsumerWidget {
         s.processing == AppProcessingState.buffering));
 
     return Padding(
-      // 需求：控制键与上方音质标签行拉开间距；本批继续上移收紧 8 → 4
-      padding: const EdgeInsets.fromLTRB(10, 4, 10, 0),
+      // 第十五批需求：进度条及以上的控件再上移 5px，播放/暂停键区域
+      // 下移 3px —— 底部锚定的浮层中，控制键与进度条的间距 +8px
+      //（进度条相对控制键上移 5，控制键相对功能条下移 3 由功能条
+      // 顶部间距承担，见 _BottomStrip）
+      padding: const EdgeInsets.fromLTRB(10, 12, 10, 0),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceEvenly,
         children: <Widget>[
@@ -1948,9 +2012,9 @@ class _BottomStrip extends ConsumerWidget {
     // 音量条 + 设置键（音量条在设置键左侧，Expanded 拉伸）。
     if (cfg.stripButtons.contains('volume')) {
       return Padding(
-        // 第十四批需求回退：底边距 38 → 28（上一批整层上移并非用户
-        // 所指 —— 只需进度条以上控件区上移，进度条位置不变）
-        padding: const EdgeInsets.fromLTRB(24, 2, 18, 28),
+        // 第十五批需求：功能条整体下移（底边距 28→14，顶部间距加大使
+        // 控制键净下移 3px）并与上方控制键对齐（同水平边距 10）
+        padding: const EdgeInsets.fromLTRB(10, 13, 10, 14),
         child: Row(
           children: <Widget>[
             const Expanded(child: _VolumeStripButton()),
@@ -1967,12 +2031,12 @@ class _BottomStrip extends ConsumerWidget {
     ];
 
     return Padding(
-      // 第十四批需求回退：底边距 38 → 28 —— 用户澄清「控件区上移」
-      // 指进度条以上区域，不是整层；进度条/控制键/功能条回到 v12 位置
-      padding: EdgeInsets.fromLTRB(
-          math.max(34.0 - buttons.length * 4, 16), 2, 34, 28),
+      // 第十五批需求：功能条整体下移（底边距 28→14，顶部间距 2→13 使
+      // 控制键净下移 3px、进度条以上净上移 5px）并与上方控制键对齐：
+      // 同水平边距（10）+ 同 spaceEvenly 均布，按钮落在同一列网格上
+      padding: const EdgeInsets.fromLTRB(10, 13, 10, 14),
       child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
         children: buttons.isEmpty ? <Widget>[const SizedBox.shrink()] : buttons,
       ),
     );

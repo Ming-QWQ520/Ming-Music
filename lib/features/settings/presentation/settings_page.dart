@@ -7,7 +7,8 @@
 ///  - 播放：播放音质 / 播放页自定义 / Mini 播放条样式 / MV 标识 / 常亮；
 ///  - 外观：主题模式 / 液态玻璃 / 应用图片背景 / 播放页背景；
 ///  - 缓存：歌曲音频缓存占用与清理 + 边听边缓存 + 预加载下一首；
-///  - 数据源 / 关于（仓库链接真实可点，需求：补全无实际作用功能）。
+///  - 数据源 / 关于（仓库链接真实可点；第十五批：移除运行诊断入口，
+///    新增项目详情页 —— 实时请求 GitHub API 展示仓库/发布/贡献者数据）。
 library;
 
 import 'dart:io';
@@ -18,7 +19,6 @@ import 'package:go_router/go_router.dart';
 
 import '../../../core/constants/app_constants.dart';
 import '../../../core/utils/platform_actions.dart';
-import 'diag_page.dart';
 import '../../auth/providers/auth_providers.dart';
 import '../../player/domain/np_settings.dart';
 import '../../player/presentation/np_settings_sheet.dart';
@@ -27,6 +27,7 @@ import '../../player/providers/player_providers.dart' show songCacheProvider;
 import '../../player/services/song_cache.dart';
 import '../domain/settings_models.dart';
 import '../providers/settings_providers.dart';
+import 'project_detail_page.dart';
 
 class SettingsPage extends ConsumerWidget {
   const SettingsPage({super.key});
@@ -123,7 +124,7 @@ class SettingsPage extends ConsumerWidget {
                     const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
                 leading: const Icon(Icons.tune_rounded, size: 22),
                 title: const Text('播放页自定义', style: TextStyle(fontSize: 15)),
-                subtitle: Text('显示模式 / 封面 / 背景 / 歌词 / 红心动效',
+                subtitle: Text('显示模式 / 封面 / 背景 / 歌词',
                     style: TextStyle(
                         fontSize: 12,
                         color: theme.colorScheme.onSurfaceVariant)),
@@ -391,15 +392,16 @@ class SettingsPage extends ConsumerWidget {
                   }
                 },
               ),
-              // 运行诊断：灰屏/异常现场自查入口（启动里程碑 + 全局异常落盘）
+              // 第十五批需求：项目详情页 —— 实时请求 GitHub 数据
+              //（仓库信息/Star/Fork/Issue/最新发布/贡献者），非硬编码
               ListTile(
                 contentPadding:
                     const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
-                title: const Text('运行诊断'),
-                subtitle: const Text('查看启动日志与错误记录'),
+                title: const Text('项目详情'),
+                subtitle: const Text('仓库数据 · 版本发布 · 贡献者'),
                 trailing: const Icon(Icons.chevron_right_rounded, size: 20),
                 onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(
-                  builder: (BuildContext context) => const DiagPage(),
+                  builder: (BuildContext context) => const GithubProjectPage(),
                 )),
               ),
             ],

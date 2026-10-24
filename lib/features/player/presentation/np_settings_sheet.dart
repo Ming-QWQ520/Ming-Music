@@ -5,7 +5,7 @@
 ///  - 封面：样式 → 封面歌词 → 大小 → 投影 → MV 标识（徽标归尾）；
 ///  - 背景：类型 → 自定义图 → 效果（模糊 → 变暗）；
 ///  - 歌词：排版（字号/行距/对齐/翻译/居中）→ 效果（淡出/模糊/高亮）
-///    → 逐字颜色 → 动效（红心动效）。
+///    → 逐字颜色。
 library;
 
 import 'package:flutter/material.dart';
@@ -324,7 +324,9 @@ class _LyricsPane extends ConsumerWidget {
         const _GroupTitle('效果'),
         _SliderRow(
           label: '非活跃行淡出',
-          hint: '所有非活跃行统一压暗（不随行距变化）',
+          // 第十五批需求：淡出 = 以上下歌词边界为起点向当前行扩散的
+          // 轻模糊感（边界处淡淡模糊，向中间逐渐清晰）
+          hint: '上下歌词边界淡淡模糊，向当前行扩散渐清晰',
           value: cfg.lyricFade,
           display: '${(cfg.lyricFade * 100).round()}%',
           onChanged: (double v) =>
@@ -362,14 +364,7 @@ class _LyricsPane extends ConsumerWidget {
               .read(npSettingsProvider.notifier)
               .setYrcColors(cfg.yrcPlayed, c),
         ),
-        const _GroupTitle('动效'),
-        _SwitchRow(
-          label: '红心动效',
-          hint: '点击喜欢时播放心形迸发动画',
-          value: cfg.heartEffect,
-          onChanged: (bool v) =>
-              ref.read(npSettingsProvider.notifier).setHeartEffect(v),
-        ),
+        // 第十五批需求：红心动效已移除（原「动效」组仅此一项，整组删除）
       ],
     );
   }

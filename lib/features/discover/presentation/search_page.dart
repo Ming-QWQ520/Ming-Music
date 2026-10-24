@@ -1333,8 +1333,10 @@ class _ChartRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // 第十五批需求：榜单卡为 16 圆角容器，行涟漪带圆角防溢出卡片底部圆角
     return InkWell(
       onTap: onTap,
+      borderRadius: BorderRadius.circular(10),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
         child: Row(

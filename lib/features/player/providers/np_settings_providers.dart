@@ -107,7 +107,9 @@ class NpSettingsNotifier extends Notifier<NpPlayerSettings> {
   void setCoverLyrics(NpCoverLyricsMode mode) =>
       _commit(state.copyWith(coverLyrics: mode));
 
-  void setHeartEffect(bool on) => _commit(state.copyWith(heartEffect: on));
+  // 第十五批需求：红心动效已整体移除（模型字段/设置项/播放页动效），
+  // 历史 setHeartEffect 删除；旧持久化 JSON 中的 heartEffect 键由
+  // fromMap 自然忽略。
 
   void setShowMvBadge(bool on) => _commit(state.copyWith(showMvBadge: on));
 
