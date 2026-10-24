@@ -1902,7 +1902,8 @@ class _BottomStrip extends ConsumerWidget {
     // 音量条 + 设置键（音量条在设置键左侧，Expanded 拉伸）。
     if (cfg.stripButtons.contains('volume')) {
       return Padding(
-        padding: const EdgeInsets.fromLTRB(24, 2, 18, 18),
+        // 第十二批需求：进度条以上控件区继续上移 —— 底边距 18 → 28
+        padding: const EdgeInsets.fromLTRB(24, 2, 18, 28),
         child: Row(
           children: <Widget>[
             const Expanded(child: _VolumeStripButton()),
@@ -1919,11 +1920,11 @@ class _BottomStrip extends ConsumerWidget {
     ];
 
     return Padding(
-      // 需求：底部控件位置继续上移（进度条太靠下导致拖动被手势区
-      // 干扰）—— 底边距 6 → 18，整层浮层明显抬高，进度条与上方
-      // 控件随之上移
+      // 需求：底部控件位置继续上移（第十二批：进度条以上的控件区仍
+      // 偏低 —— 底边距 18 → 28，整层浮层再度抬高，信息区/进度条/控制键
+      // 随之上移）
       padding: EdgeInsets.fromLTRB(
-          math.max(34.0 - buttons.length * 4, 16), 2, 34, 18),
+          math.max(34.0 - buttons.length * 4, 16), 2, 34, 28),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: buttons.isEmpty ? <Widget>[const SizedBox.shrink()] : buttons,

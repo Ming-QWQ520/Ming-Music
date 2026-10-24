@@ -1,11 +1,11 @@
 /// 设置页（kgka_Music_hl 风格分组重构）：
 ///
-/// 分组（需求：重构设置项，进行合理分类；第十一批 UI 排列优化 ——
-/// 缓存相关开关聚拢进缓存组，播放组只保留播放行为设置）：
+/// 分组（需求：重构设置项，进行合理分类；第十二批 UI 排序优化 ——
+/// 播放组提前到外观之前，Mini 样式并入播放组，Mini 颜色/透明度设置
+/// 随「底板无色玻璃」需求一并移除）：
 ///  - 账号：个人主页 / 退出登录；
+///  - 播放：播放音质 / 播放页自定义 / Mini 播放条样式 / MV 标识 / 常亮；
 ///  - 外观：主题模式 / 液态玻璃 / 应用图片背景 / 播放页背景；
-///  - 播放：播放音质 / 播放页自定义 / MV 标识开关 / 播放页常亮；
-///  - Mini 播放条：样式选择 + 颜色/透明度自定义（需求：无色 65% 透明默认）；
 ///  - 缓存：歌曲音频缓存占用与清理 + 边听边缓存 + 预加载下一首；
 ///  - 数据源 / 关于（仓库链接真实可点，需求：补全无实际作用功能）。
 library;
@@ -96,6 +96,85 @@ class SettingsPage extends ConsumerWidget {
                           color: theme.colorScheme.onSurfaceVariant)),
                   onTap: () => _confirmLogout(context, ref),
                 ),
+            ],
+          ),
+
+          const SizedBox(height: 16),
+
+          // ---------------- 播放 ----------------
+          _GroupCard(
+            title: '播放',
+            children: <Widget>[
+              _RadioRow<AudioQuality>(
+                label: '播放音质',
+                subtitle: '无损音质需要网易 VIP，游客通常回落到标准',
+                groups: const <(AudioQuality, String)>[
+                  (AudioQuality.standard, '标准'),
+                  (AudioQuality.higher, '较高'),
+                  (AudioQuality.exhigh, '极高'),
+                  (AudioQuality.lossless, '无损'),
+                ],
+                value: quality,
+                onChanged: (AudioQuality v) =>
+                    ref.read(audioQualityProvider.notifier).set(v),
+              ),
+              ListTile(
+                contentPadding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
+                leading: const Icon(Icons.tune_rounded, size: 22),
+                title: const Text('播放页自定义', style: TextStyle(fontSize: 15)),
+                subtitle: Text('显示模式 / 封面 / 背景 / 歌词 / 红心动效',
+                    style: TextStyle(
+                        fontSize: 12,
+                        color: theme.colorScheme.onSurfaceVariant)),
+                trailing: Icon(Icons.chevron_right_rounded,
+                    size: 20, color: theme.colorScheme.onSurfaceVariant),
+                onTap: () => showNpSettingsSheet(context),
+              ),
+              // 第十二批需求：Mini 样式并入播放组（kgka 式分组 —— 播放行为
+              // 相关全部聚拢）；底板颜色/透明度设置项移除，统一无色液态玻璃
+              _RadioRow<MiniPlayerStyle>(
+                label: 'Mini 播放条',
+                subtitle: '经典条悬浮导航栏上方；紧凑极简嵌入导航栏中间',
+                groups: const <(MiniPlayerStyle, String)>[
+                  (MiniPlayerStyle.classic, '经典条'),
+                  (MiniPlayerStyle.compact, '紧凑极简'),
+                ],
+                value: np.miniStyle,
+                onChanged: (MiniPlayerStyle v) =>
+                    ref.read(npSettingsProvider.notifier).setMiniStyle(v),
+              ),
+              SwitchListTile(
+                contentPadding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
+                secondary: const Icon(Icons.movie_outlined, size: 22),
+                title: const Text('MV 标识', style: TextStyle(fontSize: 15)),
+                subtitle: Text('歌曲名旁显示 MV 入口（默认开启）',
+                    style: TextStyle(
+                        fontSize: 12,
+                        color: theme.colorScheme.onSurfaceVariant)),
+                value: np.showMvBadge,
+                activeThumbColor: AppConstants.brandColor,
+                onChanged: (bool v) =>
+                    ref.read(npSettingsProvider.notifier).setShowMvBadge(v),
+              ),
+              SwitchListTile(
+                contentPadding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
+                secondary: const Icon(Icons.brightness_high_rounded, size: 22),
+                title: const Text('播放页始终亮屏', style: TextStyle(fontSize: 15)),
+                subtitle: Text(
+                    '打开全屏播放页时保持屏幕常亮，离开播放页自动恢复'
+                    '系统熄屏（默认关闭）',
+                    style: TextStyle(
+                        fontSize: 12,
+                        color: theme.colorScheme.onSurfaceVariant)),
+                value: np.playerKeepScreenOn,
+                activeThumbColor: AppConstants.brandColor,
+                onChanged: (bool v) => ref
+                    .read(npSettingsProvider.notifier)
+                    .setPlayerKeepScreenOn(v),
+              ),
             ],
           ),
 
@@ -246,106 +325,6 @@ class SettingsPage extends ConsumerWidget {
                     ],
                   ),
                 ),
-            ],
-          ),
-
-          const SizedBox(height: 16),
-
-          // ---------------- 播放 ----------------
-          _GroupCard(
-            title: '播放',
-            children: <Widget>[
-              _RadioRow<AudioQuality>(
-                label: '播放音质',
-                subtitle: '无损音质需要网易 VIP，游客通常回落到标准',
-                groups: const <(AudioQuality, String)>[
-                  (AudioQuality.standard, '标准'),
-                  (AudioQuality.higher, '较高'),
-                  (AudioQuality.exhigh, '极高'),
-                  (AudioQuality.lossless, '无损'),
-                ],
-                value: quality,
-                onChanged: (AudioQuality v) =>
-                    ref.read(audioQualityProvider.notifier).set(v),
-              ),
-              ListTile(
-                contentPadding:
-                    const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
-                leading: const Icon(Icons.tune_rounded, size: 22),
-                title: const Text('播放页自定义', style: TextStyle(fontSize: 15)),
-                subtitle: Text('显示模式 / 封面 / 背景 / 歌词 / 红心动效',
-                    style: TextStyle(
-                        fontSize: 12,
-                        color: theme.colorScheme.onSurfaceVariant)),
-                trailing: Icon(Icons.chevron_right_rounded,
-                    size: 20, color: theme.colorScheme.onSurfaceVariant),
-                onTap: () => showNpSettingsSheet(context),
-              ),
-              SwitchListTile(
-                contentPadding:
-                    const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
-                secondary: const Icon(Icons.movie_outlined, size: 22),
-                title: const Text('MV 标识', style: TextStyle(fontSize: 15)),
-                subtitle: Text('歌曲名旁显示 MV 入口（默认开启）',
-                    style: TextStyle(
-                        fontSize: 12,
-                        color: theme.colorScheme.onSurfaceVariant)),
-                value: np.showMvBadge,
-                activeThumbColor: AppConstants.brandColor,
-                onChanged: (bool v) =>
-                    ref.read(npSettingsProvider.notifier).setShowMvBadge(v),
-              ),
-              // 需求：播放页始终亮屏
-              SwitchListTile(
-                contentPadding:
-                    const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
-                secondary: const Icon(Icons.brightness_high_rounded, size: 22),
-                title: const Text('播放页始终亮屏', style: TextStyle(fontSize: 15)),
-                subtitle: Text(
-                    '打开全屏播放页时保持屏幕常亮，离开播放页自动恢复'
-                    '系统熄屏（默认关闭）',
-                    style: TextStyle(
-                        fontSize: 12,
-                        color: theme.colorScheme.onSurfaceVariant)),
-                value: np.playerKeepScreenOn,
-                activeThumbColor: AppConstants.brandColor,
-                onChanged: (bool v) => ref
-                    .read(npSettingsProvider.notifier)
-                    .setPlayerKeepScreenOn(v),
-              ),
-            ],
-          ),
-
-          const SizedBox(height: 16),
-
-          // ---------------- Mini 播放条 ----------------
-          _GroupCard(
-            title: 'Mini 播放条',
-            children: <Widget>[
-              _RadioRow<MiniPlayerStyle>(
-                label: '样式',
-                subtitle: '紧凑极简嵌入底部导航栏中间；经典条悬浮导航栏上方',
-                groups: const <(MiniPlayerStyle, String)>[
-                  (MiniPlayerStyle.classic, '经典条'),
-                  (MiniPlayerStyle.compact, '紧凑极简'),
-                ],
-                value: np.miniStyle,
-                onChanged: (MiniPlayerStyle v) =>
-                    ref.read(npSettingsProvider.notifier).setMiniStyle(v),
-              ),
-              // 需求：Mini 条无色 65% 透明，颜色可在设置自定义
-              _MiniColorRow(
-                value: np.miniColor,
-                onChanged: (int? argb) =>
-                    ref.read(npSettingsProvider.notifier).setMiniColor(argb),
-              ),
-              // 需求：透明度可在设置自定义（默认 65% 透明）
-              _MiniOpacityRow(
-                transparency: np.miniTransparency,
-                onChanged: (double v) => ref
-                    .read(npSettingsProvider.notifier)
-                    .setMiniTransparency(v),
-              ),
             ],
           ),
 
@@ -716,161 +695,6 @@ class _ChoiceChip<T extends Object> extends StatelessWidget {
       selectedColor: AppConstants.brandColor,
       showCheckmark: false,
       visualDensity: VisualDensity.compact,
-    );
-  }
-}
-
-// ---------------------------------------------------------------- Mini 条颜色/透明度
-
-/// Mini 条底色选择行（需求：无色默认 + 可自定义颜色）。
-/// 「无色」= 白色中性玻璃（miniColor = null）。
-class _MiniColorRow extends StatelessWidget {
-  const _MiniColorRow({required this.value, required this.onChanged});
-
-  final int? value;
-  final ValueChanged<int?> onChanged;
-
-  static const List<(int, String)> _presets = <(int, String)>[
-    (0xFF000000, '墨黑'),
-    (0xFFE2483D, '网易云红'),
-    (0xFFFF8A3D, '暖橙'),
-    (0xFFF5A623, '琥珀金'),
-    (0xFF27AE60, '翡翠绿'),
-    (0xFF17B8A6, '青碧'),
-    (0xFF2E7CF6, '海蓝'),
-    (0xFF7B4DFF, '星紫'),
-    (0xFFFF6FA5, '樱粉'),
-  ];
-
-  @override
-  Widget build(BuildContext context) {
-    final ThemeData theme = Theme.of(context);
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
-          Text('底板颜色',
-              style:
-                  TextStyle(fontSize: 14, color: theme.colorScheme.onSurface)),
-          const SizedBox(height: 8),
-          SizedBox(
-            height: 34,
-            child: ListView(
-              scrollDirection: Axis.horizontal,
-              children: <Widget>[
-                _swatch(
-                  context,
-                  color: null,
-                  label: '无色',
-                  selected: value == null,
-                ),
-                const SizedBox(width: 10),
-                for (final (int argb, String name) in _presets) ...<Widget>[
-                  _swatch(
-                    context,
-                    color: Color(argb),
-                    label: name,
-                    selected: value == argb,
-                  ),
-                  const SizedBox(width: 10),
-                ],
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _swatch(
-    BuildContext context, {
-    required Color? color,
-    required String label,
-    required bool selected,
-  }) {
-    final bool isColorless = color == null;
-    return GestureDetector(
-      onTap: () => onChanged(color?.toARGB32()),
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 160),
-        padding: const EdgeInsets.symmetric(horizontal: 10),
-        decoration: BoxDecoration(
-          color:
-              (color ?? Colors.white).withValues(alpha: selected ? 0.96 : 0.16),
-          borderRadius: BorderRadius.circular(17),
-          border: Border.all(
-            color: selected
-                ? AppConstants.brandColor
-                : Colors.white.withValues(alpha: 0.22),
-            width: selected ? 2 : 1,
-          ),
-        ),
-        height: 34,
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: <Widget>[
-            Text(
-              label,
-              style: TextStyle(
-                fontSize: 12.5,
-                fontWeight: selected ? FontWeight.w700 : FontWeight.w400,
-                color: selected
-                    ? (isColorless ? Colors.black87 : Colors.white)
-                    : Theme.of(context).colorScheme.onSurface,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-/// Mini 条透明度滑杆行（需求：默认 65% 透明，范围 20% - 95%）
-class _MiniOpacityRow extends StatelessWidget {
-  const _MiniOpacityRow({required this.transparency, required this.onChanged});
-
-  /// 透明度 0.20 - 0.95（越高越透）
-  final double transparency;
-  final ValueChanged<double> onChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    final ThemeData theme = Theme.of(context);
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
-          Row(
-            children: <Widget>[
-              Text('底板透明度',
-                  style: TextStyle(
-                      fontSize: 14, color: theme.colorScheme.onSurface)),
-              const Spacer(),
-              Text('${(transparency * 100).round()}% 透明',
-                  style: TextStyle(
-                      fontSize: 12.5,
-                      color: theme.colorScheme.onSurfaceVariant)),
-            ],
-          ),
-          SliderTheme(
-            data: SliderTheme.of(context).copyWith(
-              trackHeight: 3,
-              thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 8),
-              overlayShape: const RoundSliderOverlayShape(overlayRadius: 14),
-            ),
-            child: Slider(
-              value: transparency.clamp(0.20, 0.95),
-              min: 0.20,
-              max: 0.95,
-              activeColor: AppConstants.brandColor,
-              onChanged: onChanged,
-            ),
-          ),
-        ],
-      ),
     );
   }
 }

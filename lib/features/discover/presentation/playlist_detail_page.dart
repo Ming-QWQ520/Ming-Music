@@ -765,13 +765,26 @@ class _CoverHero extends StatelessWidget {
       background: Stack(
         fit: StackFit.expand,
         children: <Widget>[
-          // 大封面 + 底部深蓝渐变蒙版（描述：向下自然过渡）
-          CoverImage(
-            src: meta.coverUrl,
-            size: 600,
-            radius: 0,
-            coverSize: CoverSize.original,
-          ),
+          // 大封面 + 底部深蓝渐变蒙版（描述：向下自然过渡）；
+          // 第十二批需求：Hero 歌单封面 —— 与「我的」页宫格卡/列表行同 tag，
+          // 点击封面进入详情页时封面从小卡平滑放大成全屏大图
+          if (meta.id > 0)
+            Hero(
+              tag: playlistCoverHeroTag(meta.id),
+              child: CoverImage(
+                src: meta.coverUrl,
+                size: 600,
+                radius: 0,
+                coverSize: CoverSize.original,
+              ),
+            )
+          else
+            CoverImage(
+              src: meta.coverUrl,
+              size: 600,
+              radius: 0,
+              coverSize: CoverSize.original,
+            ),
           const DecoratedBox(
             decoration: BoxDecoration(
               gradient: LinearGradient(

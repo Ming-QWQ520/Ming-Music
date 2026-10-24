@@ -5,8 +5,10 @@
 ///    左圆形封面 + 单行「歌名 - 歌手」+ 进度圆环播放键 + 播放列表键；
 ///  - compact 紧凑极简：**嵌入底部导航栏「发现 ⇄ 我的」中间**（需求不变），
 ///    只显示歌曲封面，周围显示歌曲进度（圆环），点击主体进全屏；
-///  - 需求追加：底板无色 65% 透明，颜色/透明度可在设置自定义；
-///    出现时向上移动放大、消失时向下移动缩小（MiniBarSwitcher）；
+///  - 第十二批需求：底板**无色高透明玻璃**，颜色/透明度设置项已移除，
+///    与底部导航栏共用 LiquidGlassBarPanel 同一配方；
+///    出现时向上移动放大、消失时向下移动缩小（MiniBarSwitcher，
+///    时长 1.36s = 原 360ms + 需求追加 1s）；
 ///  - 进度：需求「无论任何样式都需显示进度」—— 经典条=播放键外圈圆环，
 ///    紧凑极简=封面周围圆环；
 ///  - `select` 只订阅 playing / currentTrack / hasQueue，进度环独立订阅；
@@ -15,19 +17,16 @@ library;
 
 import 'dart:math' as math;
 
-import 'dart:ui';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/router.dart' show openFullPlayer;
 import '../../../../core/widgets/cover_image.dart';
+import '../../../../core/widgets/liquid_glass_container.dart'
+    show LiquidGlassBarPanel;
 import '../../../library/domain/track.dart';
 import '../../domain/np_settings.dart';
-import '../../../settings/providers/settings_providers.dart'
-    show glassEnabledProvider;
-import '../../providers/np_settings_providers.dart';
 import '../../providers/player_providers.dart';
 import 'queue_sheet.dart';
 
@@ -119,7 +118,9 @@ class _RingPainter extends CustomPainter {
 
 // ---------------------------------------------------------------- 出入动画
 
-/// Mini 条统一出现/消失动画（需求：消失时向下移动缩小，出现时向上移动放大）：
+/// Mini 条统一出现/消失动画（需求：消失时向下移动缩小，出现时向上移动放大；
+/// 第十二批需求：动画时长增加 1s → 360ms + 1000ms = 1360ms，出入场
+/// 更从容）：
 ///  - 出现：从下方 1.35 倍高度处上滑 + 0.72 → 1.0 放大，easeOutCubic；
 ///  - 消失：反向播放（下滑 + 缩小），easeInCubic；
 ///  - AnimatedSwitcher 同时驱动新旧 child，退出动画期间旧条仍在移动，
@@ -136,10 +137,13 @@ class MiniBarSwitcher extends StatelessWidget {
 
   final Widget child;
 
+  /// 需求：出入场动画时长在原 360ms 基础上增加 1s
+  static const Duration _kDuration = Duration(milliseconds: 1360);
+
   @override
   Widget build(BuildContext context) {
     return AnimatedSwitcher(
-      duration: const Duration(milliseconds: 360),
+      duration: _kDuration,
       switchInCurve: Curves.easeOutCubic,
       switchOutCurve: Curves.easeInCubic,
       transitionBuilder: (Widget child, Animation<double> anim) {
@@ -295,12 +299,12 @@ Widget _navAnimated(Widget child, Object key) => child
     .fadeIn(duration: 260.ms, curve: Curves.easeOut)
     .slideY(begin: 0.05, end: 0, duration: 260.ms, curve: Curves.easeOut);
 
-/// 经典条（需求重构：无色液态玻璃圆角长条，颜色/透明度可自定义）：
+/// 经典条（需求重构：无色液态玻璃圆角长条，第十二批起颜色/透明度
+/// 不再可配置，底板统一中性玻璃）：
 ///  - 左侧圆形封面；
 ///  - 中间单行「歌名 - 歌手」；
 ///  - 右侧进度圆环播放键 + 播放列表键；
-///  - 底板：液态玻璃（BackdropFilter 模糊 + 白描边高光），
-///    性能红线允许（BackdropFilter 仅 Mini 条与底部 Sheet）。
+///  - 底板：LiquidGlassBarPanel（与底部导航栏同一配方）。
 class _FloatClassic extends ConsumerWidget {
   const _FloatClassic();
 
@@ -312,99 +316,51 @@ class _FloatClassic extends ConsumerWidget {
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(14, 4, 14, 8),
-      child: _GlassBarPanel(
-        child: Row(
-          children: <Widget>[
-            // 左：圆形封面（Hero，点击进全屏）
-            GestureDetector(
-              onTap: () => openFullPlayer(context),
-              child: Hero(
-                tag: heroTagOf(cover),
-                child: CoverImage(src: cover, size: 44, radius: 22),
-              ),
-            ),
-            const SizedBox(width: 10),
-            // 中：单行「歌名 - 歌手」（点击进全屏）
-            Expanded(
-              child: GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                onTap: () => openFullPlayer(context),
-                child: _navAnimated(
-                  Text(
-                    track == null ? '未在播放' : '${track.title} - ${track.artist}',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      fontSize: 13.5,
-                      fontWeight: FontWeight.w600,
-                      color: Colors.white,
+      child: LiquidGlassBarPanel(
+        child: SizedBox(
+          height: 58,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(7, 7, 6, 7),
+            child: Row(
+              children: <Widget>[
+                // 左：圆形封面（Hero，点击进全屏）
+                GestureDetector(
+                  onTap: () => openFullPlayer(context),
+                  child: Hero(
+                    tag: heroTagOf(cover),
+                    child: CoverImage(src: cover, size: 44, radius: 22),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                // 中：单行「歌名 - 歌手」（点击进全屏）
+                Expanded(
+                  child: GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTap: () => openFullPlayer(context),
+                    child: _navAnimated(
+                      Text(
+                        track == null
+                            ? '未在播放'
+                            : '${track.title} - ${track.artist}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 13.5,
+                          fontWeight: FontWeight.w600,
+                          color: Colors.white,
+                        ),
+                      ),
+                      track?.id ?? 'empty',
                     ),
                   ),
-                  track?.id ?? 'empty',
                 ),
-              ),
+                // 右：进度圆环播放键 + 播放列表键
+                const _MiniPlayButton(size: 40, iconSize: 22, showRing: true),
+                const _MiniQueueButton(size: 36, iconSize: 21),
+              ],
             ),
-            // 右：进度圆环播放键 + 播放列表键
-            const _MiniPlayButton(size: 40, iconSize: 22, showRing: true),
-            const _MiniQueueButton(size: 36, iconSize: 21),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-/// 无色液态玻璃面板（需求：不带颜色，65% 透明；颜色/透明度可在设置自定义）。
-/// 第十一批需求：低液态玻璃高透明 —— 投影与描边大幅弱化
-/// （旧实现 black 0.20~0.36 / blur 18 在高透明底上形成一圈明显"黑边"）；
-/// 玻璃关闭时降级为半透明深色底（非高不透明黑板）。
-class _GlassBarPanel extends ConsumerWidget {
-  const _GlassBarPanel({required this.child});
-
-  final Widget child;
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final bool glass = ref.watch(glassEnabledProvider);
-    final NpPlayerSettings np = ref.watch(npSettingsProvider);
-
-    // 需求：无色（白玻璃中性底）默认，可自定义底色；
-    // 填充不透明度 = 1 - 透明度（默认 65% 透明 → 0.35 alpha）
-    final bool dark = Theme.of(context).brightness == Brightness.dark;
-    final Color tint = np.miniColor != null
-        ? Color(np.miniColor!)
-        : (dark ? const Color(0xFF1A1626) : Colors.white);
-    final double fillAlpha = glass
-        ? (1.0 - np.miniTransparency).clamp(0.05, 0.85)
-        : 0.90; // 降级：按主题深浅的半透明底保证可读（去"黑板"感）
-
-    final Widget content = Container(
-      height: 58,
-      padding: const EdgeInsets.fromLTRB(7, 7, 6, 7),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(29),
-        color: tint.withValues(alpha: fillAlpha),
-        border: Border.all(
-          color: Colors.white.withValues(alpha: 0.08 + fillAlpha * 0.10),
-          width: 0.8,
-        ),
-        boxShadow: <BoxShadow>[
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.08 + fillAlpha * 0.06),
-            blurRadius: 12,
-            offset: const Offset(0, 3),
           ),
-        ],
-      ),
-      child: child,
-    );
-
-    if (!glass) return content;
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(29),
-      child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
-        child: content,
+        ),
       ),
     );
   }

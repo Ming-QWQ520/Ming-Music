@@ -3,6 +3,9 @@
 ///    trackHeight，旧 M3 Slider 实现两条观感粗细不一致的问题根除）；
 ///  - 手动拖动时两条**以同一倍数平滑变粗**（4 → 8），松手回弹 ——
 ///    Apple Music 效果；
+///  - 高潮点白点：**固定小尺寸**（6px，第十二批需求修复 —— 旧实现
+///    9px ≈ 拖动态条高，用户观感“点的大小是拖动时放大后的总条”），
+///    不随拖动放大，仅显示不拦截拖动；
 ///  - 自绘替代 SliderTheme：根治 M3 RoundedRectTrackShape 在无圆点
 ///    配置下 active/inactive 分段圆角与间隙的观感差异，并保证轨道
 ///    两侧内收与 m:s 时间标签对齐；
@@ -147,14 +150,15 @@ class _PlayerProgressBarState extends ConsumerState<PlayerProgressBar> {
                             ),
                             textStyle: const TextStyle(
                                 fontSize: 11.5, color: Colors.white),
-                            // 命中区放宽到 34x30，白点本体 9px
+                            // 命中区放宽到 34x30，白点本体固定 6px
+                            //（第十二批需求：不随拖动变大的总进度条尺寸）
                             child: SizedBox(
                               width: 34,
                               height: 30,
                               child: Center(
                                 child: Container(
-                                  width: 9,
-                                  height: 9,
+                                  width: 6,
+                                  height: 6,
                                   decoration: BoxDecoration(
                                     shape: BoxShape.circle,
                                     color: Colors.white,
@@ -167,7 +171,7 @@ class _PlayerProgressBarState extends ConsumerState<PlayerProgressBar> {
                                       BoxShadow(
                                         color:
                                             Colors.black.withValues(alpha: 0.4),
-                                        blurRadius: 4,
+                                        blurRadius: 3,
                                       ),
                                     ],
                                   ),

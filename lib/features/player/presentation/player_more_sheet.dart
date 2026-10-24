@@ -694,14 +694,38 @@ class _PlayerMoreSheetState extends ConsumerState<_PlayerMoreSheet> {
       context,
       barrierLabel: '播放页底部功能自定义',
       builder: (BuildContext ctx) {
+        // 第十二批 bug 修复（中等严重：勾选/取消勾选时项会丢失/增加）——
+        // 根因：`disabled`（未勾选列表）在 StatefulBuilder 之外只计算一次，
+        // setState2 重建时不会随 order 重算：
+        //  - 取消勾选 → 项从 order 移除，但 disabled 仍是旧列表 → 该项
+        //    从界面消失（丢失），直到重开面板；
+        //  - 勾选 → 项加入 order，但 disabled 仍含该项 → 勾选/未勾选两个
+        //    列表同时出现该项（增加/重复）。
+        // 修复：disabled 改为 builder 内每次重建时从当前 order 派生。
         final List<String> order = List<String>.of(cfg.stripButtons);
-        // 未启用的按钮（kStripButtonIds 中不在当前顺序表内的）排在最后供勾选
-        final List<String> disabled = kStripButtonIds
-            .where((String id) => !order.contains(id))
-            .toList(growable: false);
         return StatefulBuilder(
           builder:
               (BuildContext ctx2, void Function(void Function()) setState2) {
+            // 每次重建派生未勾选项（修复勾选状态与列表不同步的根因）
+            final List<String> disabled = kStripButtonIds
+                .where((String id) => !order.contains(id))
+                .toList(growable: false);
+
+            // 重新勾选时按 kStripButtonIds 的规范相对位置插回
+            //（而不是简单追加到尾部），保持与默认顺序一致观感；
+            // 用户拖动过的自定义顺序不受影响（仅插入点按规范邻位）。
+            void enable(String id) {
+              final int canonical = kStripButtonIds.indexOf(id);
+              int insertAt = order.length;
+              for (int i = 0; i < order.length; i++) {
+                if (kStripButtonIds.indexOf(order[i]) > canonical) {
+                  insertAt = i;
+                  break;
+                }
+              }
+              order.insert(insertAt, id);
+            }
+
             return Container(
               decoration: const BoxDecoration(
                 color: AppConstants.darkSurface,
@@ -817,7 +841,7 @@ class _PlayerMoreSheetState extends ConsumerState<_PlayerMoreSheet> {
                           activeColor: AppConstants.brandColor,
                           onChanged: (bool? v) {
                             if (v == true) {
-                              setState2(() => order.add(id));
+                              setState2(() => enable(id));
                             }
                           },
                         ),

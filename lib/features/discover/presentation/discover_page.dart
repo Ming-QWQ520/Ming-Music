@@ -1,7 +1,8 @@
 /// 发现页（App 首页）：Zephyr-Music 首页样式重构。
 ///
-/// 顶部圆形快捷入口（需求）：每日推荐 / 私人漫游 / 私人雷达 / 心动模式 /
-/// 雷达歌单 / 相似歌曲；
+/// 顶部个性化入口（第十二批需求：对齐 Zephyr 参考图 —— 横向滑动的
+/// 圆角卡片，封面/渐变铺底 + 底部标题副标题 + 右下圆形播放键）：
+/// 每日推荐 / 私人漫游 / 私人雷达 / 心动模式 / 雷达歌单 / 相似歌曲；
 /// 下方板块（需求，从上到下）：个性推荐歌单 / 推荐新音乐 / 新歌速递 /
 /// 热搜榜 / 榜单精选（支持跟 Zephyr 一样的自定义勾选，持久化）。
 library;
@@ -76,14 +77,15 @@ class _BottomSpacer extends StatelessWidget {
 
 // ---------------------------------------------------------------- 快捷入口
 
-/// 顶部个性化推荐类入口（需求：显示歌单封面，对齐 Zephyr-Music 推荐页 ——
-/// 网易云样式圆角方块，有封面的入口直接用封面图）：
-///  - 每日推荐：品牌红渐变方块 + 当日日期（网易云日历样式）；
-///  - 私人漫游：蓝渐变 + 图标；
-///  - 私人雷达：私人雷达歌单**封面**（轻量 /playlist/detail，失败回退图标）；
-///  - 心动模式：粉渐变 + 图标；
-///  - 雷达歌单：首个推荐歌单**封面**（/recommend/resource 首项，回退图标）；
-///  - 相似歌曲：琥珀渐变 + 图标。
+/// 顶部个性化推荐入口（第十二批需求：Zephyr-Music 参考图样式 ——
+/// 横向滑动的圆角卡片，每张卡：封面/渐变铺底 + 底部标题副标题 +
+/// 右下圆形播放键）：
+///  - 每日推荐：日推歌曲封面 2x2 拼贴（未登录/失败回退品牌红渐变+日期）；
+///  - 私人漫游：紫渐变 + 随机播放图标；
+///  - 私人雷达：私人雷达歌单**封面**（轻量 /playlist/detail，失败回退渐变）；
+///  - 心动模式：玫红渐变 + 爱心图标；
+///  - 雷达歌单：每日推荐列表中「雷达」歌单**封面**（回退首项/渐变）；
+///  - 相似歌曲：琥珀橙渐变 + 闪光图标。
 class _QuickEntries extends ConsumerWidget {
   const _QuickEntries();
 
@@ -98,88 +100,78 @@ class _QuickEntries extends ConsumerWidget {
         ref.watch(personalRadarMetaProvider);
     final AsyncValue<List<PlaylistMeta>> daily =
         ref.watch(dailyPlaylistProvider);
-    final String dayLabel = '${DateTime.now().day}';
+    final AsyncValue<List<String>> dailyCovers =
+        ref.watch(dailySongsCoversProvider);
 
-    final List<({Widget visual, String label, VoidCallback onTap})> entries =
-        <({Widget visual, String label, VoidCallback onTap})>[
-      (
-        visual: _QuickTile.date(dayLabel),
-        label: '每日推荐',
+    final List<_QuickCard> cards = <_QuickCard>[
+      _QuickCard(
+        title: '每日推荐',
+        subtitle: '今日限定好歌推荐',
+        covers: dailyCovers.valueOrNull,
+        dayNumber: '${DateTime.now().day}',
+        fallbackColors: const <Color>[Color(0xFFE2483D), Color(0xFFB31F1F)],
         onTap: () => _openDaily(context, ref),
       ),
-      (
-        visual: const _QuickTile.icon(Icons.sensors_rounded, Color(0xFF2E7CF6)),
-        label: '私人漫游',
+      _QuickCard(
+        title: '私人漫游',
+        subtitle: '漫游中·无限畅听',
+        icon: Icons.shuffle_rounded,
+        fallbackColors: const <Color>[Color(0xFF8E5BF0), Color(0xFF5F35D1)],
         onTap: () => _openPersonalFm(context, ref),
       ),
-      (
-        visual: _QuickTile.cover(
-          cover: radar.valueOrNull?.coverUrl,
-          fallbackIcon: Icons.radar_rounded,
-          fallbackColor: const Color(0xFF7B4DFF),
-        ),
-        label: '私人雷达',
+      _QuickCard(
+        title: '私人雷达',
+        subtitle: '从你的听歌听起',
+        coverUrl: radar.valueOrNull?.coverUrl,
+        icon: Icons.radar_rounded,
+        fallbackColors: const <Color>[Color(0xFF7B4DFF), Color(0xFF4A25B8)],
         onTap: () => context
             .push('/toplist/3136952023?name=${Uri.encodeComponent('私人雷达')}'),
       ),
-      (
-        visual:
-            const _QuickTile.icon(Icons.favorite_rounded, Color(0xFFFF6FA5)),
-        label: '心动模式',
+      _QuickCard(
+        title: '心动模式',
+        subtitle: '红心歌曲和相似推荐',
+        icon: Icons.favorite_rounded,
+        fallbackColors: const <Color>[Color(0xFFFF5E7E), Color(0xFFE41458)],
         onTap: () => _openHeartbeat(context, ref),
       ),
-      (
-        visual: _QuickTile.cover(
-          cover: daily.valueOrNull?.firstOrNull?.coverUrl,
-          fallbackIcon: Icons.travel_explore_rounded,
-          fallbackColor: const Color(0xFF17B8A6),
-        ),
-        label: '雷达歌单',
+      _QuickCard(
+        title: '雷达歌单',
+        subtitle: '根据你的听歌口味生成',
+        coverUrl: _radarPlaylistCover(daily.valueOrNull),
+        icon: Icons.travel_explore_rounded,
+        fallbackColors: const <Color>[Color(0xFF17B8A6), Color(0xFF0E8A7E)],
         onTap: () => _openRadarPlaylists(context, ref),
       ),
-      (
-        visual:
-            const _QuickTile.icon(Icons.graphic_eq_rounded, Color(0xFFF5A623)),
-        label: '相似歌曲',
+      _QuickCard(
+        title: '相似歌曲',
+        subtitle: '从你喜欢的歌听起',
+        icon: Icons.auto_awesome_rounded,
+        fallbackColors: const <Color>[Color(0xFFFFA53D), Color(0xFFF07018)],
         onTap: () => _openSimilar(context, ref),
       ),
     ];
 
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(8, 12, 8, 6),
-      child: Row(
-        children: <Widget>[
-          for (final e in entries)
-            Expanded(
-              child: InkWell(
-                borderRadius: BorderRadius.circular(14),
-                onTap: e.onTap,
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 6),
-                  child: Column(
-                    children: <Widget>[
-                      e.visual,
-                      const SizedBox(height: 6),
-                      Text(
-                        e.label,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontSize: 11,
-                          color: Theme.of(context)
-                              .colorScheme
-                              .onSurface
-                              .withValues(alpha: 0.85),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-        ],
+    // 参考图样式：横向滑动卡片带（卡宽 156 × 高 96，间距 10）
+    return SizedBox(
+      height: 110,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.fromLTRB(16, 6, 16, 8),
+        itemCount: cards.length,
+        separatorBuilder: (_, __) => const SizedBox(width: 10),
+        itemBuilder: (BuildContext context, int index) => cards[index],
       ),
     );
+  }
+
+  /// 雷达歌单封面：优先取每日推荐列表中名字带「雷达」的歌单，否则首项
+  static String? _radarPlaylistCover(List<PlaylistMeta>? list) {
+    if (list == null || list.isEmpty) return null;
+    for (final PlaylistMeta m in list) {
+      if (m.name.contains('雷达')) return m.coverUrl;
+    }
+    return list.first.coverUrl;
   }
 
   void _requireLogin(BuildContext context, WidgetRef ref) {
@@ -298,101 +290,202 @@ class _QuickEntries extends ConsumerWidget {
   }
 }
 
-/// 顶部入口圆角方块（46×46，radius 14；网易云推荐页样式）：
-///  - date：品牌红渐变 + 当日日期数字（每日推荐专用）；
-///  - icon：彩色渐变底 + 白图标（无封面入口）；
-///  - cover：歌单封面图（封面加载失败回退 icon 形态）。
-class _QuickTile extends StatelessWidget {
-  const _QuickTile.icon(this.icon, this.color)
-      : coverUrl = null,
-        dayNumber = null;
+/// 顶部个性化入口卡（Zephyr 参考图样式，156×96 / radius 16）：
+///  - 铺底优先级：2x2 封面拼贴（每日推荐）→ 单封面 → 渐变 + 中央图标/日期；
+///  - 底部黑渐变压暗保证文字可读；
+///  - 左下：标题（w800 白）+ 副标题（白 75%）；右下：圆形播放键
+///   （白 22% 底 + 白色播放三角，与整卡共用入口行为）。
+class _QuickCard extends StatelessWidget {
+  const _QuickCard({
+    required this.title,
+    required this.subtitle,
+    required this.fallbackColors,
+    required this.onTap,
+    this.coverUrl,
+    this.covers,
+    this.icon,
+    this.dayNumber,
+  });
 
-  const _QuickTile.date(this.dayNumber)
-      : icon = null,
-        color = AppConstants.brandColor,
-        coverUrl = null;
+  final String title;
+  final String subtitle;
 
-  const _QuickTile.cover({
-    String? cover,
-    required IconData fallbackIcon,
-    required Color fallbackColor,
-  })  : coverUrl = cover,
-        icon = fallbackIcon,
-        color = fallbackColor,
-        dayNumber = null;
+  /// 渐变回退底色 [左上, 右下]
+  final List<Color> fallbackColors;
 
-  final IconData? icon;
-  final Color color;
+  final VoidCallback onTap;
+
+  /// 单封面铺底（私人雷达 / 雷达歌单）
   final String? coverUrl;
+
+  /// 2x2 拼贴铺底（每日推荐，取前 4 张日推歌曲封面）
+  final List<String>? covers;
+
+  /// 渐变底中央图标（也可作为封面缺失的回退图标）
+  final IconData? icon;
+
+  /// 每日推荐日期数字（拼贴缺失时的回退视觉）
   final String? dayNumber;
 
-  static const double _size = 46;
+  static const double _w = 156;
+  static const double _h = 96;
 
   @override
   Widget build(BuildContext context) {
-    final String? cover = coverUrl;
-    if (cover != null && cover.isNotEmpty) {
-      return _frame(
-        ClipRRect(
-          borderRadius: BorderRadius.circular(14),
-          child: CoverImage(src: cover, size: _size, radius: 14),
-        ),
-      );
-    }
-    final String? day = dayNumber;
-    if (day != null) {
-      // 每日推荐：网易云日历样式 —— 红渐变方块 + 白色日期数字
-      return _frame(
-        Container(
-          width: _size,
-          height: _size,
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(14),
-            gradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: <Color>[
-                color.withValues(alpha: 0.95),
-                color.withValues(alpha: 0.72),
-              ],
-            ),
-          ),
-          alignment: Alignment.center,
-          child: Text(
-            day,
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 20,
-              fontWeight: FontWeight.w900,
-              height: 1,
-            ),
-          ),
-        ),
-      );
-    }
-    return _frame(
-      Container(
-        width: _size,
-        height: _size,
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: _w,
+        height: _h,
         decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(14),
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: <Color>[
-              color.withValues(alpha: 0.95),
-              color.withValues(alpha: 0.65),
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: <BoxShadow>[
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.18),
+              blurRadius: 10,
+              offset: const Offset(0, 3),
+            ),
+          ],
+        ),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(16),
+          child: Stack(
+            fit: StackFit.expand,
+            children: <Widget>[
+              _background(),
+              // 底部压暗渐变（参考图同款：文字区自然加深）
+              const DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    stops: <double>[0.40, 1.0],
+                    colors: <Color>[Colors.transparent, Color(0x96000000)],
+                  ),
+                ),
+              ),
+              Positioned(
+                left: 12,
+                right: 42,
+                bottom: 9,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Text(
+                      title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 13.5,
+                        fontWeight: FontWeight.w800,
+                        height: 1.1,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitle,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: Colors.white.withValues(alpha: 0.78),
+                        fontSize: 10,
+                        height: 1.1,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              // 右下圆形播放键（参考图同款：半透明白圆 + 白色三角）
+              Positioned(
+                right: 8,
+                bottom: 7,
+                child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: onTap,
+                  child: Container(
+                    width: 27,
+                    height: 27,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: Colors.white.withValues(alpha: 0.24),
+                      border: Border.all(
+                        color: Colors.white.withValues(alpha: 0.30),
+                        width: 0.8,
+                      ),
+                    ),
+                    child: const Icon(
+                      Icons.play_arrow_rounded,
+                      size: 18,
+                      color: Colors.white,
+                    ),
+                  ),
+                ),
+              ),
             ],
           ),
         ),
-        alignment: Alignment.center,
-        child: Icon(icon, color: Colors.white, size: 22),
       ),
     );
   }
 
-  Widget _frame(Widget child) {
-    return SizedBox(width: _size, height: _size, child: child);
+  /// 铺底：拼贴 → 单封面 → 渐变（+图标/日期）
+  Widget _background() {
+    final List<String>? collage = covers;
+    if (collage != null && collage.length >= 4) {
+      return Column(
+        children: <Widget>[
+          Expanded(
+            child: Row(
+              children: <Widget>[
+                Expanded(child: CoverImage(src: collage[0], size: 160)),
+                Expanded(child: CoverImage(src: collage[1], size: 160)),
+              ],
+            ),
+          ),
+          Expanded(
+            child: Row(
+              children: <Widget>[
+                Expanded(child: CoverImage(src: collage[2], size: 160)),
+                Expanded(child: CoverImage(src: collage[3], size: 160)),
+              ],
+            ),
+          ),
+        ],
+      );
+    }
+    final String? cover = coverUrl;
+    if (cover != null && cover.isNotEmpty) {
+      return CoverImage(src: cover, size: 320, radius: 0);
+    }
+    return Container(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: fallbackColors,
+        ),
+      ),
+      alignment: Alignment.center,
+      child: dayNumber != null
+          ? Text(
+              dayNumber!,
+              style: TextStyle(
+                color: Colors.white.withValues(alpha: 0.60),
+                fontSize: 30,
+                fontWeight: FontWeight.w900,
+                height: 1,
+              ),
+            )
+          : (icon != null
+              ? Icon(
+                  icon,
+                  color: Colors.white.withValues(alpha: 0.92),
+                  size: 26,
+                )
+              : null),
+    );
   }
 }
 
