@@ -22,6 +22,11 @@ import 'package:path_provider/path_provider.dart';
 
 enum CoverSize { small, large, original }
 
+/// 歌单封面 Hero 标签（需求：点击歌单封面 → 歌单详情页大图 Hero 转场）。
+/// 源（我的页宫格卡/列表行）与目标（歌单详情 _CoverHero）共用同一派生。
+/// 仅在 id > 0 时使用，避免多个未知 id 产生同 tag 冲突。
+String playlistCoverHeroTag(int? playlistId) => 'playlist-cover-$playlistId';
+
 extension CoverSizeX on CoverSize {
   /// 网易云图片缩略参数；null = 原图
   String? get param => switch (this) {
@@ -118,6 +123,22 @@ class _CoverMemoryCache {
 final Map<String, Future<Uint8List?>> _kInflight =
     <String, Future<Uint8List?>>{};
 
+/// 内存缓存键（与 fetchBytes 完全一致；peek 同步查询用）
+String _coverMemKey(String url, CoverSize size) {
+  final String rawUrl =
+      url.startsWith('http://') ? url.replaceFirst('http://', 'https://') : url;
+  return '${size.param ?? 'raw'}:$rawUrl';
+}
+
+/// 同步查询内存缓存（不发起网络）：
+/// 第十二批需求修复「滑动封面时闪烁显示默认占位图」—— 播放页封面在
+/// 常规态（CoverArtView）与过渡态（_FrozenCover）之间切换时，
+/// CoverImage 会重新挂载，旧实现的 _bytes 只能在异步 _load 完成后
+/// 才有值，即使字节早已在内存缓存里也会先渲染 1～N 帧占位图。
+/// 暴露同步 peek 后，initState/didUpdateWidget 可在首帧前同步水合。
+Uint8List? peekCoverMemoryCache(String url, CoverSize size) =>
+    _CoverMemoryCache.get(_coverMemKey(url, size));
+
 /// 下载 + 并发去重 + 内存命中短路 + 多级重试。
 ///
 /// 网易云 CDN 部分节点对 ?param 缩略参数会返回 403/404（部分歌曲封面无法
@@ -127,7 +148,7 @@ Future<Uint8List?> fetchBytes(String url, CoverSize size) async {
       ? url.replaceFirst('http://', 'https://')
       : url; // CDN 明文直链统一 https（Android 9+ 拦截 http）
 
-  final String memKey = '${size.param ?? 'raw'}:$rawUrl';
+  final String memKey = _coverMemKey(url, size);
   final Uint8List? cached = _CoverMemoryCache.get(memKey);
   if (cached != null) return cached;
 
@@ -184,6 +205,7 @@ class _CoverImageState extends State<CoverImage> {
   @override
   void initState() {
     super.initState();
+    _hydrateFromMemoryCache();
     _load();
   }
 
@@ -196,7 +218,21 @@ class _CoverImageState extends State<CoverImage> {
         _bytes = null;
       }
       _failed = false;
+      // 新地址若已在内存缓存，同步替换（不闪烁、不等异步）
+      _hydrateFromMemoryCache();
       _load();
+    }
+  }
+
+  /// 同步水合：内存缓存命中则直接赋值（initState 内可直接赋字段，
+  /// 无需 setState；命中后首帧即渲染真图，消灭占位闪烁）
+  void _hydrateFromMemoryCache() {
+    final String? src = widget.src;
+    if (src == null || src.isEmpty || !src.startsWith('http')) return;
+    final Uint8List? cached = peekCoverMemoryCache(src, widget.coverSize);
+    if (cached != null) {
+      _bytes = cached;
+      _failed = false;
     }
   }
 

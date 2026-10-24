@@ -13,7 +13,6 @@
 library;
 
 import 'dart:async';
-import 'dart:ui' show ImageFilter;
 
 import 'package:audio_service/audio_service.dart';
 import 'package:flutter/material.dart';
@@ -22,13 +21,14 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/constants/app_constants.dart';
 import '../../../core/router.dart' show openFullPlayer;
+import '../../../core/widgets/liquid_glass_container.dart'
+    show LiquidGlassBarPanel;
 import '../../discover/presentation/discover_page.dart';
 import '../../library/presentation/my_music_page.dart';
 import '../../player/domain/np_settings.dart';
 import '../../player/presentation/widgets/mini_player.dart';
 import '../../player/providers/np_settings_providers.dart';
 import '../../player/providers/player_providers.dart';
-import '../../settings/providers/settings_providers.dart';
 
 /// 当前 Tab
 final NotifierProvider<TabNotifier, int> selectedTabProvider =
@@ -268,74 +268,46 @@ class _CenterNavBar extends StatelessWidget {
     }
 
     return Container(
-      // 液态玻璃导航栏（需求：全面重构 UI 液态玻璃风）：半透明深底 +
-      // BackdropFilter 模糊 + 顶部高光描边；玻璃关闭/低端机降级实色。
-      height: _height + MediaQuery.paddingOf(context).bottom,
-      padding: EdgeInsets.only(bottom: MediaQuery.paddingOf(context).bottom),
+      // 第十二批需求：液态玻璃导航栏 = Mini 条同款 —— 悬浮胶囊造型，
+      // 左右留 14、底部留 安全区+8，内容从胶囊四周及背后穿过
+      //（Scaffold extendBody:true 已开，BackdropFilter 采样真实内容）
+      color: Colors.transparent,
+      padding: EdgeInsets.fromLTRB(
+          14, 0, 14, MediaQuery.paddingOf(context).bottom + 8),
       child: _GlassNavBarSurface(
-        child: Row(
-          children: <Widget>[
-            item(0, Icons.explore_outlined, Icons.explore_rounded, '发现'),
-            // 中央槽位：Mini 播放条（无边框透明，点击进播放页）
-            SizedBox(
-              width: 150,
-              height: _height,
-              child: Center(
-                child: center ?? const SizedBox.shrink(),
+        child: SizedBox(
+          height: _height,
+          child: Row(
+            children: <Widget>[
+              item(0, Icons.explore_outlined, Icons.explore_rounded, '发现'),
+              // 中央槽位：Mini 播放条（无边框透明，点击进播放页）
+              SizedBox(
+                width: 150,
+                height: _height,
+                child: Center(
+                  child: center ?? const SizedBox.shrink(),
+                ),
               ),
-            ),
-            item(1, Icons.person_outline_rounded, Icons.person_rounded, '我的'),
-          ],
+              item(1, Icons.person_outline_rounded, Icons.person_rounded, '我的'),
+            ],
+          ),
         ),
       ),
     );
   }
 }
 
-/// 导航栏玻璃底板：BackdropFilter 模糊 + 极低透明度白色叠加 + 顶描边高光。
-/// 需求（第十一批）：高透明低液态玻璃 —— 内容透出为主，玻璃只负责
-/// 模糊与一层极淡的白色提亮；玻璃关闭时降级为半透明深色底（非纯黑）。
-class _GlassNavBarSurface extends ConsumerWidget {
+/// 导航栏玻璃底板：第十二批需求 —— 与 Mini 条**同一配方**
+/// （LiquidGlassBarPanel：同模糊/同圆角/同描边/同投影/同无色中性填充），
+/// 降级策略一致；玻璃关闭时为半透明深色胶囊。
+class _GlassNavBarSurface extends StatelessWidget {
   const _GlassNavBarSurface({required this.child});
 
   final Widget child;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final bool glass = ref.watch(glassEnabledProvider);
-    final Brightness brightness = Theme.of(context).brightness;
-    final Color fallback = brightness == Brightness.dark
-        ? const Color(0xCC14101B)
-        : const Color(0xCCF2F1F8);
-
-    if (!glass) {
-      return Container(color: fallback, child: child);
-    }
-    return ClipRect(
-      child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 24, sigmaY: 24),
-        child: Container(
-          decoration: BoxDecoration(
-            // 需求：高透明 —— 白色叠加层降到 0.05/0.015，内容清晰透出
-            gradient: LinearGradient(
-              begin: Alignment.topCenter,
-              end: Alignment.bottomCenter,
-              colors: <Color>[
-                Colors.white.withValues(alpha: 0.05),
-                Colors.white.withValues(alpha: 0.015),
-              ],
-            ),
-            border: Border(
-              top: BorderSide(
-                color: Colors.white.withValues(alpha: 0.10),
-                width: 0.6,
-              ),
-            ),
-          ),
-          child: child,
-        ),
-      ),
-    );
+  Widget build(BuildContext context) {
+    return LiquidGlassBarPanel(child: child);
   }
 }
 

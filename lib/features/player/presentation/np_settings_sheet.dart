@@ -133,8 +133,9 @@ class _DisplayPane extends ConsumerWidget {
           onChanged: (MiniPlayerStyle v) =>
               ref.read(npSettingsProvider.notifier).setMiniStyle(v),
         ),
-        const _HintText(
-            '经典条：高透明液态玻璃长条悬浮导航栏上方；底板颜色/透明度在「设置 → Mini 播放条」中自定义'),
+        // 第十二批需求：底板无色玻璃，颜色/透明度设置项已移除
+        const _HintText('经典条：无色液态玻璃长条悬浮导航栏上方（与底部导航栏同配方），'
+            '底板颜色/透明度不再需要设置'),
       ],
     );
   }

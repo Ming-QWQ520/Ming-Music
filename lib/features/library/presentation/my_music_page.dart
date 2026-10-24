@@ -788,10 +788,15 @@ class _PlaylistGridCard extends StatelessWidget {
             aspectRatio: 1,
             child: ClipRRect(
               borderRadius: BorderRadius.circular(10),
-              child: CoverImage(
-                src: playlist.coverUrl,
-                size: 120,
-                radius: 10,
+              // 第十二批需求：歌单封面 Hero —— 与歌单详情页大图同 tag，
+              // 点击时封面平滑放大为详情页全屏大图
+              child: Hero(
+                tag: playlistCoverHeroTag(playlist.id),
+                child: CoverImage(
+                  src: playlist.coverUrl,
+                  size: 120,
+                  radius: 10,
+                ),
               ),
             ),
           ),
@@ -912,16 +917,20 @@ class _PlaylistRowTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
-    // 需求：歌单显示歌单封面（网易云样式：封面 46 + 名称 + 曲目数）
+    // 需求：歌单显示歌单封面（网易云样式：封面 46 + 名称 + 曲目数）；
+    // 第十二批：封面带 Hero（与歌单详情页大图同 tag）
     final Widget row = ListTile(
       dense: true,
       contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 3),
       leading: ClipRRect(
         borderRadius: BorderRadius.circular(8),
-        child: CoverImage(
-          src: playlist.coverUrl,
-          size: 46,
-          radius: 8,
+        child: Hero(
+          tag: playlistCoverHeroTag(playlist.id),
+          child: CoverImage(
+            src: playlist.coverUrl,
+            size: 46,
+            radius: 8,
+          ),
         ),
       ),
       title: Text(

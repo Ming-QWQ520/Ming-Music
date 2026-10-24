@@ -60,6 +60,19 @@ final FutureProvider<List<PlaylistMeta>> dailyPlaylistProvider =
   (Ref ref) => ref.read(neteaseRepositoryProvider).recommendPlaylists(),
 );
 
+/// 每日推荐歌曲封面（第十二批需求：每日推荐卡片 2x2 拼贴铺底，
+/// 对齐 Zephyr-Music 参考图的拼贴封面样式；未登录/失败由卡片回退
+/// 品牌红渐变 + 日期数字）
+final FutureProvider<List<String>> dailySongsCoversProvider =
+    FutureProvider<List<String>>((Ref ref) async {
+  final List<Song> songs =
+      await ref.read(neteaseRepositoryProvider).recommendSongs();
+  return <String>[
+    for (final Song s in songs)
+      if (s.coverUrl != null && s.coverUrl!.isNotEmpty) s.coverUrl!,
+  ].take(4).toList(growable: false);
+});
+
 /// 私人雷达歌单封面（需求：发现页顶部个性化推荐类入口显示歌单封面，
 /// 对齐 Zephyr-Music 推荐页 —— 轻量 /playlist/detail 只取 meta）。
 /// 3136952023 = 网易云「私人雷达」固定歌单 id。

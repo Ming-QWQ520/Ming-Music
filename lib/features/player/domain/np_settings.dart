@@ -138,11 +138,8 @@ class NpPlayerSettings {
     this.showMvBadge = true,
     this.playerKeepScreenOn = false,
     this.miniStyle = MiniPlayerStyle.classic,
-    // 需求：Mini 条无色 65% 透明（miniColor=null = 无色白玻璃；
-    // miniTransparency = 透明度百分比 0.20-0.95，默认 0.65，填充
-    // 不透明度 = 1 - 透明度）；可在设置中自定义颜色与透明度
-    this.miniColor,
-    this.miniTransparency = 0.65,
+    // 第十二批需求：Mini 条底板无色高透明玻璃 —— 颜色/透明度设置项已移除
+    //（统一走 LiquidGlassBarPanel 中性玻璃配方，不再持久化自定义值）
     this.stripButtons = kStripButtonDefaults,
   });
 
@@ -168,12 +165,6 @@ class NpPlayerSettings {
 
   /// Mini 播放条样式
   final MiniPlayerStyle miniStyle;
-
-  /// Mini 条自定义底色（ARGB；null = 无色 —— 白色玻璃中性底，需求默认）
-  final int? miniColor;
-
-  /// Mini 条透明度（0.20 - 0.95；需求默认 0.65 = 65% 透明）
-  final double miniTransparency;
 
   // ---- 背景 ----
 
@@ -254,9 +245,6 @@ class NpPlayerSettings {
     bool? showMvBadge,
     bool? playerKeepScreenOn,
     MiniPlayerStyle? miniStyle,
-    int? miniColor,
-    bool clearMiniColor = false,
-    double? miniTransparency,
     List<String>? stripButtons,
   }) {
     return NpPlayerSettings(
@@ -281,8 +269,6 @@ class NpPlayerSettings {
       showMvBadge: showMvBadge ?? this.showMvBadge,
       playerKeepScreenOn: playerKeepScreenOn ?? this.playerKeepScreenOn,
       miniStyle: miniStyle ?? this.miniStyle,
-      miniColor: clearMiniColor ? null : (miniColor ?? this.miniColor),
-      miniTransparency: miniTransparency ?? this.miniTransparency,
       stripButtons: stripButtons ?? this.stripButtons,
     );
   }
@@ -310,8 +296,6 @@ class NpPlayerSettings {
         'showMvBadge': showMvBadge,
         'playerKeepScreenOn': playerKeepScreenOn,
         'miniStyle': miniStyle.name,
-        'miniColor': miniColor,
-        'miniTransparency': miniTransparency,
         'stripButtons': stripButtons,
       };
 
@@ -378,9 +362,6 @@ class NpPlayerSettings {
         (MiniPlayerStyle s) => s.name == map['miniStyle'],
         orElse: () => defaults.miniStyle,
       ),
-      miniColor: map['miniColor'] is int ? map['miniColor']! as int : null,
-      miniTransparency:
-          clampD(map['miniTransparency'], 0.20, 0.95, defaults.miniTransparency),
       stripButtons:
           strip.isEmpty ? List<String>.of(kStripButtonDefaults) : strip,
     );
