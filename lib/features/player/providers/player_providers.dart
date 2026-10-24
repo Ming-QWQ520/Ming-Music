@@ -96,8 +96,10 @@ class QueueHistoryNotifier extends Notifier<List<QueueSnapshot>> {
     return persistence.loadHistory();
   }
 
-  Future<void> push(String title, List<Track> tracks) async {
-    state = await ref.read(queuePersistenceProvider).pushHistory(title, tracks);
+  Future<void> push(String title, List<Track> tracks, {int currentIndex = 0}) async {
+    state = await ref
+        .read(queuePersistenceProvider)
+        .pushHistory(title, tracks, currentIndex: currentIndex);
   }
 
   Future<void> removeAt(int index) async {
@@ -593,11 +595,13 @@ class PlayerNotifier extends Notifier<PlayerState> {
       if (startIdx < 0) {
         startIdx = safeStart.clamp(0, resolved.length - 1);
       }
-      // 装载新队列前：旧队列入历史快照（去重，最多 3 个）
+      // 装载新队列前：旧队列入历史快照（去重，最多 3 个；
+      // 记录当前播放位置供「继续播放」显示与恢复）
       if (state.loaded && state.hasQueue) {
         unawaited(ref
             .read(queueHistoryProvider.notifier)
-            .push(state.queueTitle ?? '播放列表', state.queue));
+            .push(state.queueTitle ?? '播放列表', state.queue,
+                currentIndex: state.index));
       }
       state = state.copyWith(
         queue: resolved,

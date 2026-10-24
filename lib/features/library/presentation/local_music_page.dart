@@ -168,6 +168,9 @@ class _LocalMusicPageState extends ConsumerState<LocalMusicPage> {
         ),
         Expanded(
           child: ListView.builder(
+            // 第十六批：底部留白防 Mini 条遮挡末尾行
+            padding: EdgeInsets.only(
+                bottom: MediaQuery.paddingOf(context).bottom + 96),
             itemCount: files.length,
             itemBuilder: (BuildContext context, int index) {
               final Map<String, Object?> f = files[index];

@@ -171,7 +171,7 @@ void main() {
       expect(v2.lyricBlur, 0);
       expect(v2.lyricFade, closeTo(0.6, 1e-9));
       expect(v2.coverLyrics, NpCoverLyricsMode.one);
-      // 迁移后写回即为 v4
+      // 迁移后写回即为当前版本
       expect(v2.toMap()['_v'], NpPlayerSettings.version);
     });
 
@@ -189,6 +189,24 @@ void main() {
         'lyricAlwaysCenter': false,
       });
       expect(current.lyricAlwaysCenter, isFalse);
+    });
+
+    test('v5 迁移：播放页始终亮屏升为开启；v5 档保留用户显式关闭', () {
+      // v4 及更早旧档：playerKeepScreenOn 升为 true（第十六批需求）
+      final NpPlayerSettings old = NpPlayerSettings.fromMap(<Object?, Object?>{
+        '_v': 4,
+        'playerKeepScreenOn': false,
+      });
+      expect(old.playerKeepScreenOn, isTrue);
+      // v5 新档：用户显式关闭后保留关闭态
+      final NpPlayerSettings current =
+          NpPlayerSettings.fromMap(<Object?, Object?>{
+        '_v': 5,
+        'playerKeepScreenOn': false,
+      });
+      expect(current.playerKeepScreenOn, isFalse);
+      // 默认值即为开启
+      expect(NpPlayerSettings.defaults.playerKeepScreenOn, isTrue);
     });
 
     test('stripButtons 顺序按 kStripButtonIds 规范化', () {

@@ -324,9 +324,9 @@ class _LyricsPane extends ConsumerWidget {
         const _GroupTitle('效果'),
         _SliderRow(
           label: '非活跃行淡出',
-          // 第十五批需求：淡出 = 以上下歌词边界为起点向当前行扩散的
-          // 轻模糊感（边界处淡淡模糊，向中间逐渐清晰）
-          hint: '上下歌词边界淡淡模糊，向当前行扩散渐清晰',
+          // 第十六批需求：淡出 = 套在非活跃行上的模糊效果（上下边界
+          // 向当前行扩散），不再联动亮度 —— 非活跃行始终压暗
+          hint: '上下边界向当前行扩散的模糊感；非活跃行始终压暗，不会变亮歌词',
           value: cfg.lyricFade,
           display: '${(cfg.lyricFade * 100).round()}%',
           onChanged: (double v) =>

@@ -140,14 +140,15 @@ class NpPlayerSettings {
     // 第十三批需求：封面页歌词预览默认两行（旧默认一行）
     this.coverLyrics = NpCoverLyricsMode.two,
     this.showMvBadge = true,
-    this.playerKeepScreenOn = false,
+    // 第十六批需求：播放页始终亮屏默认开启（旧档统一升为开启）
+    this.playerKeepScreenOn = true,
     this.miniStyle = MiniPlayerStyle.classic,
     // 第十二批需求：Mini 条底板无色高透明玻璃 —— 颜色/透明度设置项已移除
     //（统一走 LiquidGlassBarPanel 中性玻璃配方，不再持久化自定义值）
     this.stripButtons = kStripButtonDefaults,
   });
 
-  static const int version = 4;
+  static const int version = 5;
 
   static const NpPlayerSettings defaults = NpPlayerSettings();
 
@@ -324,10 +325,14 @@ class NpPlayerSettings {
     // 版本迁移（v4，第十五批需求）：
     //  - 「时刻保持居中」默认开启（旧档未开启的用户升为开启，
     //    升级后可再自行关闭）；红心动效设置项已移除，旧键自然忽略。
+    // 版本迁移（v5，第十六批需求）：
+    //  - 播放页始终亮屏默认开启（旧档未开启的用户升为开启，
+    //    升级后可再自行关闭）。
     final int storedVersion = (map['_v'] as num?)?.toInt() ?? 1;
     final bool migrateToV2 = storedVersion < 2;
     final bool migrateToV3 = storedVersion < 3;
     final bool migrateToV4 = storedVersion < 4;
+    final bool migrateToV5 = storedVersion < 5;
 
     return NpPlayerSettings(
       displayMode: NpDisplayMode.values.firstWhere(
@@ -378,7 +383,9 @@ class NpPlayerSettings {
       showMvBadge: map['showMvBadge'] is bool
           ? map['showMvBadge']! as bool
           : defaults.showMvBadge,
-      playerKeepScreenOn: map['playerKeepScreenOn'] == true,
+      // v5 迁移：始终亮屏默认开启；v5 新档保留用户显式关闭态
+      playerKeepScreenOn:
+          migrateToV5 || map['playerKeepScreenOn'] == true,
       miniStyle: MiniPlayerStyle.values.firstWhere(
         (MiniPlayerStyle s) => s.name == map['miniStyle'],
         orElse: () => defaults.miniStyle,

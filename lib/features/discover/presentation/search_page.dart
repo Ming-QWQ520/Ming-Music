@@ -463,6 +463,9 @@ class _SongResults extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     return ListView.builder(
+      // 第十六批：底部留白防 Mini 条遮挡末尾行（单曲/歌词分类共用）
+      padding: EdgeInsets.only(
+          bottom: MediaQuery.paddingOf(context).bottom + 96),
       itemCount: songs.length,
       itemBuilder: (BuildContext context, int index) {
         final Song s = songs[index];
@@ -489,7 +492,9 @@ class _PlaylistResults extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ListView.builder(
-      padding: const EdgeInsets.symmetric(vertical: 6),
+      // 第十六批：底部留白防 Mini 条遮挡末尾行
+      padding: EdgeInsets.only(
+          top: 6, bottom: MediaQuery.paddingOf(context).bottom + 96),
       itemCount: playlists.length,
       itemBuilder: (BuildContext context, int index) {
         final PlaylistMeta p = playlists[index];
@@ -530,7 +535,9 @@ class _AlbumResults extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ListView.builder(
-      padding: const EdgeInsets.symmetric(vertical: 6),
+      // 第十六批：底部留白防 Mini 条遮挡末尾行
+      padding: EdgeInsets.only(
+          top: 6, bottom: MediaQuery.paddingOf(context).bottom + 96),
       itemCount: albums.length,
       itemBuilder: (BuildContext context, int index) {
         final SearchAlbum a = albums[index];
@@ -580,7 +587,9 @@ class _ArtistResults extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return GridView.builder(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+      // 第十六批：底部留白防 Mini 条遮挡末尾行
+      padding: EdgeInsets.fromLTRB(
+          16, 12, 16, MediaQuery.paddingOf(context).bottom + 96),
       gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
         crossAxisCount: 3,
         childAspectRatio: 0.86,
@@ -631,7 +640,9 @@ class _MvResults extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ListView.builder(
-      padding: const EdgeInsets.symmetric(vertical: 8),
+      // 第十六批：底部留白防 Mini 条遮挡末尾行
+      padding: EdgeInsets.only(
+          top: 8, bottom: MediaQuery.paddingOf(context).bottom + 96),
       itemCount: mvs.length,
       itemBuilder: (BuildContext context, int index) {
         final SearchMv m = mvs[index];
@@ -706,7 +717,9 @@ class _UserResults extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ListView.builder(
-      padding: const EdgeInsets.symmetric(vertical: 6),
+      // 第十六批：底部留白防 Mini 条遮挡末尾行
+      padding: EdgeInsets.only(
+          top: 6, bottom: MediaQuery.paddingOf(context).bottom + 96),
       itemCount: users.length,
       itemBuilder: (BuildContext context, int index) {
         final SearchUser u = users[index];
@@ -929,7 +942,8 @@ class _CompositeResults extends ConsumerWidget {
           icon: Icons.search_off_rounded, message: '没有找到相关内容');
     }
     return ListView(
-      padding: const EdgeInsets.only(top: 2, bottom: 24),
+      padding: EdgeInsets.only(
+          top: 2, bottom: MediaQuery.paddingOf(context).bottom + 96),
       children: sections,
     );
   }
@@ -990,7 +1004,8 @@ class _SearchHome extends ConsumerWidget {
     final AsyncValue<List<HotWord>> hot = ref.watch(hotWordsProvider);
 
     return ListView(
-      padding: const EdgeInsets.only(top: 6, bottom: 24),
+      padding: EdgeInsets.only(
+          top: 6, bottom: MediaQuery.paddingOf(context).bottom + 96),
       children: <Widget>[
         // ---------------- 搜索历史（需求） ----------------
         if (history.isNotEmpty)

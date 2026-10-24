@@ -1,9 +1,15 @@
-/// 播放列表底部弹窗（仿网易云）：
-///  - 「当前播放」与「历史列表」左右滑动切换（PageView，Tab 胶囊同步）；
-///  - 当前播放行（需求）：从左到右 = 当前播放标识（抖动条纹）→ VIP 标识
+/// 播放列表底部弹窗（第十六批按参考图重做）：
+///  - 「当前播放」与「历史播放」左右滑动切换（PageView，文字 tab + 下划线
+///    指示器同步，计数以上标小字跟随在标签右上，如图「当前播放⁶⁴」）；
+///  - 当前播放行：从左到右 = 当前播放标识（抖动条纹）→ VIP 标识
 ///    （是才显示）→ 「歌名 - 歌手」（歌手紧靠歌名，左右各一空格）；
-///    移除行尾 x 删除键与封面；行尾为拖动按键（ReorderableListView 自定义排序）；
-///  - 历史列表：最多保留 3 个队列快照，可展开/恢复/删除。
+///    行尾拖动按键（ReorderableListView 自定义排序）；
+///  - 定位修复（第十六批）：打开弹窗/点击定位键 —— ListView.builder
+///    懒构建导致深处行无 BuildContext，改两段式（估高跳转 → 锚点构建后
+///    ensureVisible 精调）；
+///  - 历史播放（参考图）：每个队列快照一个分组 —— 组头「来源名 + 删除」、
+///    「继续播放：X」副标题、编号行「N. 歌名 · 歌手（VIP）」，
+///    点行恢复该队列并从该行继续播放；
 library;
 
 import 'dart:math' as math;
@@ -44,12 +50,9 @@ class _QueueSheet extends ConsumerStatefulWidget {
 }
 
 class _QueueSheetState extends ConsumerState<_QueueSheet> {
-  /// 0 = 当前播放；1 = 历史列表（PageView 页码）
+  /// 0 = 当前播放；1 = 历史播放（PageView 页码）
   final PageController _pageCtrl = PageController();
   int _page = 0;
-
-  /// 展开的历史快照下标
-  int? _expandedHistory;
 
   @override
   void dispose() {
@@ -88,23 +91,24 @@ class _QueueSheetState extends ConsumerState<_QueueSheet> {
               borderRadius: BorderRadius.circular(2),
             ),
           ),
-          // Tab 胶囊：与 PageView 双向联动（点击切换 / 滑动同步高亮）
+          // 文字 Tab + 下划线指示器（参考图），与 PageView 双向联动
           Padding(
             padding: const EdgeInsets.fromLTRB(20, 12, 12, 0),
             child: Row(
               children: <Widget>[
                 GestureDetector(
                   onTap: () => _go(0),
-                  child: _TabChip(
-                    label: '当前播放 $count',
+                  child: _TabText(
+                    label: '当前播放',
+                    count: count,
                     active: _page == 0,
                   ),
                 ),
-                const SizedBox(width: 10),
+                const SizedBox(width: 22),
                 GestureDetector(
                   onTap: () => _go(1),
-                  child: _TabChip(
-                    label: '历史列表 ${history.length}',
+                  child: _TabText(
+                    label: '历史播放',
                     active: _page == 1,
                   ),
                 ),
@@ -129,24 +133,21 @@ class _QueueSheetState extends ConsumerState<_QueueSheet> {
               controller: _pageCtrl,
               onPageChanged: (int p) => setState(() {
                 _page = p;
-                _expandedHistory = null;
               }),
               children: <Widget>[
                 _CurrentPane(state: state, count: count),
                 _HistoryPane(
                   history: history,
-                  expanded: _expandedHistory,
-                  onToggleExpand: (int i) => setState(() {
-                    _expandedHistory = _expandedHistory == i ? null : i;
-                  }),
-                  onRestore: (QueueSnapshot snap) async {
-                    Navigator.of(context).pop();
-                    await ref
-                        .read(playerProvider.notifier)
-                        .playSongs(snap.tracks, queueTitle: snap.title);
-                  },
                   onDelete: (int i) =>
                       ref.read(queueHistoryProvider.notifier).removeAt(i),
+                  onPlayFrom: (QueueSnapshot snap, int startAt) async {
+                    Navigator.of(context).pop();
+                    await ref.read(playerProvider.notifier).playSongs(
+                          snap.tracks,
+                          startIndex: startAt,
+                          queueTitle: snap.title,
+                        );
+                  },
                 ),
               ],
             ),
@@ -157,33 +158,70 @@ class _QueueSheetState extends ConsumerState<_QueueSheet> {
   }
 }
 
-// ---------------------------------------------------------------- Tab 胶囊
+// ---------------------------------------------------------------- 文字 Tab
 
-class _TabChip extends StatelessWidget {
-  const _TabChip({required this.label, required this.active});
+/// 文字 Tab（参考图）：标签 + 可选上标计数（如「当前播放⁶⁴」），
+/// 选中态加粗 + 品牌色 + 底部下划线指示器
+
+class _TabText extends StatelessWidget {
+  const _TabText({required this.label, this.count, required this.active});
 
   final String label;
+  final int? count;
   final bool active;
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
-      decoration: BoxDecoration(
-        color: active
-            ? AppConstants.brandColor.withValues(alpha: 0.16)
-            : Colors.white.withValues(alpha: 0.05),
-        borderRadius: BorderRadius.circular(14),
-      ),
-      child: Text(
-        label,
-        style: TextStyle(
-          fontSize: 13,
-          fontWeight: active ? FontWeight.w700 : FontWeight.w400,
-          color: active
-              ? AppConstants.brandColor
-              : Colors.white.withValues(alpha: 0.6),
-        ),
+    final Color color = active
+        ? AppConstants.brandColor
+        : Colors.white.withValues(alpha: 0.62);
+    final TextStyle style = TextStyle(
+      fontSize: 14.5,
+      fontWeight: active ? FontWeight.w800 : FontWeight.w500,
+      color: color,
+    );
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          // 上标计数：WidgetSpan 上移 4px 小字号（仿参考图「当前播放⁶⁴」）
+          Text.rich(
+            TextSpan(
+              children: <InlineSpan>[
+                TextSpan(text: label, style: style),
+                if (count != null)
+                  WidgetSpan(
+                    alignment: PlaceholderAlignment.middle,
+                    child: Transform.translate(
+                      offset: const Offset(1.5, -4.5),
+                      child: Text(
+                        '$count',
+                        style: TextStyle(
+                          fontSize: 9.5,
+                          fontWeight: FontWeight.w700,
+                          color: color,
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 3),
+          // 下划线指示器（选中态展开）
+          AnimatedContainer(
+            duration: const Duration(milliseconds: 220),
+            curve: Curves.easeOutCubic,
+            width: active ? 18 : 0,
+            height: 2.5,
+            decoration: BoxDecoration(
+              color: active ? AppConstants.brandColor : Colors.transparent,
+              borderRadius: BorderRadius.circular(1.5),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -210,9 +248,14 @@ class _CurrentPaneState extends ConsumerState<_CurrentPane> {
   /// Scrollable.ensureVisible 精确滚动）
   final GlobalKey _currentRowKey = GlobalKey();
 
-  /// 定位重试计数（打开弹窗首帧 PageView 可能尚未布出列表，
-  /// 锚点未就绪时逐帧重试）
-  int _locateTries = 0;
+  /// 两段式定位阶段：0 = 初始尝试；1 = 已按估高跳转待精调；2 = 完成
+  int _locatePhase = 0;
+
+  /// 估高跳转重试计数（防极端场景无限递归）
+  int _locateJumps = 0;
+
+  /// 行高估算：行内容单行 + 上下 10 padding（拖动键 32 为最高子项）
+  static const double _kRowEstHeight = 52;
 
   @override
   void initState() {
@@ -231,26 +274,57 @@ class _CurrentPaneState extends ConsumerState<_CurrentPane> {
   /// 滚动到当前播放歌曲：使其上方保留两行可见（近似居中偏上）
   void _locate({bool animate = true}) {
     if (!widget.state.hasQueue) return;
-    _locateTries = 0;
+    _locatePhase = 0;
+    _locateJumps = 0;
     _locateTick(animate);
   }
 
+  /// 第十六批定位失效根治：
+  ///
+  /// 根因：ReorderableListView.builder 懒构建 —— 当前歌在列表深处时
+  /// 行从未被构建，`_currentRowKey.currentContext` 恒为 null，
+  /// Scrollable.ensureVisible 无从定位；旧实现重试 6 帧后放弃，
+  /// 定位按钮与打开自动定位双双失效。
+  ///
+  /// 修复：两段式 —— 先按估高（行数 × _kRowEstHeight）直接跳到目标
+  /// 附近（jumpTo/animateTo），行进入构建缓存后下一帧锚点就绪，
+  /// 再 ensureVisible 精调到「上方保留两行」。
   void _locateTick(bool animate) {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       final BuildContext? ctx = _currentRowKey.currentContext;
-      if (ctx == null) {
-        // 列表尚未布局（PageView 懒加载/首帧）：重试最多 6 帧
-        if (_locateTries++ < 6) _locateTick(animate);
+      if (ctx != null) {
+        Scrollable.ensureVisible(
+          ctx,
+          duration: animate ? const Duration(milliseconds: 260) : Duration.zero,
+          curve: Curves.easeOutCubic,
+          // 当前歌曲上方保留两行（与需求一致）
+          alignment: 0.3,
+        );
+        _locatePhase = 2;
         return;
       }
-      Scrollable.ensureVisible(
-        ctx,
-        duration: animate ? const Duration(milliseconds: 320) : Duration.zero,
-        curve: Curves.easeOutCubic,
-        // 当前歌曲上方保留两行（与需求一致）
-        alignment: 0.3,
-      );
+      if (!_scroll.hasClients || _locatePhase >= 2) return;
+      final double viewport = _scroll.position.viewportDimension;
+      final double target =
+          (widget.state.index * _kRowEstHeight - viewport * 0.3)
+              .clamp(0.0, _scroll.position.maxScrollExtent);
+      if (animate && _locatePhase == 0) {
+        _locatePhase = 1;
+        _scroll
+            .animateTo(
+              target,
+              duration: const Duration(milliseconds: 300),
+              curve: Curves.easeOutCubic,
+            )
+            .whenComplete(() => _locateTick(false));
+      } else {
+        if (_locateJumps++ > 3) return; // 极端场景（锚点始终未构建）不再重试
+        _locatePhase = 1;
+        _scroll.jumpTo(target);
+        // 跳转后下一帧行已构建，再走一次锚点精调
+        _locateTick(false);
+      }
     });
   }
 
@@ -471,22 +545,38 @@ class _EqBarsPainter extends CustomPainter {
       oldDelegate.phase != phase || oldDelegate.playing != playing;
 }
 
-// ---------------------------------------------------------------- 历史列表
+// ---------------------------------------------------------------- 历史播放
 
+/// 历史播放分组列表（第十六批按参考图重做）：
+///  - 每个队列快照一个分组：组头「来源名 + 删除键」→「继续播放：X」副标题
+///    → 编号曲目行「N. 歌名 · 歌手（VIP）」；
+///  - 点任意曲目行：恢复该队列并从该行开始播放（不打断语义由 playSongs 承接）。
 class _HistoryPane extends StatelessWidget {
   const _HistoryPane({
     required this.history,
-    required this.expanded,
-    required this.onToggleExpand,
-    required this.onRestore,
     required this.onDelete,
+    required this.onPlayFrom,
   });
 
   final List<QueueSnapshot> history;
-  final int? expanded;
-  final ValueChanged<int> onToggleExpand;
-  final ValueChanged<QueueSnapshot> onRestore;
   final ValueChanged<int> onDelete;
+  final void Function(QueueSnapshot snap, int startAt) onPlayFrom;
+
+  /// 扁平化条目：组头 / 继续播放行 / 曲目行（避免嵌套滚动）
+  List<_HistoryEntry> _flatten() {
+    final List<_HistoryEntry> entries = <_HistoryEntry>[];
+    for (int g = 0; g < history.length; g++) {
+      final QueueSnapshot snap = history[g];
+      entries.add(_HistoryEntry.header(g));
+      if (snap.tracks.isNotEmpty) {
+        entries.add(_HistoryEntry.continueLine(g));
+        for (int i = 0; i < snap.tracks.length; i++) {
+          entries.add(_HistoryEntry.track(g, i));
+        }
+      }
+    }
+    return entries;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -495,110 +585,160 @@ class _HistoryPane extends StatelessWidget {
       return Padding(
         padding: const EdgeInsets.symmetric(vertical: 56),
         child: Text(
-          '暂无历史列表\n切换播放队列后会自动保留最近 3 个',
+          '暂无历史播放\n切换播放队列后会自动保留最近 3 个',
           textAlign: TextAlign.center,
           style: TextStyle(
               fontSize: 13, color: theme.colorScheme.onSurfaceVariant),
         ),
       );
     }
+    final List<_HistoryEntry> entries = _flatten();
     return ListView.builder(
-      padding: const EdgeInsets.only(bottom: 16, top: 6),
-      itemCount: history.length,
+      padding: const EdgeInsets.only(bottom: 16, top: 2),
+      itemCount: entries.length,
       itemBuilder: (BuildContext context, int index) {
-        final QueueSnapshot snap = history[index];
-        final bool isOpen = expanded == index;
-        return Column(
-          children: <Widget>[
-            ListTile(
-              contentPadding:
-                  const EdgeInsets.symmetric(horizontal: 20, vertical: 2),
-              leading: Icon(
-                isOpen ? Icons.folder_open_rounded : Icons.folder_rounded,
-                size: 22,
-                color: theme.colorScheme.onSurfaceVariant,
-              ),
-              title: Text(
-                snap.title,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(fontSize: 14.5),
-              ),
-              subtitle: Text(
-                '${snap.tracks.length} 首 · ${_formatTime(snap.savedAt)}',
-                style: TextStyle(
-                    fontSize: 11.5, color: theme.colorScheme.onSurfaceVariant),
-              ),
-              trailing: Row(
-                mainAxisSize: MainAxisSize.min,
+        final _HistoryEntry e = entries[index];
+        final QueueSnapshot snap = history[e.group];
+        switch (e.kind) {
+          case _HistoryEntryKind.header:
+            return Padding(
+              padding: const EdgeInsets.fromLTRB(20, 14, 10, 0),
+              child: Row(
                 children: <Widget>[
-                  IconButton(
-                    tooltip: '播放此列表',
-                    icon: const Icon(Icons.play_circle_outline_rounded,
-                        size: 22, color: AppConstants.brandColor),
-                    onPressed: () => onRestore(snap),
+                  Expanded(
+                    child: Text(
+                      snap.title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                          fontSize: 15.5, fontWeight: FontWeight.w800),
+                    ),
                   ),
+                  // 组头右侧删除键（参考图）：删除该历史分组
                   IconButton(
-                    tooltip: '删除',
-                    icon: Icon(Icons.close_rounded,
-                        size: 18, color: theme.colorScheme.onSurfaceVariant),
-                    onPressed: () => onDelete(index),
+                    tooltip: '删除该历史',
+                    icon: Icon(
+                      Icons.delete_outline_rounded,
+                      size: 20,
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                    onPressed: () => onDelete(e.group),
                   ),
                 ],
               ),
-              onTap: () => onToggleExpand(index),
-            ),
-            AnimatedCrossFade(
-              duration: const Duration(milliseconds: 180),
-              crossFadeState:
-                  isOpen ? CrossFadeState.showSecond : CrossFadeState.showFirst,
-              firstChild: const SizedBox(width: double.infinity),
-              secondChild: Container(
-                constraints: const BoxConstraints(maxHeight: 220),
-                decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.03),
+            );
+          case _HistoryEntryKind.continueLine:
+            final Track cur = snap.tracks[snap.currentIndex];
+            return Padding(
+              padding: const EdgeInsets.fromLTRB(20, 2, 20, 6),
+              child: Text.rich(
+                TextSpan(
+                  children: <InlineSpan>[
+                    const TextSpan(
+                      text: '继续播放：',
+                      style: TextStyle(fontSize: 12.5, color: Colors.white38),
+                    ),
+                    TextSpan(
+                      text: cur.title,
+                      style: TextStyle(
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.white.withValues(alpha: 0.78),
+                      ),
+                    ),
+                  ],
                 ),
-                child: ListView.builder(
-                  shrinkWrap: true,
-                  padding: const EdgeInsets.symmetric(vertical: 4),
-                  itemCount: snap.tracks.length,
-                  itemBuilder: (BuildContext ctx, int ti) {
-                    final Track t = snap.tracks[ti];
-                    return ListTile(
-                      dense: true,
-                      visualDensity: VisualDensity.compact,
-                      contentPadding:
-                          const EdgeInsets.symmetric(horizontal: 24),
-                      leading: const SizedBox(width: 8),
-                      title: Text(
-                        t.title,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(fontSize: 13),
-                      ),
-                      subtitle: Text(
-                        t.artist,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            );
+          case _HistoryEntryKind.track:
+            final int i = e.trackIndex;
+            final Track t = snap.tracks[i];
+            final bool isContinue = i == snap.currentIndex;
+            return InkWell(
+              onTap: () => onPlayFrom(snap, i),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 9),
+                child: Row(
+                  children: <Widget>[
+                    // 编号（参考图「1.」）；继续播放首行用品牌色呼应
+                    SizedBox(
+                      width: 26,
+                      child: Text(
+                        '${i + 1}.',
                         style: TextStyle(
-                            fontSize: 11,
-                            color: theme.colorScheme.onSurfaceVariant),
+                          fontSize: 12.5,
+                          fontWeight: isContinue
+                              ? FontWeight.w700
+                              : FontWeight.w400,
+                          color: isContinue
+                              ? AppConstants.brandColor
+                              : Colors.white.withValues(alpha: 0.42),
+                        ),
                       ),
-                    );
-                  },
+                    ),
+                    Expanded(
+                      child: Text.rich(
+                        TextSpan(
+                          children: <InlineSpan>[
+                            TextSpan(
+                              text: t.title,
+                              style: TextStyle(
+                                fontSize: 14.5,
+                                fontWeight: isContinue
+                                    ? FontWeight.w700
+                                    : FontWeight.w400,
+                                color: Colors.white
+                                    .withValues(alpha: isContinue ? 1 : 0.88),
+                              ),
+                            ),
+                            TextSpan(
+                              text: ' · ${t.artist}',
+                              style: TextStyle(
+                                fontSize: 12.5,
+                                color: Colors.white.withValues(alpha: 0.45),
+                              ),
+                            ),
+                            if (t.isVipOnly)
+                              const TextSpan(
+                                text: '（VIP）',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  color: Colors.white38,
+                                ),
+                              ),
+                          ],
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
                 ),
               ),
-            ),
-          ],
-        );
+            );
+        }
       },
     );
   }
+}
 
-  static String _formatTime(DateTime t) {
-    String two(int v) => v.toString().padLeft(2, '0');
-    return '${t.month}-${two(t.day)} ${two(t.hour)}:${two(t.minute)}';
-  }
+enum _HistoryEntryKind { header, continueLine, track }
+
+class _HistoryEntry {
+  const _HistoryEntry.header(this.group)
+      : kind = _HistoryEntryKind.header,
+        trackIndex = -1;
+  const _HistoryEntry.continueLine(this.group)
+      : kind = _HistoryEntryKind.continueLine,
+        trackIndex = -1;
+  const _HistoryEntry.track(this.group, this.trackIndex)
+      : kind = _HistoryEntryKind.track;
+
+  final int group;
+  final _HistoryEntryKind kind;
+  final int trackIndex;
 }
 
 // ---------------------------------------------------------------- 行

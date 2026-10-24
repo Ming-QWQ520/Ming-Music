@@ -1,7 +1,9 @@
 /// 添加至歌单底部弹窗（需求）：
 ///  - 列出所有「我创建的歌单」（封面 + 名称 + 数量），点击即添加；
 ///  - 顶部「新建歌单」行：输入名称 → /playlist/create → 直接入歌；
-///  - 未登录引导登录；已存在/失败给出明确提示。
+///  - 未登录引导登录；已存在/失败给出明确提示；
+///  - 第十六批：添加到歌单记忆 —— 上次添加成功的歌单下次打开置顶
+///    （仅本地显示顺序，不改云端真实歌单排序）。
 library;
 
 import 'package:flutter/material.dart';
@@ -13,6 +15,8 @@ import '../../auth/data/netease_auth_repository.dart' show NeteaseUserPlaylist;
 import '../../auth/presentation/login_sheet.dart';
 import '../../auth/providers/auth_providers.dart';
 import '../../discover/data/netease_providers.dart';
+import '../../settings/providers/settings_providers.dart'
+    show PrefsKeys, sharedPreferencesProvider;
 import '../../../core/widgets/sheet_host.dart' show showMingSheet;
 
 /// 打开「添加至歌单」弹窗。返回操作结果（关闭弹窗后 toast）。
@@ -58,6 +62,10 @@ class _AddToPlaylistSheetState extends ConsumerState<_AddToPlaylistSheet> {
   int? _busyId;
   bool _creating = false;
 
+  /// 第十六批需求：添加到歌单记忆 —— 上次添加成功的歌单 id
+  /// （本次打开时置顶展示；仅改本地显示顺序，不改云端真实排序）
+  int _lastUsedId = 0;
+
   /// 弹窗 pop 后自身 context 失效：提前持有 messenger
   ScaffoldMessengerState? _messenger;
 
@@ -83,7 +91,15 @@ class _AddToPlaylistSheetState extends ConsumerState<_AddToPlaylistSheet> {
                   p.creatorUserId == auth.profile!.userId)
               .toList(growable: false));
       if (!mounted) return;
-      setState(() => _mine = all);
+      // 第十六批需求：上次使用的歌单置顶（本地记忆，不改云端排序）
+      _lastUsedId =
+          ref.read(sharedPreferencesProvider).getInt(PrefsKeys.addToPlaylistLast) ?? 0;
+      final List<NeteaseUserPlaylist> ordered = <NeteaseUserPlaylist>[
+        for (final NeteaseUserPlaylist p in all)
+          if (_lastUsedId > 0 && p.id == _lastUsedId) p,
+        ...all.where((NeteaseUserPlaylist p) => p.id != _lastUsedId),
+      ];
+      setState(() => _mine = ordered);
     } catch (e) {
       if (!mounted) return;
       setState(() => _error = '歌单加载失败：$e');
@@ -99,6 +115,10 @@ class _AddToPlaylistSheetState extends ConsumerState<_AddToPlaylistSheet> {
             trackIds: widget.trackIds,
             add: true,
           );
+      // 第十六批需求：写入「上次使用」记忆（下次打开置顶）
+      await ref
+          .read(sharedPreferencesProvider)
+          .setInt(PrefsKeys.addToPlaylistLast, playlistId);
       _messenger?.showSnackBar(
         SnackBar(content: Text('已添加到「$name」')),
       );
@@ -237,11 +257,15 @@ class _AddToPlaylistSheetState extends ConsumerState<_AddToPlaylistSheet> {
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
                                   style: const TextStyle(fontSize: 15)),
-                              subtitle: Text('${p.trackCount}首',
+                              subtitle: Text(
+                                  p.id == _lastUsedId
+                                      ? '${p.trackCount}首 · 上次添加'
+                                      : '${p.trackCount}首',
                                   style: TextStyle(
                                       fontSize: 11.5,
-                                      color:
-                                          theme.colorScheme.onSurfaceVariant)),
+                                      color: p.id == _lastUsedId
+                                          ? AppConstants.brandColor
+                                          : theme.colorScheme.onSurfaceVariant)),
                               trailing: _busyId == p.id
                                   ? const SizedBox(
                                       width: 18,

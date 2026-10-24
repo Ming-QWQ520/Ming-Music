@@ -24,16 +24,23 @@ class QueueSnapshot {
     required this.title,
     required this.tracks,
     required this.savedAt,
+    // 第十六批需求：历史播放「继续播放：X」—— 快照入历史时记录
+    // 当前播放到哪一首（恢复时从此首继续）
+    this.currentIndex = 0,
   });
 
   final String title;
   final List<Track> tracks;
   final DateTime savedAt;
 
+  /// 快照时的播放位置（clamp 在曲目范围内）
+  final int currentIndex;
+
   Map<String, Object?> toMap() => <String, Object?>{
         'title': title,
         'tracks': tracks.map((Track t) => t.toMap()).toList(),
         'savedAt': savedAt.millisecondsSinceEpoch,
+        'currentIndex': currentIndex,
       };
 
   static QueueSnapshot fromMap(Map<Object?, Object?> map) {
@@ -45,10 +52,13 @@ class QueueSnapshot {
             .toList(growable: false)
         : const <Track>[];
     final int ms = (map['savedAt'] as num?)?.toInt() ?? 0;
+    final int idx = ((map['currentIndex'] as num?)?.toInt() ?? 0)
+        .clamp(0, tracks.isEmpty ? 0 : tracks.length - 1);
     return QueueSnapshot(
       title: (map['title'] as String?) ?? '播放列表',
       tracks: tracks,
       savedAt: DateTime.fromMillisecondsSinceEpoch(ms),
+      currentIndex: idx,
     );
   }
 
@@ -190,11 +200,13 @@ class QueuePersistence {
     }
   }
 
-  /// 推入历史快照（去重、最多保留 [maxHistory] 个，最新在前）
+  /// 推入历史快照（去重、最多保留 [maxHistory] 个，最新在前；
+  /// [currentIndex] = 入历史时的播放位置，供「继续播放」显示与恢复）
   Future<List<QueueSnapshot>> pushHistory(
     String title,
     List<Track> tracks, {
     int maxHistory = 3,
+    int currentIndex = 0,
   }) async {
     if (tracks.isEmpty) return loadHistory();
     final List<QueueSnapshot> current = List<QueueSnapshot>.of(loadHistory())
@@ -205,6 +217,7 @@ class QueuePersistence {
           title: title,
           tracks: tracks,
           savedAt: DateTime.now(),
+          currentIndex: currentIndex.clamp(0, tracks.length - 1),
         ));
     while (current.length > maxHistory) {
       current.removeLast();

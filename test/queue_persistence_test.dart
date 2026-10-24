@@ -140,6 +140,26 @@ void main() {
       expect(snap.tracks.first.mvId, 7);
       expect(snap.tracks.first.isNetwork, isTrue);
     });
+
+    test('快照记录继续播放位置（第十六批：历史播放「继续播放」）', () async {
+      await persistence.pushHistory(
+        'A',
+        <Track>[track('a1'), track('a2'), track('a3')],
+        currentIndex: 2,
+      );
+      final QueueSnapshot snap = persistence.loadHistory().single;
+      expect(snap.currentIndex, 2);
+
+      // 旧档无 currentIndex 字段 → 默认 0
+      await prefs.setString(PrefsKeys.queueHistory,
+          '[{"title":"B","tracks":[],"savedAt":123}]');
+      expect(persistence.loadHistory().first.currentIndex, 0);
+
+      // currentIndex 越界 → clamp 到曲目范围内
+      await prefs.setString(PrefsKeys.queueHistory,
+          '[{"title":"C","tracks":[],"savedAt":123,"currentIndex":99}]');
+      expect(persistence.loadHistory().first.currentIndex, 0);
+    });
   });
 
   group('播放统计', () {
