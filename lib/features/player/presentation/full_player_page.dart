@@ -895,9 +895,11 @@ class _InfoSectionState extends ConsumerState<_InfoSection> {
             authProvider.select((AuthState s) => s.likedIds.contains(songId)));
 
     return Padding(
-      // 需求：底部区域呼吸感修复 —— 信息区与进度条不再挤在一起；
-      // 本批需求「继续上移进度条与上方信息」：上/下边距再度收紧
-      padding: const EdgeInsets.fromLTRB(24, 3, 12, 2),
+      // 第十四批需求：「控件区上移」= 仅进度条以上的信息区上移，
+      // 进度条位置不动 —— 回退 v13 整层抬升（底边距 38→28）后，把
+      // 抬升量转移到信息区与进度条之间（下边距 2 → 12，信息块整体
+      // 抬高 10px，进度条及以下各层位置不变）
+      padding: const EdgeInsets.fromLTRB(24, 3, 12, 12),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: <Widget>[
@@ -1946,8 +1948,9 @@ class _BottomStrip extends ConsumerWidget {
     // 音量条 + 设置键（音量条在设置键左侧，Expanded 拉伸）。
     if (cfg.stripButtons.contains('volume')) {
       return Padding(
-        // 第十三批需求：进度条以上控件区继续上移 —— 底边距 28 → 38
-        padding: const EdgeInsets.fromLTRB(24, 2, 18, 38),
+        // 第十四批需求回退：底边距 38 → 28（上一批整层上移并非用户
+        // 所指 —— 只需进度条以上控件区上移，进度条位置不变）
+        padding: const EdgeInsets.fromLTRB(24, 2, 18, 28),
         child: Row(
           children: <Widget>[
             const Expanded(child: _VolumeStripButton()),
@@ -1964,11 +1967,10 @@ class _BottomStrip extends ConsumerWidget {
     ];
 
     return Padding(
-      // 需求：底部控件位置继续上移（第十三批：进度条以上的控件区仍
-      // 偏低 —— 底边距 28 → 38，整层浮层再度抬高，信息区/进度条/控制键
-      // 随之上移）
+      // 第十四批需求回退：底边距 38 → 28 —— 用户澄清「控件区上移」
+      // 指进度条以上区域，不是整层；进度条/控制键/功能条回到 v12 位置
       padding: EdgeInsets.fromLTRB(
-          math.max(34.0 - buttons.length * 4, 16), 2, 34, 38),
+          math.max(34.0 - buttons.length * 4, 16), 2, 34, 28),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: buttons.isEmpty ? <Widget>[const SizedBox.shrink()] : buttons,

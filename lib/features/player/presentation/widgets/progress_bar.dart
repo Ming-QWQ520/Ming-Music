@@ -3,11 +3,14 @@
 ///    trackHeight，旧 M3 Slider 实现两条观感粗细不一致的问题根除）；
 ///  - 手动拖动时两条**以同一倍数平滑变粗**（4 → 8），松手回弹 ——
 ///    Apple Music 效果；
-///  - 高潮点白点（第十三批需求修复）：直径 = 当前条高，与总进度条
-///    **同大小同时变化**（常态 4px / 拖动 8px 同步插值）；旧实现固定
-///    6px 且被 Positioned tight 高度约束压缩成 6×H 椭圆（穿过进度条
-///    时肉眼可见形变）—— 现用 OverflowBox 解除高度约束 + 直径绑定
-///    条高插值，双问题根治；仅显示不拦截拖动；
+///  - 高潮点白点（第十四批需求修复「未显示」）：直径 = 当前条高，与
+///    总进度条**同大小同时变化**（常态 4px / 拖动 8px 同步插值）；
+///    两处根因：① Positioned 只给 left 未给 width → Center 被撑满
+///    「剩余宽度」，白点中心漂移到剩余区中点（仅合唱点靠近轨道末端
+///    时才恰好落位 =「有概率显示/位置不对」）；补 width: 34 后中心
+///    恒为 chorusX；② 纯白点与白色进度条同色融合 → 对齐 Zephyr
+///    PlayerBar 的黑色外发光（box-shadow 0 0 2px black.55 +
+///    0 0 4px white.6），任何底色上均可辨；仅显示不拦截拖动；
 ///  - 自绘替代 SliderTheme：根治 M3 RoundedRectTrackShape 在无圆点
 ///    配置下 active/inactive 分段圆角与间隙的观感差异，并保证轨道
 ///    两侧内收与 m:s 时间标签对齐；
@@ -133,10 +136,15 @@ class _PlayerProgressBarState extends ConsumerState<PlayerProgressBar> {
                     // 高度约束，Center→SizedBox(34x30)→白点 6x6 被压缩成
                     // 6×H（H=条高插值）→ 穿过进度条时可见椭圆；OverflowBox
                     // 解除约束后白点以条高为直径正圆绘制。
+                    // 第十四批「未显示」修复：① 补 width: 34 —— 只给 left
+                    // 时 Center 被撑满剩余宽度，白点中心=剩余区中点而非
+                    // chorusX（仅靠近末尾时才恰好正确）；② 纯白点与白色
+                    // 进度条同色 → 改用 Zephyr 同款黑色外发光暗环。
                     if (chorusMs != null &&
                         chorusMs > 0 &&
                         chorusMs < safeDuration)
                       Positioned(
+                        width: 34,
                         left: (_kTrackInset +
                                 (w - _kTrackInset * 2) *
                                     (chorusMs / safeDuration).clamp(0.0, 1.0) -
@@ -167,17 +175,28 @@ class _PlayerProgressBarState extends ConsumerState<PlayerProgressBar> {
                                 width: 34,
                                 height: 34,
                                 child: Center(
+                                  // Zephyr PlayerBar .chorus-dot 同款观感：
+                                  // 白色圆点 + 黑色外发光暗环（0 0 2px
+                                  // black55）+ 白色微光晕（0 0 4px white60），
+                                  // 在白 25% 轨道与白 90% 已播条上都可辨
                                   child: Container(
                                     width: height,
                                     height: height,
                                     decoration: BoxDecoration(
                                       shape: BoxShape.circle,
                                       color: Colors.white,
-                                      border: Border.all(
-                                        color: Colors.black
-                                            .withValues(alpha: 0.35),
-                                        width: 0.8,
-                                      ),
+                                      boxShadow: <BoxShadow>[
+                                        BoxShadow(
+                                          color: Colors.black
+                                              .withValues(alpha: 0.55),
+                                          blurRadius: 2,
+                                        ),
+                                        BoxShadow(
+                                          color: Colors.white
+                                              .withValues(alpha: 0.60),
+                                          blurRadius: 4,
+                                        ),
+                                      ],
                                     ),
                                   ),
                                 ),

@@ -181,4 +181,95 @@ void main() {
       expect(restored.needsUrlResolve, isTrue);
     });
   });
+
+  group('搜索分类模型（第十四批：/search type 全量）', () {
+    test('SearchAlbum：artist 嵌套对象 / size→songCount / picUrl 归一化', () {
+      final SearchAlbum a = SearchAlbum.fromJson(<String, Object?>{
+        'id': 18909,
+        'name': 'Partners 拍档',
+        'size': 13,
+        'publishTime': 1507046400000,
+        'artist': <String, Object?>{'id': 6452, 'name': '周杰伦'},
+        'picUrl': 'http://p4.music.126.net/abc.jpg',
+      });
+      expect(a.id, 18909);
+      expect(a.name, 'Partners 拍档');
+      expect(a.artist, '周杰伦');
+      expect(a.songCount, 13);
+      expect(a.picUrl, isNotNull);
+      expect(a.picUrl!.startsWith('https://'), isTrue);
+    });
+
+    test('SearchAlbum：artist 缺失回退未知歌手', () {
+      final SearchAlbum a = SearchAlbum.fromJson(<String, Object?>{
+        'id': 1,
+        'name': 'X',
+      });
+      expect(a.artist, '未知歌手');
+      expect(a.picUrl, isNull);
+    });
+
+    test('SearchArtist：alias 字符串数组拼接 / img1v1Url 兜底', () {
+      final SearchArtist ar = SearchArtist.fromJson(<String, Object?>{
+        'id': 6452,
+        'name': '周杰伦',
+        'alias': <Object?>['Jay Chou', '周董'],
+        'albumSize': 42,
+        'musicSize': 582,
+        'mvSize': 9,
+      });
+      expect(ar.alias, 'Jay Chou / 周董');
+      expect(ar.albumSize, 42);
+      expect(ar.picUrl, isNull); // 无 picUrl/img1v1Url
+      final SearchArtist ar2 = SearchArtist.fromJson(<String, Object?>{
+        'id': 7,
+        'name': 'A',
+        'img1v1Url': 'http://p4.music.126.net/vv.jpg',
+      });
+      expect(ar2.picUrl, isNotNull);
+      expect(ar2.picUrl!.startsWith('https://'), isTrue);
+    });
+
+    test('SearchUser：userId 缺失回退 id 字段', () {
+      final SearchUser u1 = SearchUser.fromJson(<String, Object?>{
+        'userId': 98693,
+        'nickname': '音乐',
+        'signature': '签名',
+      });
+      expect(u1.userId, 98693);
+      expect(u1.signature, '签名');
+      final SearchUser u2 = SearchUser.fromJson(<String, Object?>{
+        'id': 42,
+        'nickname': 'N',
+      });
+      expect(u2.userId, 42);
+      expect(u2.signature, '');
+    });
+
+    test('SearchMv：duration/playCount/cover 解析', () {
+      final SearchMv m = SearchMv.fromJson(<String, Object?>{
+        'id': 4909,
+        'name': 'MV',
+        'artistName': '周杰伦',
+        'cover': 'http://p4.music.126.net/mv.jpg',
+        'duration': 54000,
+        'playCount': 436191,
+      });
+      expect(m.id, 4909);
+      expect(m.durationMs, 54000);
+      expect(m.playCount, 436191);
+      expect(m.coverUrl, isNotNull);
+      expect(m.coverUrl!.startsWith('https://'), isTrue);
+    });
+
+    test('SearchResults.isEmpty：全空为 true，任一列表非空为 false', () {
+      const SearchResults empty = SearchResults(type: 1018);
+      expect(empty.isEmpty, isTrue);
+      const SearchResults onlySongs = SearchResults(
+        type: 1,
+        songs: <Song>[Song(id: 1, name: 'a', artists: 'b', album: 'c')],
+      );
+      expect(onlySongs.isEmpty, isFalse);
+    });
+  });
 }

@@ -6,6 +6,9 @@
 ///    说唱榜/原创榜/民谣榜/日语榜/ACG 榜/摇滚榜 —— 横向滑动双列卡片，
 ///    每列展示前 10 名（前三名高亮，热搜前三带「爆」标）；
 ///  - 搜索建议（/search/suggest，250ms 防抖）+ 结果整页可作队列播放。
+///  - 第十四批需求（对齐 Zephyr-Music WIP）：分类筛选搜索 —— 综合/单曲/
+///    歌单/专辑/歌手/MV/用户/歌词 八类（/search type 全量），综合按
+///    result.order 分区块展示、区块头点击跳转对应分类。
 library;
 
 import 'dart:async';
@@ -18,6 +21,7 @@ import 'package:go_router/go_router.dart';
 import '../../../core/api/netease_models.dart';
 import '../../../core/constants/app_constants.dart';
 import '../../../core/storage/prefs_keys.dart';
+import '../../../core/widgets/cover_image.dart';
 import '../../library/domain/track.dart';
 import '../../library/presentation/add_to_playlist_sheet.dart';
 import '../../player/providers/player_providers.dart';
@@ -39,14 +43,16 @@ final NotifierProvider<SearchHistoryNotifier, List<String>>
 class SearchHistoryNotifier extends Notifier<List<String>> {
   @override
   List<String> build() {
-    final String? raw = ref
-        .watch(sharedPreferencesProvider)
-        .getString(PrefsKeys.searchHistory);
+    final String? raw =
+        ref.watch(sharedPreferencesProvider).getString(PrefsKeys.searchHistory);
     if (raw != null && raw.isNotEmpty) {
       try {
         final Object? decoded = jsonDecode(raw);
         if (decoded is List<Object?>) {
-          return decoded.whereType<String>().where((String s) => s.isNotEmpty).toList();
+          return decoded
+              .whereType<String>()
+              .where((String s) => s.isNotEmpty)
+              .toList();
         }
       } catch (_) {
         // 脏数据 → 空
@@ -64,7 +70,10 @@ class SearchHistoryNotifier extends Notifier<List<String>> {
   void add(String keyword) {
     final String kw = keyword.trim();
     if (kw.isEmpty) return;
-    final List<String> next = <String>[kw, ...state.where((String s) => s != kw)];
+    final List<String> next = <String>[
+      kw,
+      ...state.where((String s) => s != kw)
+    ];
     state = next.length > 20 ? next.sublist(0, 20) : next;
     _persist();
   }
@@ -79,6 +88,22 @@ class SearchHistoryNotifier extends Notifier<List<String>> {
     _persist();
   }
 }
+
+// ---------------------------------------------------------------- 分类筛选
+
+/// 搜索分类（第十四批需求，对齐 Zephyr-Music WIP 分支）：
+/// type 值与网易云官方一致 —— 1018 综合 / 1 单曲 / 1000 歌单 / 10 专辑 /
+/// 100 歌手 / 1004 MV / 1002 用户 / 1006 歌词
+const List<(int, String)> kSearchTypes = <(int, String)>[
+  (1018, '综合'),
+  (1, '单曲'),
+  (1000, '歌单'),
+  (10, '专辑'),
+  (100, '歌手'),
+  (1004, 'MV'),
+  (1002, '用户'),
+  (1006, '歌词'),
+];
 
 // ---------------------------------------------------------------- 页面
 
@@ -95,11 +120,27 @@ class _SearchPageState extends ConsumerState<SearchPage> {
   late final TextEditingController _controller;
   late final FocusNode _focus;
   Timer? _debounce;
-  List<Song> _results = <Song>[];
+
+  /// 分类搜索结果（当前 type 对应的列表非空，其余空）
+  SearchResults? _bundle;
   bool _searching = false;
   String? _error;
   bool _showResults = false;
   SearchSuggest? _suggest;
+
+  /// 当前搜索分类（默认综合，对齐网易云 App）
+  int _searchType = 1018;
+
+  /// 切换分类：有结果时立即以新分类重搜（对齐 Zephyr WIP
+  /// `searchType = t.value; if (keyword) runSearch(keyword)`）
+  void _switchType(int type) {
+    if (type == _searchType) return;
+    setState(() => _searchType = type);
+    final String kw = _controller.text.trim();
+    if (_showResults && kw.isNotEmpty) {
+      _doSearch(kw);
+    }
+  }
 
   @override
   void initState() {
@@ -154,11 +195,12 @@ class _SearchPageState extends ConsumerState<SearchPage> {
       _suggest = null;
     });
     try {
-      final List<Song> songs =
-          await ref.read(neteaseRepositoryProvider).search(keywords);
+      final SearchResults bundle = await ref
+          .read(neteaseRepositoryProvider)
+          .searchByType(keywords, _searchType);
       if (!mounted) return;
       setState(() {
-        _results = songs;
+        _bundle = bundle;
         _searching = false;
       });
     } catch (e) {
@@ -170,9 +212,14 @@ class _SearchPageState extends ConsumerState<SearchPage> {
     }
   }
 
-  void _playAt(int index) {
+  /// 当前分类的单曲结果（单曲/歌词/综合区块用）
+  List<Song> get _songs => _bundle?.songs ?? const <Song>[];
+
+  void _playAt(int index, {List<Song>? from}) {
+    final List<Song> pool = from ?? _songs;
+    if (index < 0 || index >= pool.length) return;
     final List<Track> tracks =
-        _results.map((Song s) => s.toTrack()).toList(growable: false);
+        pool.map((Song s) => s.toTrack()).toList(growable: false);
     ref.read(playerProvider.notifier).playSongs(
           tracks,
           startIndex: index,
@@ -195,7 +242,7 @@ class _SearchPageState extends ConsumerState<SearchPage> {
           textInputAction: TextInputAction.search,
           style: const TextStyle(fontSize: 16),
           decoration: InputDecoration(
-            hintText: '搜索歌曲、歌手、专辑',
+            hintText: '搜索歌曲、歌手、专辑、MV、用户',
             isDense: true,
             filled: true,
             fillColor: theme.colorScheme.surfaceContainerHighest
@@ -221,6 +268,11 @@ class _SearchPageState extends ConsumerState<SearchPage> {
                     },
                   ),
           ),
+        ),
+        // 第十四批需求：分类筛选条（综合/单曲/歌单/专辑/歌手/MV/用户/歌词）
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(46),
+          child: _SearchTypeBar(current: _searchType, onSelect: _switchType),
         ),
       ),
       body: !_showResults
@@ -256,52 +308,669 @@ class _SearchPageState extends ConsumerState<SearchPage> {
             : () => _doSearch(_controller.text.trim()),
       );
     }
-    if (_results.isEmpty) {
+    final SearchResults? bundle = _bundle;
+    if (bundle == null || bundle.isEmpty) {
       return const _MessagePanel(
-          icon: Icons.search_off_rounded, message: '没有找到相关歌曲');
+          icon: Icons.search_off_rounded, message: '没有找到相关内容');
     }
+    // 第十四批需求：按分类渲染
+    switch (_searchType) {
+      case 1000:
+        return _PlaylistResults(bundle.playlists);
+      case 10:
+        return _AlbumResults(bundle.albums);
+      case 100:
+        return _ArtistResults(bundle.artists);
+      case 1004:
+        return _MvResults(bundle.mvs);
+      case 1002:
+        return _UserResults(bundle.users);
+      case 1018:
+        return _CompositeResults(
+          bundle: bundle,
+          onMore: _switchType,
+          onPlayAt: (int i, List<Song> pool) => _playAt(i, from: pool),
+        );
+      default: // 1 单曲 / 1006 歌词
+        return _SongResults(
+          songs: bundle.songs,
+          onPlayAt: (int i) => _playAt(i),
+        );
+    }
+  }
+
+  /// 单曲结果列表（单曲/歌词分类共用；综合页的单曲区块复用行组件，
+  /// 行构建见顶层 _songRow）
+}
+
+/// 单曲行构建（单曲/歌词/综合共用；withSwipe 仅独立单曲分类开启 ——
+/// 左滑 = 添加至歌单；右滑 = 下一首播放，与歌单详情页同规则）
+Widget _songRow(
+  BuildContext context,
+  WidgetRef ref, {
+  required Song s,
+  required int index,
+  required List<Song> pool,
+  required VoidCallback onPlay,
+  bool withSwipe = false,
+}) {
+  final Widget tile = SongTile(
+    song: s,
+    onPlay: onPlay,
+    onMore: () => showSongActionsSheet(context, s.toTrack()),
+    onLongPress: () => showSongActionsSheet(context, s.toTrack()),
+  );
+  if (!withSwipe) return tile;
+  return Dismissible(
+    key: ValueKey<String>('search_${s.id}_$index'),
+    confirmDismiss: (DismissDirection dir) async {
+      if (dir == DismissDirection.startToEnd) {
+        final String? err =
+            await ref.read(playerProvider.notifier).insertNext(s.toTrack());
+        if (!context.mounted) return false;
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(err ?? '已添加至下一首播放：${s.name}'),
+        ));
+      } else {
+        await showAddToPlaylistSheet(context, ref, <int>[s.id]);
+      }
+      return false; // 动作后回弹，不移除行
+    },
+    background: _SearchSwipeBg(
+      color: AppConstants.brandColor,
+      icon: Icons.low_priority_rounded,
+      label: '下一首播放',
+      alignRight: false,
+    ),
+    secondaryBackground: _SearchSwipeBg(
+      color: const Color(0xFF3D7BFF),
+      icon: Icons.playlist_add_rounded,
+      label: '添加到歌单',
+      alignRight: true,
+    ),
+    child: tile,
+  );
+}
+
+// ---------------------------------------------------------------- 分类渲染
+
+/// 播放量格式化（1.2万 / 340）
+String _formatCount(int n) {
+  if (n >= 100000000) return '${(n / 100000000).toStringAsFixed(1)}亿';
+  if (n >= 10000) return '${(n / 10000).toStringAsFixed(1)}万';
+  return '$n';
+}
+
+/// 分类筛选条（第十四批需求）：横向滑动 chips，选中态品牌色填充
+class _SearchTypeBar extends StatelessWidget {
+  const _SearchTypeBar({required this.current, required this.onSelect});
+
+  final int current;
+  final ValueChanged<int> onSelect;
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    return SizedBox(
+      height: 46,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+        itemCount: kSearchTypes.length,
+        separatorBuilder: (_, __) => const SizedBox(width: 8),
+        itemBuilder: (BuildContext context, int index) {
+          final (int type, String label) = kSearchTypes[index];
+          final bool selected = type == current;
+          return Material(
+            color: selected
+                ? AppConstants.brandColor
+                : theme.colorScheme.surfaceContainerHighest
+                    .withValues(alpha: 0.55),
+            borderRadius: BorderRadius.circular(16),
+            child: InkWell(
+              borderRadius: BorderRadius.circular(16),
+              onTap: () => onSelect(type),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 14),
+                child: Center(
+                  child: Text(
+                    label,
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: selected ? FontWeight.w700 : FontWeight.w400,
+                      color: selected
+                          ? Colors.white
+                          : theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+/// 单曲/歌词分类结果（与旧版行为一致：滑动快捷操作 + 整页可作队列）
+class _SongResults extends ConsumerWidget {
+  const _SongResults({required this.songs, required this.onPlayAt});
+
+  final List<Song> songs;
+  final ValueChanged<int> onPlayAt;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
     return ListView.builder(
-      itemCount: _results.length,
+      itemCount: songs.length,
       itemBuilder: (BuildContext context, int index) {
-        final Song s = _results[index];
-        // 需求调整：滑动方向对调 —— 左滑 = 添加至歌单；右滑 = 下一首播放
-        // （与歌单详情页同规则）
-        return Dismissible(
-          key: ValueKey<String>('search_${s.id}'),
-          confirmDismiss: (DismissDirection dir) async {
-            if (dir == DismissDirection.startToEnd) {
-              final String? err = await ref
-                  .read(playerProvider.notifier)
-                  .insertNext(s.toTrack());
-              if (!context.mounted) return false;
-              ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                content: Text(err ?? '已添加至下一首播放：${s.name}'),
-              ));
-            } else {
-              await showAddToPlaylistSheet(context, ref, <int>[s.id]);
-            }
-            return false; // 动作后回弹，不移除行
-          },
-          background: _SearchSwipeBg(
-            color: AppConstants.brandColor,
-            icon: Icons.low_priority_rounded,
-            label: '下一首播放',
-            alignRight: false,
+        final Song s = songs[index];
+        return _songRow(
+          context,
+          ref,
+          s: s,
+          index: index,
+          pool: songs,
+          onPlay: () => onPlayAt(index),
+          withSwipe: true,
+        );
+      },
+    );
+  }
+}
+
+/// 歌单分类结果（封面行 → /playlist/:id）
+class _PlaylistResults extends StatelessWidget {
+  const _PlaylistResults(this.playlists);
+
+  final List<PlaylistMeta> playlists;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView.builder(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      itemCount: playlists.length,
+      itemBuilder: (BuildContext context, int index) {
+        final PlaylistMeta p = playlists[index];
+        return ListTile(
+          leading: ClipRRect(
+            borderRadius: BorderRadius.circular(8),
+            child: CoverImage(src: p.coverUrl, size: 52, radius: 8),
           ),
-          secondaryBackground: _SearchSwipeBg(
-            color: const Color(0xFF3D7BFF),
-            icon: Icons.playlist_add_rounded,
-            label: '添加到歌单',
-            alignRight: true,
+          title: Text(p.name,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 14.5)),
+          subtitle: Padding(
+            padding: const EdgeInsets.only(top: 2),
+            child: Text(
+              '${p.creator ?? '未知创建者'} · ${_formatCount(p.playCount ?? 0)}次播放'
+              '${p.trackCount != null ? ' · ${p.trackCount}首' : ''}',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                  fontSize: 12,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant),
+            ),
           ),
-          child: SongTile(
-            song: s,
-            onPlay: () => _playAt(index),
-            onMore: () => showSongActionsSheet(context, s.toTrack()),
-            onLongPress: () => showSongActionsSheet(context, s.toTrack()),
+          onTap: () => context.push('/playlist/${p.id}'),
+        );
+      },
+    );
+  }
+}
+
+/// 专辑分类结果（方封面行 → /album/:id）
+class _AlbumResults extends StatelessWidget {
+  const _AlbumResults(this.albums);
+
+  final List<SearchAlbum> albums;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView.builder(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      itemCount: albums.length,
+      itemBuilder: (BuildContext context, int index) {
+        final SearchAlbum a = albums[index];
+        final String? year = a.publishTime == null || a.publishTime! <= 0
+            ? null
+            : DateTime.fromMillisecondsSinceEpoch(a.publishTime!)
+                .year
+                .toString();
+        return ListTile(
+          leading: ClipRRect(
+            borderRadius: BorderRadius.circular(8),
+            child: CoverImage(src: a.picUrl, size: 52, radius: 8),
+          ),
+          title: Text(a.name,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 14.5)),
+          subtitle: Padding(
+            padding: const EdgeInsets.only(top: 2),
+            child: Text(
+              <String>[
+                a.artist,
+                if (a.songCount != null) '${a.songCount}首',
+                if (year != null) year,
+              ].join(' · '),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                  fontSize: 12,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant),
+            ),
+          ),
+          onTap: () => context
+              .push('/album/${a.id}?name=${Uri.encodeComponent(a.name)}'),
+        );
+      },
+    );
+  }
+}
+
+/// 歌手分类结果（3 列圆形头像网格 → /artist/:id）
+class _ArtistResults extends StatelessWidget {
+  const _ArtistResults(this.artists);
+
+  final List<SearchArtist> artists;
+
+  @override
+  Widget build(BuildContext context) {
+    return GridView.builder(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 3,
+        childAspectRatio: 0.86,
+        mainAxisSpacing: 14,
+        crossAxisSpacing: 12,
+      ),
+      itemCount: artists.length,
+      itemBuilder: (BuildContext context, int index) {
+        final SearchArtist a = artists[index];
+        return InkWell(
+          borderRadius: BorderRadius.circular(14),
+          onTap: () => context
+              .push('/artist/${a.id}?name=${Uri.encodeComponent(a.name)}'),
+          child: Column(
+            children: <Widget>[
+              CoverImage(src: a.picUrl, size: 92, radius: 46),
+              const SizedBox(height: 7),
+              Text(
+                a.name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                    fontSize: 13.5, fontWeight: FontWeight.w600),
+              ),
+              if (a.alias.isNotEmpty)
+                Text(
+                  a.alias,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                      fontSize: 11,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant),
+                ),
+            ],
           ),
         );
       },
+    );
+  }
+}
+
+/// MV 分类结果（16:9 封面行 → /mv/:id）
+class _MvResults extends StatelessWidget {
+  const _MvResults(this.mvs);
+
+  final List<SearchMv> mvs;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView.builder(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      itemCount: mvs.length,
+      itemBuilder: (BuildContext context, int index) {
+        final SearchMv m = mvs[index];
+        return InkWell(
+          onTap: () =>
+              context.push('/mv/${m.id}?title=${Uri.encodeComponent(m.name)}'),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 7),
+            child: Row(
+              children: <Widget>[
+                SizedBox(
+                  width: 124,
+                  height: 70,
+                  child: Stack(
+                    children: <Widget>[
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(9),
+                        child:
+                            CoverImage(src: m.coverUrl, size: 124, radius: 9),
+                      ),
+                      const Positioned.fill(
+                        child: Center(
+                          child: Icon(Icons.play_circle_fill_rounded,
+                              size: 30, color: Colors.white70),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: <Widget>[
+                      Text(m.name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                              fontSize: 14.5, fontWeight: FontWeight.w600)),
+                      const SizedBox(height: 3),
+                      Text(
+                        <String>[
+                          if (m.artistName.isNotEmpty) m.artistName,
+                          if (m.playCount != null)
+                            '${_formatCount(m.playCount!)}次播放',
+                        ].join(' · '),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                            fontSize: 12,
+                            color:
+                                Theme.of(context).colorScheme.onSurfaceVariant),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+/// 用户分类结果（头像行；暂无用户主页路由，仅展示）
+class _UserResults extends StatelessWidget {
+  const _UserResults(this.users);
+
+  final List<SearchUser> users;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView.builder(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      itemCount: users.length,
+      itemBuilder: (BuildContext context, int index) {
+        final SearchUser u = users[index];
+        return ListTile(
+          leading: CoverImage(src: u.avatarUrl, size: 44, radius: 22),
+          title: Text(u.nickname,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 14.5)),
+          subtitle: u.signature.isEmpty
+              ? null
+              : Padding(
+                  padding: const EdgeInsets.only(top: 2),
+                  child: Text(u.signature,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                          fontSize: 12,
+                          color:
+                              Theme.of(context).colorScheme.onSurfaceVariant)),
+                ),
+        );
+      },
+    );
+  }
+}
+
+/// 综合搜索结果（第十四批需求）：按 result.order 分区块展示，
+/// 每区块限流展示，区块头「更多」跳转对应分类
+class _CompositeResults extends ConsumerWidget {
+  const _CompositeResults({
+    required this.bundle,
+    required this.onMore,
+    required this.onPlayAt,
+  });
+
+  final SearchResults bundle;
+  final ValueChanged<int> onMore;
+  final void Function(int index, List<Song> pool) onPlayAt;
+
+  /// 各区块限流（与网易云 App 观感一致：综合页每类少量 + 更多入口）
+  static const int _kSongs = 5;
+  static const int _kOthers = 3;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final ThemeData theme = Theme.of(context);
+    final List<Widget> sections = <Widget>[];
+
+    for (final String key in bundle.order) {
+      switch (key) {
+        case 'song':
+          if (bundle.songs.isEmpty) break;
+          final List<Song> pool =
+              bundle.songs.take(_kSongs).toList(growable: false);
+          sections.add(_SectionHeader(title: '单曲', onMore: () => onMore(1)));
+          for (int i = 0; i < pool.length; i++) {
+            sections.add(_songRow(
+              context,
+              ref,
+              s: pool[i],
+              index: i,
+              pool: pool,
+              onPlay: () => onPlayAt(i, pool),
+            ));
+          }
+        case 'playList':
+          if (bundle.playlists.isEmpty) break;
+          sections.add(_SectionHeader(title: '歌单', onMore: () => onMore(1000)));
+          for (final PlaylistMeta p in bundle.playlists.take(_kOthers)) {
+            sections.add(ListTile(
+              dense: true,
+              leading: ClipRRect(
+                borderRadius: BorderRadius.circular(7),
+                child: CoverImage(src: p.coverUrl, size: 44, radius: 7),
+              ),
+              title: Text(p.name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 13.5)),
+              subtitle: Text(
+                '${p.creator ?? ''} · ${_formatCount(p.playCount ?? 0)}次播放',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                    fontSize: 11.5, color: theme.colorScheme.onSurfaceVariant),
+              ),
+              onTap: () => context.push('/playlist/${p.id}'),
+            ));
+          }
+        case 'artist':
+          if (bundle.artists.isEmpty) break;
+          sections.add(_SectionHeader(title: '歌手', onMore: () => onMore(100)));
+          final List<SearchArtist> list =
+              bundle.artists.take(6).toList(growable: false);
+          sections.add(SizedBox(
+            height: 118,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              itemCount: list.length,
+              separatorBuilder: (_, __) => const SizedBox(width: 18),
+              itemBuilder: (BuildContext context, int index) {
+                final SearchArtist a = list[index];
+                return InkWell(
+                  borderRadius: BorderRadius.circular(12),
+                  onTap: () => context.push(
+                      '/artist/${a.id}?name=${Uri.encodeComponent(a.name)}'),
+                  child: SizedBox(
+                    width: 64,
+                    child: Column(
+                      children: <Widget>[
+                        CoverImage(src: a.picUrl, size: 64, radius: 32),
+                        const SizedBox(height: 5),
+                        Text(a.name,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(fontSize: 12)),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            ),
+          ));
+        case 'album':
+          if (bundle.albums.isEmpty) break;
+          sections.add(_SectionHeader(title: '专辑', onMore: () => onMore(10)));
+          for (final SearchAlbum a in bundle.albums.take(_kOthers)) {
+            sections.add(ListTile(
+              dense: true,
+              leading: ClipRRect(
+                borderRadius: BorderRadius.circular(7),
+                child: CoverImage(src: a.picUrl, size: 44, radius: 7),
+              ),
+              title: Text(a.name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 13.5)),
+              subtitle: Text(a.artist,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                      fontSize: 11.5,
+                      color: theme.colorScheme.onSurfaceVariant)),
+              onTap: () => context
+                  .push('/album/${a.id}?name=${Uri.encodeComponent(a.name)}'),
+            ));
+          }
+        case 'mv':
+          if (bundle.mvs.isEmpty) break;
+          sections.add(_SectionHeader(title: 'MV', onMore: () => onMore(1004)));
+          for (final SearchMv m in bundle.mvs.take(_kOthers)) {
+            sections.add(ListTile(
+              dense: true,
+              leading: SizedBox(
+                width: 76,
+                height: 44,
+                child: Stack(
+                  children: <Widget>[
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(6),
+                      child: CoverImage(src: m.coverUrl, size: 76, radius: 6),
+                    ),
+                    const Positioned.fill(
+                      child: Center(
+                        child: Icon(Icons.play_circle_fill_rounded,
+                            size: 22, color: Colors.white70),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              title: Text(m.name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 13.5)),
+              subtitle: Text(
+                <String>[
+                  if (m.artistName.isNotEmpty) m.artistName,
+                  if (m.playCount != null) '${_formatCount(m.playCount!)}次播放',
+                ].join(' · '),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                    fontSize: 11.5, color: theme.colorScheme.onSurfaceVariant),
+              ),
+              onTap: () => context
+                  .push('/mv/${m.id}?title=${Uri.encodeComponent(m.name)}'),
+            ));
+          }
+        case 'user':
+          if (bundle.users.isEmpty) break;
+          sections.add(_SectionHeader(title: '用户', onMore: () => onMore(1002)));
+          for (final SearchUser u in bundle.users.take(_kOthers)) {
+            sections.add(ListTile(
+              dense: true,
+              leading: CoverImage(src: u.avatarUrl, size: 38, radius: 19),
+              title: Text(u.nickname,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 13.5)),
+              subtitle: u.signature.isEmpty
+                  ? null
+                  : Text(u.signature,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                          fontSize: 11.5,
+                          color: theme.colorScheme.onSurfaceVariant)),
+            ));
+          }
+        default:
+          break; // sim_query / voice / new_mlog 等未知区块不展示
+      }
+    }
+
+    if (sections.isEmpty) {
+      return const _MessagePanel(
+          icon: Icons.search_off_rounded, message: '没有找到相关内容');
+    }
+    return ListView(
+      padding: const EdgeInsets.only(top: 2, bottom: 24),
+      children: sections,
+    );
+  }
+}
+
+/// 综合页区块头：标题 + 尾部「更多」入口
+class _SectionHeader extends StatelessWidget {
+  const _SectionHeader({required this.title, required this.onMore});
+
+  final String title;
+  final VoidCallback onMore;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(18, 14, 8, 4),
+      child: Row(
+        children: <Widget>[
+          Text(title,
+              style:
+                  const TextStyle(fontSize: 15.5, fontWeight: FontWeight.w700)),
+          const Spacer(),
+          TextButton(
+            style: TextButton.styleFrom(
+              padding: const EdgeInsets.symmetric(horizontal: 10),
+              minimumSize: const Size(0, 32),
+            ),
+            onPressed: onMore,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: <Widget>[
+                Text('更多',
+                    style: TextStyle(
+                        fontSize: 12,
+                        color: Theme.of(context).colorScheme.onSurfaceVariant)),
+                const Icon(Icons.chevron_right_rounded, size: 16),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -367,8 +1036,7 @@ class _SearchHome extends ConsumerWidget {
               children: <Widget>[
                 for (final String kw in history)
                   ActionChip(
-                    label: Text(kw,
-                        style: const TextStyle(fontSize: 13)),
+                    label: Text(kw, style: const TextStyle(fontSize: 13)),
                     backgroundColor: Theme.of(context)
                         .colorScheme
                         .surfaceContainerHighest
@@ -384,7 +1052,8 @@ class _SearchHome extends ConsumerWidget {
         hot.maybeWhen(
           data: (List<HotWord> words) {
             if (words.length < 8) return const SizedBox.shrink();
-            final List<HotWord> guess = words.sublist(6, words.length < 14 ? words.length : 12);
+            final List<HotWord> guess =
+                words.sublist(6, words.length < 14 ? words.length : 12);
             return Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: <Widget>[
@@ -441,8 +1110,8 @@ class _HeaderRow extends StatelessWidget {
       child: Row(
         children: <Widget>[
           Text(title,
-              style: const TextStyle(
-                  fontSize: 17, fontWeight: FontWeight.w700)),
+              style:
+                  const TextStyle(fontSize: 17, fontWeight: FontWeight.w700)),
           const Spacer(),
           if (trailing != null) trailing!,
         ],
@@ -506,8 +1175,7 @@ class _HotSearchColumn extends ConsumerWidget {
       },
       child: state.when(
         loading: () => const _ColumnLoading(),
-        error: (Object e, StackTrace st) =>
-            const _ColumnMessage('热搜加载失败'),
+        error: (Object e, StackTrace st) => const _ColumnMessage('热搜加载失败'),
         data: (List<HotWord> words) {
           if (words.isEmpty) return const _ColumnMessage('暂无热搜');
           return Column(
@@ -560,10 +1228,10 @@ class _ChartColumn extends ConsumerWidget {
                   text: songs[i].name,
                   onTap: () {
                     ref.read(playerProvider.notifier).playSongs(
-                          <Track>[for (final Song s in songs) s.toTrack()],
-                          startIndex: i,
-                          queueTitle: name,
-                        );
+                      <Track>[for (final Song s in songs) s.toTrack()],
+                      startIndex: i,
+                      queueTitle: name,
+                    );
                   },
                 ),
             ],
@@ -605,8 +1273,7 @@ class _ChartCard extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
           InkWell(
-            borderRadius:
-                const BorderRadius.vertical(top: Radius.circular(16)),
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
             onTap: onTapHeader,
             child: Padding(
               padding: const EdgeInsets.fromLTRB(14, 12, 14, 8),
@@ -678,8 +1345,7 @@ class _ChartRow extends StatelessWidget {
                 '$rank',
                 style: TextStyle(
                   fontSize: 13.5,
-                  fontWeight:
-                      rank <= 3 ? FontWeight.w800 : FontWeight.w500,
+                  fontWeight: rank <= 3 ? FontWeight.w800 : FontWeight.w500,
                   color: _rankColor,
                 ),
               ),
@@ -703,8 +1369,7 @@ class _ChartRow extends StatelessWidget {
             if (badge != null) ...<Widget>[
               const SizedBox(width: 6),
               Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
                 decoration: BoxDecoration(
                   color: AppConstants.brandColor,
                   borderRadius: BorderRadius.circular(6),

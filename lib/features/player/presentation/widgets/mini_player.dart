@@ -5,10 +5,11 @@
 ///    左圆形封面 + 单行「歌名 - 歌手」+ 进度圆环播放键 + 播放列表键；
 ///  - compact 紧凑极简：**嵌入底部导航栏「发现 ⇄ 我的」中间**（需求不变），
 ///    只显示歌曲封面，周围显示歌曲进度（圆环），点击主体进全屏；
+///    第十四批需求：子页面全局弹出形态同步紧凑化 —— 渲染为玻璃圆球
+///    （_FloatCompact），不再弹出经典长条；
 ///  - 第十二批需求：底板**无色高透明玻璃**，颜色/透明度设置项已移除，
 ///    与底部导航栏共用 LiquidGlassBarPanel 同一配方；
-///    出现时向上移动放大、消失时向下移动缩小（MiniBarSwitcher，
-///    时长 1.36s = 原 360ms + 需求追加 1s）；
+///    出现时向上移动放大、消失时向下移动缩小（MiniBarSwitcher，700ms）；
 ///  - 进度：需求「无论任何样式都需显示进度」—— 经典条=播放键外圈圆环，
 ///    紧凑极简=封面周围圆环；
 ///  - `select` 只订阅 playing / currentTrack / hasQueue，进度环独立订阅；
@@ -27,6 +28,7 @@ import '../../../../core/widgets/liquid_glass_container.dart'
     show LiquidGlassBarPanel;
 import '../../../library/domain/track.dart';
 import '../../domain/np_settings.dart';
+import '../../providers/np_settings_providers.dart';
 import '../../providers/player_providers.dart';
 import 'queue_sheet.dart';
 
@@ -36,7 +38,7 @@ bool miniInNavBar(MiniPlayerStyle style) => style == MiniPlayerStyle.compact;
 class MiniPlayer extends ConsumerWidget {
   const MiniPlayer({super.key, this.embedded = false});
 
-  /// true = 渲染为导航栏中央形态（紧凑布局）；false = 悬浮完整条
+  /// true = 渲染为导航栏中央形态（紧凑布局）；false = 悬浮形态
   final bool embedded;
 
   @override
@@ -48,8 +50,13 @@ class MiniPlayer extends ConsumerWidget {
       // 导航栏中央槽位：紧凑极简布局（需求）
       return const _NavCompact();
     }
-    // 悬浮条：classic（紧凑极简不会走到这里）
-    return const _FloatClassic();
+    // 悬浮形态随设置联动（第十四批需求：紧凑极简弹出时也是紧凑样式，
+    // 子页面全局宿主与平板栏共用本分支）
+    final MiniPlayerStyle style = ref
+        .watch(npSettingsProvider.select((NpPlayerSettings s) => s.miniStyle));
+    return style == MiniPlayerStyle.compact
+        ? const _FloatCompact()
+        : const _FloatClassic();
   }
 }
 
@@ -287,6 +294,57 @@ class _NavCompact extends ConsumerWidget {
               child: CoverImage(src: cover, size: 38, radius: 19),
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------- 悬浮：紧凑圆球
+
+/// 紧凑极简的悬浮形态（第十四批需求：Mini 条设置为紧凑极简时，子页面
+/// 弹出的样式也应是紧凑极简而非经典长条）—— 玻璃圆球：
+///  - 与导航栏内嵌 _NavCompact 同构：圆环进度 + 圆形封面，点击进全屏；
+///  - 底板 LiquidGlassBarPanel（borderRadius = 半径 → 正圆，同一配方）；
+///  - 居中悬浮于子页面底部（全局宿主 Positioned left/right 12 内自居中）。
+class _FloatCompact extends ConsumerWidget {
+  const _FloatCompact();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final Track? track =
+        ref.watch(playerProvider.select((PlayerState s) => s.currentTrack));
+    final String? cover = track?.cover;
+
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 6),
+        child: GestureDetector(
+          // opaque：Hero flight 期间封面被 Overlay 取走仍可命中
+          behavior: HitTestBehavior.opaque,
+          onTap: () => openFullPlayer(context),
+          child: LiquidGlassBarPanel(
+            borderRadius: 30,
+            child: SizedBox(
+              width: 60,
+              height: 60,
+              child: Stack(
+                alignment: Alignment.center,
+                children: <Widget>[
+                  const Positioned.fill(
+                    child: Padding(
+                      padding: EdgeInsets.all(4),
+                      child: _MiniRingProgress(stroke: 2.2),
+                    ),
+                  ),
+                  Hero(
+                    tag: heroTagOf(cover),
+                    child: CoverImage(src: cover, size: 46, radius: 23),
+                  ),
+                ],
+              ),
+            ),
+          ),
         ),
       ),
     );

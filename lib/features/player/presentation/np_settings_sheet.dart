@@ -324,17 +324,19 @@ class _LyricsPane extends ConsumerWidget {
         const _GroupTitle('效果'),
         _SliderRow(
           label: '非活跃行淡出',
+          hint: '所有非活跃行统一压暗（不随行距变化）',
           value: cfg.lyricFade,
           display: '${(cfg.lyricFade * 100).round()}%',
           onChanged: (double v) =>
               ref.read(npSettingsProvider.notifier).setLyricFade(v),
         ),
         _SliderRow(
-          // 第十三批需求：模糊改倍率语义（对齐 Zephyr blurByOffset，
-          // 1.0 = 标准按行距轻微模糊，0 = 关闭，最大 3 倍）
+          // 第十四批需求：模糊改直接 px 语义（0 = 关闭，对齐 Zephyr 默认；
+          // 所有非活跃行统一强度，不再按行距递增）
           label: '非活跃行模糊',
+          hint: '0 = 关闭（Zephyr 默认）；所有非活跃行统一强度',
           value: cfg.lyricBlur / 3,
-          display: 'x${cfg.lyricBlur.toStringAsFixed(1)}',
+          display: '${cfg.lyricBlur.toStringAsFixed(1)}px',
           onChanged: (double v) =>
               ref.read(npSettingsProvider.notifier).setLyricBlur(v * 3),
         ),
