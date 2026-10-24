@@ -42,4 +42,7 @@ class PrefsKeys {
 
   /// 发现页「榜单精选」自定义勾选（json：ToplistConf.id 有序数组）
   static const String discoverToplists = 'discover.toplists';
+
+  /// 我的页歌单排列方式（grid=宫格 / list=列表；需求：默认宫格）
+  static const String libraryPlaylistLayout = 'library.playlistLayout';
 }

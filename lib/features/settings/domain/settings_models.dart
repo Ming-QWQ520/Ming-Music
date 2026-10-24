@@ -66,6 +66,17 @@ class BackgroundConfig {
 /// 液态玻璃偏好：auto 跟随设备能力（Android 12+ 启用）
 enum GlassPref { auto, on, off }
 
+/// 我的页歌单排列方式（需求：宫格/列表可切换，默认宫格；
+/// 宫格下收藏的歌单不显示收起/弹出栏，直接续排在最后一个创建的歌单下方）
+enum LibraryPlaylistLayout { grid, list }
+
+extension LibraryPlaylistLayoutX on LibraryPlaylistLayout {
+  String get label => switch (this) {
+        LibraryPlaylistLayout.grid => '宫格',
+        LibraryPlaylistLayout.list => '列表',
+      };
+}
+
 extension GlassPrefX on GlassPref {
   String get label => switch (this) {
         GlassPref.auto => '自动',
@@ -74,9 +85,15 @@ extension GlassPrefX on GlassPref {
       };
 }
 
-/// 液态玻璃的自动降级判定阈值：Android 12 (SDK 31) 起
-/// BackdropFilter 的 blur 有 RenderEffect 硬件加速，代价显著更低。
-const int kGlassAutoMinSdk = 31;
+/// 液态玻璃的自动降级判定阈值。
+///
+/// 需求修复（荣耀 LRA-AL00 / Android 10 实测）：旧值 31 (Android 12) 使
+/// Android 10 设备全部降级为 0.88+ 高不透明实底 —— 底部导航栏与经典
+/// Mini 条"不透明、周围黑边"。本应用已强制 Skia+GLES 渲染路径，且
+/// BackdropFilter 仅用于导航栏/Mini 条/底部 Sheet（性能红线内），
+/// RenderEffect 缺失时 Skia 仍可软件路径执行（模糊半径 ≤ 22 无可感知
+/// 掉帧）。阈值下调到 27（Android 8.1），用户仍可在设置中手动关闭。
+const int kGlassAutoMinSdk = 27;
 
 /// 网易云播放音质等级（对应 /song/url/v1 的 level 参数）
 enum AudioQuality { standard, higher, exhigh, lossless }

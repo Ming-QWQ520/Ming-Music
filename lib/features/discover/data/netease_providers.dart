@@ -60,6 +60,20 @@ final FutureProvider<List<PlaylistMeta>> dailyPlaylistProvider =
   (Ref ref) => ref.read(neteaseRepositoryProvider).recommendPlaylists(),
 );
 
+/// 私人雷达歌单封面（需求：发现页顶部个性化推荐类入口显示歌单封面，
+/// 对齐 Zephyr-Music 推荐页 —— 轻量 /playlist/detail 只取 meta）。
+/// 3136952023 = 网易云「私人雷达」固定歌单 id。
+final FutureProvider<PlaylistMeta?> personalRadarMetaProvider =
+    FutureProvider<PlaylistMeta?>((Ref ref) async {
+  try {
+    return await ref
+        .read(neteaseRepositoryProvider)
+        .playlistMetaLite(3136952023);
+  } catch (_) {
+    return null; // 未登录/接口异常：入口回退渐变图标
+  }
+});
+
 // ---------------------------------------------------------------- 榜单精选自定义
 
 /// 发现页「榜单精选」自定义勾选（需求：跟 Zephyr-Music 一样的自定义 ——
@@ -72,8 +86,9 @@ final NotifierProvider<DiscoverToplistNotifier, List<int>>
 class DiscoverToplistNotifier extends Notifier<List<int>> {
   @override
   List<int> build() {
-    final String? raw =
-        ref.watch(sharedPreferencesProvider).getString(PrefsKeys.discoverToplists);
+    final String? raw = ref
+        .watch(sharedPreferencesProvider)
+        .getString(PrefsKeys.discoverToplists);
     if (raw != null && raw.isNotEmpty) {
       try {
         final Object? decoded = jsonDecode(raw);

@@ -6,6 +6,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart' show RouteMatchBase;
 
 import 'core/router.dart';
 import 'core/theme/app_theme.dart';
@@ -53,10 +54,15 @@ class MingMusicApp extends ConsumerWidget {
 
 /// 全局 Mini 播放条宿主：
 ///  - 监听 go_router `routerDelegate`（而非 routeInformationProvider）：
-///    push 与 **pop 都必然回调**，当前路径取自 `currentConfiguration.uri`，
-///    彻底修复「子页面打开播放页再退出后 Mini 条消失」——旧实现依赖
-///    routeInformationProvider 的 location 通知，pop 回退在部分机型上
-///    不再触发监听，路径残留 `/player` 导致悬浮条再也不出现；
+///    push 与 **pop 都必然回调**，栈结构取自 `currentConfiguration.matches`；
+///  - ⚠️ 显隐判定必须用 matches 而非 uri（修复「进入非首页页面 Mini 条
+///    不显示」）：go_router 14.x 的 `RouteMatchList.uri` 只反映
+///    **非 ImperativeRouteMatch** 的匹配 —— `context.push()` 产生的正是
+///    ImperativeRouteMatch（见 go_router match.dart 源码注释 "This uri
+///    only reflects RouteMatchs that are not ImperativeRouteMatch"），
+///    push 后 `currentConfiguration.uri.path` 仍停在 `/`，旧实现据此
+///    判定"仍在首页"，悬浮条在所有子页面永不出现；
+///    `matches` 则包含被 push 的匹配，栈深度与路径均正确；
 ///  - `/`（主骨架，Mini 已在导航栏内/悬浮位）与 `/player`（全屏播放页
 ///    本身）不重复显示；其余页面统一显示；
 ///  - 出现/消失带 MiniBarSwitcher 动画（上滑放大进场 / 下滑缩小退场）。
@@ -70,19 +76,31 @@ class _GlobalMiniBarHost extends ConsumerStatefulWidget {
 }
 
 class _GlobalMiniBarHostState extends ConsumerState<_GlobalMiniBarHost> {
-  String _path = '/';
+  int _stackDepth = 1;
+  bool _playerOpen = false;
 
   void _onRouteChanged() {
-    final String next = appRouter.routerDelegate.currentConfiguration.uri.path;
-    if (next == _path) return;
-    setState(() => _path = next);
+    final List<RouteMatchBase> matches =
+        appRouter.routerDelegate.currentConfiguration.matches;
+    final int depth = matches.length;
+    final bool playerOpen =
+        matches.any((RouteMatchBase m) => m.matchedLocation == '/player');
+    if (depth == _stackDepth && playerOpen == _playerOpen) return;
+    setState(() {
+      _stackDepth = depth;
+      _playerOpen = playerOpen;
+    });
   }
 
   @override
   void initState() {
     super.initState();
     appRouter.routerDelegate.addListener(_onRouteChanged);
-    _path = appRouter.routerDelegate.currentConfiguration.uri.path;
+    final List<RouteMatchBase> initial =
+        appRouter.routerDelegate.currentConfiguration.matches;
+    _stackDepth = initial.length;
+    _playerOpen =
+        initial.any((RouteMatchBase m) => m.matchedLocation == '/player');
   }
 
   @override
@@ -91,11 +109,11 @@ class _GlobalMiniBarHostState extends ConsumerState<_GlobalMiniBarHost> {
     super.dispose();
   }
 
-  bool get _showFloat {
-    if (_path.startsWith('/player')) return false;
-    if (_path == '/' || _path.isEmpty) return false;
-    return true;
-  }
+  /// 显隐判定（需求：进入非首页页面正常显示 Mini 条）：
+  ///  - 栈深度 == 1：在主骨架（Mini 条已由导航栏内/悬浮位负责）→ 不重复显示；
+  ///  - 栈内有 '/player'：全屏播放页本身就是播放器 → 不显示；
+  ///  - 其余（任意子页面，无论 push 多少层）→ 显示。
+  bool get _showFloat => _stackDepth > 1 && !_playerOpen;
 
   @override
   Widget build(BuildContext context) {

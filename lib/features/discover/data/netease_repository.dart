@@ -159,8 +159,8 @@ class NeteaseRepository {
 
   /// 新歌速递（/top/song → data[]；type: 0全部 7华语 96欧美 8日本 16韩国）
   Future<List<Song>> topSongs({int type = 0, int limit = 30}) async {
-    final Map<String, Object?> res = await _api.get(
-        '/top/song', <String, String>{'type': '$type', 'limit': '$limit'});
+    final Map<String, Object?> res = await _api
+        .get('/top/song', <String, String>{'type': '$type', 'limit': '$limit'});
     final Object? data = res['data'];
     if (data is! List<Object?>) return const <Song>[];
     return data
@@ -207,6 +207,19 @@ class NeteaseRepository {
     final Map<String, Object?> res = await _api.get('/playlist/track/all',
         <String, String>{'id': '$id', 'limit': '$limit', 'offset': '0'});
     return _songsFrom(res['songs']);
+  }
+
+  /// 歌单轻量元数据（需求：发现页顶部个性化入口显示歌单封面 ——
+  /// 只取 /playlist/detail 的 meta（封面/名称/曲目数），**不触发**
+  /// trackIds 全量补全，避免为一张封面拉整个歌单）。
+  Future<PlaylistMeta> playlistMetaLite(int id) async {
+    final Map<String, Object?> res =
+        await _api.get('/playlist/detail', <String, String>{'id': '$id'});
+    final Object? playlist = res['playlist'];
+    if (playlist is! Map<String, Object?>) {
+      throw ApiException('歌单不存在或已下架');
+    }
+    return PlaylistMeta.fromJson(playlist);
   }
 
   /// 歌单详情（榜单同构，亦复用此接口）。

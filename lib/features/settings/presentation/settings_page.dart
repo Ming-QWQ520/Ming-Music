@@ -1,11 +1,12 @@
 /// 设置页（kgka_Music_hl 风格分组重构）：
 ///
-/// 分组（需求：重构设置项，进行合理分类）：
-///  - 账号：个人主页 / 登录状态 / 退出登录；
+/// 分组（需求：重构设置项，进行合理分类；第十一批 UI 排列优化 ——
+/// 缓存相关开关聚拢进缓存组，播放组只保留播放行为设置）：
+///  - 账号：个人主页 / 退出登录；
 ///  - 外观：主题模式 / 液态玻璃 / 应用图片背景 / 播放页背景；
-///  - 播放：播放音质 / 播放页自定义 / MV 标识开关（默认开启）；
+///  - 播放：播放音质 / 播放页自定义 / MV 标识开关 / 播放页常亮；
 ///  - Mini 播放条：样式选择 + 颜色/透明度自定义（需求：无色 65% 透明默认）；
-///  - 缓存：歌曲音频缓存占用与清理（封面不再磁盘缓存）；
+///  - 缓存：歌曲音频缓存占用与清理 + 边听边缓存 + 预加载下一首；
 ///  - 数据源 / 关于（仓库链接真实可点，需求：补全无实际作用功能）。
 library;
 
@@ -40,8 +41,6 @@ class SettingsPage extends ConsumerWidget {
     final AudioQuality quality = ref.watch(audioQualityProvider);
     final AuthState auth = ref.watch(authProvider);
     final NpPlayerSettings np = ref.watch(npSettingsProvider);
-    final bool listenCache = ref.watch(listenCacheProvider);
-    final bool preloadNext = ref.watch(preloadNextProvider);
     // 需求：应用图片背景（除播放页外）
     final AppBackgroundConfig appBg = ref.watch(appBackgroundProvider);
 
@@ -159,9 +158,7 @@ class SettingsPage extends ConsumerWidget {
                   }
                   if (cfg.imagePath == null) {
                     // 首次开启：直接选图（pickImage 成功后自动启用）
-                    await ref
-                        .read(appBackgroundProvider.notifier)
-                        .pickImage();
+                    await ref.read(appBackgroundProvider.notifier).pickImage();
                     if (!context.mounted) return;
                     if (cfg.imagePath == null &&
                         !ref.read(appBackgroundProvider).enabled) {
@@ -200,9 +197,8 @@ class SettingsPage extends ConsumerWidget {
                               .read(appBackgroundProvider.notifier)
                               .pickImage(),
                           icon: const Icon(Icons.image_rounded, size: 18),
-                          label: Text(appBg.imagePath == null
-                              ? '选择背景图'
-                              : '更换背景图'),
+                          label:
+                              Text(appBg.imagePath == null ? '选择背景图' : '更换背景图'),
                         ),
                       ),
                       const SizedBox(width: 10),
@@ -299,64 +295,6 @@ class SettingsPage extends ConsumerWidget {
                 onChanged: (bool v) =>
                     ref.read(npSettingsProvider.notifier).setShowMvBadge(v),
               ),
-              SwitchListTile(
-                contentPadding:
-                    const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
-                secondary: const Icon(Icons.save_alt_rounded, size: 22),
-                title: const Text('边听边缓存', style: TextStyle(fontSize: 15)),
-                subtitle: Text(
-                    '播放到哪首缓存哪首（只缓存实际播放的歌曲），再次播放'
-                    '秒开且不耗流量；可在「我的」页数据缓存或下方分组清理'
-                    '（默认开启）',
-                    style: TextStyle(
-                        fontSize: 12,
-                        color: theme.colorScheme.onSurfaceVariant)),
-                value: listenCache,
-                activeThumbColor: AppConstants.brandColor,
-                // 需求：关闭时弹确认弹窗（颜文字文案），防止误关
-                onChanged: (bool v) async {
-                  if (v) {
-                    ref.read(listenCacheProvider.notifier).set(true);
-                    return;
-                  }
-                  final bool? confirm = await showDialog<bool>(
-                    context: context,
-                    builder: (BuildContext ctx) => AlertDialog(
-                      title: const Text('关闭边听边缓存'),
-                      content: const Text('关闭后没网不能听歌了哦(๑`^´๑)，真的要关吗'),
-                      actions: <Widget>[
-                        TextButton(
-                          onPressed: () => Navigator.of(ctx).pop(false),
-                          child: const Text("算了(●'◡'●)"),
-                        ),
-                        FilledButton(
-                          style: FilledButton.styleFrom(
-                              backgroundColor: AppConstants.brandColor),
-                          onPressed: () => Navigator.of(ctx).pop(true),
-                          child: const Text('关闭╥_╥'),
-                        ),
-                      ],
-                    ),
-                  );
-                  if (confirm == true) {
-                    ref.read(listenCacheProvider.notifier).set(false);
-                  }
-                },
-              ),
-              SwitchListTile(
-                contentPadding:
-                    const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
-                secondary: const Icon(Icons.skip_next_rounded, size: 22),
-                title: const Text('预加载下一首', style: TextStyle(fontSize: 15)),
-                subtitle: Text('提前加载队列下一首，切歌零等待（默认开启）',
-                    style: TextStyle(
-                        fontSize: 12,
-                        color: theme.colorScheme.onSurfaceVariant)),
-                value: preloadNext,
-                activeThumbColor: AppConstants.brandColor,
-                onChanged: (bool v) =>
-                    ref.read(preloadNextProvider.notifier).set(v),
-              ),
               // 需求：播放页始终亮屏
               SwitchListTile(
                 contentPadding:
@@ -404,8 +342,9 @@ class SettingsPage extends ConsumerWidget {
               // 需求：透明度可在设置自定义（默认 65% 透明）
               _MiniOpacityRow(
                 transparency: np.miniTransparency,
-                onChanged: (double v) =>
-                    ref.read(npSettingsProvider.notifier).setMiniTransparency(v),
+                onChanged: (double v) => ref
+                    .read(npSettingsProvider.notifier)
+                    .setMiniTransparency(v),
               ),
             ],
           ),
@@ -582,6 +521,8 @@ class _CacheGroupState extends ConsumerState<_CacheGroup> {
 
   @override
   Widget build(BuildContext context) {
+    final bool listenCache = ref.watch(listenCacheProvider);
+    final bool preloadNext = ref.watch(preloadNextProvider);
     return _GroupCard(
       title: '缓存',
       children: <Widget>[
@@ -596,6 +537,63 @@ class _CacheGroupState extends ConsumerState<_CacheGroup> {
                   color: Theme.of(context).colorScheme.onSurfaceVariant)),
           trailing: const Icon(Icons.delete_outline_rounded, size: 20),
           onTap: _clearSongCache,
+        ),
+        // 需求：UI 排列优化 —— 缓存相关开关聚拢到缓存组
+        SwitchListTile(
+          contentPadding:
+              const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
+          secondary: const Icon(Icons.save_alt_rounded, size: 22),
+          title: const Text('边听边缓存', style: TextStyle(fontSize: 15)),
+          subtitle: Text(
+              '播放到哪首缓存哪首（只缓存实际播放的歌曲），再次播放'
+              '秒开且不耗流量（默认开启）',
+              style: TextStyle(
+                  fontSize: 12,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant)),
+          value: listenCache,
+          activeThumbColor: AppConstants.brandColor,
+          // 需求：关闭时弹确认弹窗（颜文字文案），防止误关
+          onChanged: (bool v) async {
+            if (v) {
+              ref.read(listenCacheProvider.notifier).set(true);
+              return;
+            }
+            final bool? confirm = await showDialog<bool>(
+              context: context,
+              builder: (BuildContext ctx) => AlertDialog(
+                title: const Text('关闭边听边缓存'),
+                content: const Text('关闭后没网不能听歌了哦(๑`^´๑)，真的要关吗'),
+                actions: <Widget>[
+                  TextButton(
+                    onPressed: () => Navigator.of(ctx).pop(false),
+                    child: const Text("算了(●'◡'●)"),
+                  ),
+                  FilledButton(
+                    style: FilledButton.styleFrom(
+                        backgroundColor: AppConstants.brandColor),
+                    onPressed: () => Navigator.of(ctx).pop(true),
+                    child: const Text('关闭╥_╥'),
+                  ),
+                ],
+              ),
+            );
+            if (confirm == true) {
+              ref.read(listenCacheProvider.notifier).set(false);
+            }
+          },
+        ),
+        SwitchListTile(
+          contentPadding:
+              const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
+          secondary: const Icon(Icons.skip_next_rounded, size: 22),
+          title: const Text('预加载下一首', style: TextStyle(fontSize: 15)),
+          subtitle: Text('提前加载队列下一首，切歌零等待（默认开启）',
+              style: TextStyle(
+                  fontSize: 12,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant)),
+          value: preloadNext,
+          activeThumbColor: AppConstants.brandColor,
+          onChanged: (bool v) => ref.read(preloadNextProvider.notifier).set(v),
         ),
       ],
     );
@@ -753,8 +751,8 @@ class _MiniColorRow extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
           Text('底板颜色',
-              style: TextStyle(
-                  fontSize: 14, color: theme.colorScheme.onSurface)),
+              style:
+                  TextStyle(fontSize: 14, color: theme.colorScheme.onSurface)),
           const SizedBox(height: 8),
           SizedBox(
             height: 34,
@@ -798,7 +796,8 @@ class _MiniColorRow extends StatelessWidget {
         duration: const Duration(milliseconds: 160),
         padding: const EdgeInsets.symmetric(horizontal: 10),
         decoration: BoxDecoration(
-          color: (color ?? Colors.white).withValues(alpha: selected ? 0.96 : 0.16),
+          color:
+              (color ?? Colors.white).withValues(alpha: selected ? 0.96 : 0.16),
           borderRadius: BorderRadius.circular(17),
           border: Border.all(
             color: selected
@@ -859,10 +858,8 @@ class _MiniOpacityRow extends StatelessWidget {
           SliderTheme(
             data: SliderTheme.of(context).copyWith(
               trackHeight: 3,
-              thumbShape:
-                  const RoundSliderThumbShape(enabledThumbRadius: 8),
-              overlayShape:
-                  const RoundSliderOverlayShape(overlayRadius: 14),
+              thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 8),
+              overlayShape: const RoundSliderOverlayShape(overlayRadius: 14),
             ),
             child: Slider(
               value: transparency.clamp(0.20, 0.95),
