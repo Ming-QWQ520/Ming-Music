@@ -1,7 +1,7 @@
 name: ming_music
 description: "MingMusic - 基于网易云 API 的在线音乐播放器 (Flutter + Riverpod + MD3)."
 publish_to: "none"
-version: 1.1.0+2
+version: 0.1.0+3
 
 environment:
   sdk: ^3.6.0
