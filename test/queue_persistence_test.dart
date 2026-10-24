@@ -32,9 +32,10 @@ void main() {
       );
 
   group('队列状态持久化', () {
-    test('v2：网易云曲目只存歌曲 ID，恢复为占位曲目（需求：歌单数据只存 ID）', () async {
+    test('v3：网易云曲目落盘元数据（重启直显真实歌名/封面），直链仍置空', () async {
       final List<Track> queue = <Track>[
-        track('netease_111', neteaseId: 111, mvId: 222),
+        track('netease_111', neteaseId: 111, mvId: 222).copyWith(
+            cover: 'https://p1.music.126.net/x.jpg', durationMs: 210000),
         track('netease_333', neteaseId: 333),
       ];
       await persistence.saveQueueState(queue, 1, '测试歌单');
@@ -42,13 +43,35 @@ void main() {
       final saved = persistence.loadQueueState();
       expect(saved, isNotNull);
       expect(saved!.queue.length, 2);
-      // 只保存 ID：恢复出的曲目按 id 对齐，元数据由 restore 阶段补全
       expect(saved.hasNeteaseIds, isTrue);
       expect(saved.queue[0].neteaseId, 111);
       expect(saved.queue[1].neteaseId, 333);
-      expect(saved.queue[0].source, isEmpty); // 不再持久化直链
+      // 第十七批：元数据随存档恢复 —— Mini 条不再显示「加载中…」
+      expect(saved.queue[0].title, '歌 netease_111');
+      expect(saved.queue[0].cover, 'https://p1.music.126.net/x.jpg');
+      expect(saved.queue[0].durationMs, 210000);
+      expect(saved.queue[0].fee, 1);
+      expect(saved.queue[0].mvId, 222);
+      // 直链不落盘（20 分钟过期），恢复后由 restore 阶段重新解析
+      expect(saved.queue[0].source, isEmpty);
+      expect(saved.queue[0].needsUrlResolve, isTrue);
       expect(saved.index, 1);
       expect(saved.queueTitle, '测试歌单');
+    });
+
+    test('v2 旧档兼容：纯 id 恢复为「加载中…」占位（restore 阶段补全）', () async {
+      const String v2Json = '{"v":2,"items":[111,333],"index":1,'
+          '"queueTitle":"v2旧档"}';
+      await prefs.setString(PrefsKeys.queueState, v2Json);
+      final saved = persistence.loadQueueState();
+      expect(saved, isNotNull);
+      expect(saved!.queue.length, 2);
+      expect(saved.queue[0].neteaseId, 111);
+      expect(saved.queue[0].title, '加载中…');
+      expect(saved.queue[1].neteaseId, 333);
+      expect(saved.hasNeteaseIds, isTrue);
+      expect(saved.index, 1);
+      expect(saved.queueTitle, 'v2旧档');
     });
 
     test('v2：本地/自定义曲目保存完整数据', () async {

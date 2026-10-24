@@ -11,6 +11,8 @@
 ///  - 未登录 → 登录引导卡；校验失败 → 重试卡（对齐 Zephyr 容错策略）。
 library;
 
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -18,6 +20,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../../core/api/netease_models.dart' show PlaylistMeta;
 import '../../../core/constants/app_constants.dart';
+import '../../../core/storage/prefs_keys.dart';
 import '../../../core/widgets/cover_image.dart';
 import '../../auth/data/netease_auth_repository.dart' show NeteaseUserPlaylist;
 import '../../auth/presentation/login_sheet.dart';
@@ -26,7 +29,7 @@ import '../../discover/data/netease_providers.dart';
 import '../data/local_music_count.dart' show localMusicCountProvider;
 import '../../settings/domain/settings_models.dart' show LibraryPlaylistLayout;
 import '../../settings/providers/settings_providers.dart'
-    show libraryPlaylistLayoutProvider;
+    show libraryPlaylistLayoutProvider, sharedPreferencesProvider;
 import '../../player/presentation/cache_songs_page.dart';
 import '../../player/providers/player_providers.dart';
 
@@ -45,7 +48,70 @@ class _MyMusicPageState extends ConsumerState<MyMusicPage> {
   @override
   void initState() {
     super.initState();
+    // 第十七批需求：重启后创建/收藏歌单立即显示，不再必须手动刷新 ——
+    // 1) 先读本地缓存直显（网络前零等待）；
+    _playlists = _readCachedPlaylists();
+    // 2) 首帧后网络刷新；3) 登录态异步恢复完成（重启后 loggedIn 由
+    // false→true）时自动重拉 —— 旧实现只在 initState 拉一次，此时
+    // AuthNotifier 的 _restore（网络校验 cookie）尚未完成，loggedIn
+    // 仍为 false，直接跳过 → 重启后歌单空白，必须手动下拉刷新。
     WidgetsBinding.instance.addPostFrameCallback((_) => _loadPlaylists());
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // 登录态监听放在 didChangeDependencies 且只注册一次
+    // （initState 里不能 ref.listen）
+    if (!_authListenerAttached) {
+      _authListenerAttached = true;
+      ref.listenManual<AuthState>(authProvider, (
+        AuthState? prev,
+        AuthState next,
+      ) {
+        final bool becameLoggedIn =
+            next.loggedIn && !(prev?.loggedIn ?? false);
+        if (becameLoggedIn || (next.loggedIn && _playlists == null)) {
+          _loadPlaylists();
+        }
+      });
+    }
+  }
+
+  bool _authListenerAttached = false;
+
+  /// 读取歌单缓存（登录前/离线时直显；脏数据静默丢弃）
+  List<NeteaseUserPlaylist>? _readCachedPlaylists() {
+    final String? raw =
+        ref.read(sharedPreferencesProvider).getString(
+              PrefsKeys.libraryUserPlaylistsCache,
+            );
+    if (raw == null || raw.isEmpty) return null;
+    try {
+      final Object? decoded = jsonDecode(raw);
+      if (decoded is! List<Object?>) return null;
+      final List<NeteaseUserPlaylist> out = <NeteaseUserPlaylist>[
+        for (final Object? item in decoded)
+          if (item is Map<String, Object?>)
+            NeteaseUserPlaylist.fromCacheMap(item),
+      ];
+      return out.isEmpty ? null : out;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  void _cachePlaylists(List<NeteaseUserPlaylist> list) {
+    try {
+      ref
+          .read(sharedPreferencesProvider)
+          .setString(PrefsKeys.libraryUserPlaylistsCache,
+              jsonEncode(<Object?>[
+                for (final NeteaseUserPlaylist p in list) p.toCacheMap(),
+              ]));
+    } catch (_) {
+      // 缓存写入失败不影响展示
+    }
   }
 
   Future<void> _loadPlaylists() async {
@@ -58,9 +124,12 @@ class _MyMusicPageState extends ConsumerState<MyMusicPage> {
       final List<NeteaseUserPlaylist> list = await ref
           .read(neteaseAuthRepositoryProvider)
           .userPlaylists(auth.profile!.userId);
-      if (mounted) setState(() => _playlists = list);
+      if (mounted) {
+        setState(() => _playlists = list);
+        _cachePlaylists(list);
+      }
     } catch (_) {
-      if (mounted) setState(() => _playlists = const <NeteaseUserPlaylist>[]);
+      // 失败时保留缓存直显（不再清空 → 重启后弱网不空白）
     }
   }
 

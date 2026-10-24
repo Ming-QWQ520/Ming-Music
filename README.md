@@ -189,3 +189,12 @@ service 声明了 `foregroundServiceType="mediaPlayback"`；Android 13+ 首次�
 **Q：数据来源与合规说明？**
 本应用仅通过网易云音乐公开 API 读取数据，VIP 专属歌曲在未登录状态下仅可
 试听或不可播放；项目仅供学习交流，请支持正版音乐。
+
+## 开源协议
+
+本项目基于 **GNU Affero General Public License v3.0（AGPL-3.0）** 开源发布：
+
+- 任何基于本项目的二次开发、分发都必须同样以 AGPL-3.0 开源；
+- 通过网络提供服务（含修改版）时，必须向交互用户提供完整的对应源代码；
+- 完整协议文本见仓库根目录 [`LICENSE`](./LICENSE)，
+  详见 <https://www.gnu.org/licenses/agpl-3.0.html>。

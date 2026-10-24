@@ -2,10 +2,14 @@
 ///
 ///  - 搜索历史：本地持久化（最多 20 条，去重置顶），头部垃圾桶一键清空；
 ///  - 猜你喜欢：基于热搜词的补充推荐 chips；
-///  - 热榜矩阵：热搜榜 + 热歌榜/欧美热歌榜/古风榜/飙升榜/韩语榜/新歌榜/
-///    说唱榜/原创榜/民谣榜/日语榜/ACG 榜/摇滚榜 —— 横向滑动双列卡片，
-///    每列展示前 10 名（前三名高亮，热搜前三带「爆」标）；
-///  - 搜索建议（/search/suggest，250ms 防抖）+ 结果整页可作队列播放。
+///  - 热榜矩阵（第十七批：top20 + 官方截图同款卡片）：热搜榜 + 热歌榜/
+///    欧美热歌榜/古风榜/飙升榜/韩语榜/新歌榜/说唱榜/原创榜/民谣榜/
+///    日语榜/ACG 榜/摇滚榜 —— 横向滑动卡片（单卡 ~84% 屏宽，下一卡
+///    右缘露出），卡头「▶ 播放」一键播整榜，行 = 前三名彩色名次 + 歌名
+///    + 灰色歌手后缀 + 爆标/上升箭头，每卡渲染前 20 名（超高内部滚动）；
+///  - 搜索联想词（第十七批：POST /search/suggest/keyword/get，三层兜底
+///    落到旧 /search/suggest；直 hit 歌曲卡 + 高亮分段 + 标签 + 相关搜索，
+///    250ms 防抖）+ 结果整页可作队列播放。
 ///  - 第十四批需求（对齐 Zephyr-Music WIP）：分类筛选搜索 —— 综合/单曲/
 ///    歌单/专辑/歌手/MV/用户/歌词 八类（/search type 全量），综合按
 ///    result.order 分区块展示、区块头点击跳转对应分类。
@@ -126,7 +130,10 @@ class _SearchPageState extends ConsumerState<SearchPage> {
   bool _searching = false;
   String? _error;
   bool _showResults = false;
-  SearchSuggest? _suggest;
+
+  /// 联想词下拉（第十七批：新接口 /search/suggest/keyword/get，
+  /// 含直 hit 歌曲卡/高亮分段/标签/相关搜索）
+  KeywordSuggest? _suggest;
 
   /// 当前搜索分类（默认综合，对齐网易云 App）
   int _searchType = 1018;
@@ -169,12 +176,13 @@ class _SearchPageState extends ConsumerState<SearchPage> {
       });
       return;
     }
-    // 搜索建议（实时，250ms 防抖，对齐 Zephyr useSearchSuggest）
+    // 搜索联想词（实时，250ms 防抖；新接口三层兜底，
+    // 进程内记忆命中路径后直达）
     _debounce = Timer(const Duration(milliseconds: 250), () async {
       try {
-        final SearchSuggest s = await ref
+        final KeywordSuggest s = await ref
             .read(neteaseRepositoryProvider)
-            .searchSuggest(value.trim());
+            .searchKeywordSuggest(value.trim());
         if (!mounted || value.trim() != _controller.text.trim()) return;
         setState(() => _suggest = s);
       } catch (_) {
@@ -1103,7 +1111,7 @@ class _SearchHome extends ConsumerWidget {
           orElse: () => const SizedBox.shrink(),
         ),
 
-        // ---------------- 热榜矩阵（需求：热搜榜 + 12 榜单） ----------------
+        // ---------------- 热榜矩阵（第十七批：top20 + 官方图同款卡片） ----------------
         const _HeaderRow(title: '热榜'),
         _HotChartRail(onWord: onWord),
       ],
@@ -1137,9 +1145,14 @@ class _HeaderRow extends StatelessWidget {
 
 // ---------------------------------------------------------------- 热榜矩阵
 
-/// 热榜矩阵（需求：热搜榜 + 热歌榜/欧美热歌榜/古风榜/飙升榜/韩语榜/新歌榜/
-/// 说唱榜/原创榜/民谣榜/日语榜/ACG 榜/摇滚榜）—— 横向滑动双列卡片，
-/// 每列前 10 名；热搜词条点击搜索，榜单歌曲点击直接播放。
+/// 热榜矩阵（第十七批需求：搜索页面底部的榜单只渲染前二十的歌曲，
+/// 布局对齐官方 App 截图）——
+///  - 横向滑动卡片，单卡占屏宽 ~84%，下一张卡右缘露出（截图同款）；
+///  - 卡头：色条 + 榜名 + 「▶ 播放」胶囊（歌曲榜，点其一键播整榜）；
+///  - 行：前三名彩色名次（红/橙/金）+ 歌名白色 + 灰色歌手后缀；
+///    热搜榜第 1 名「爆」标，官方 iconType==1 行右侧红色 ↑ 上升箭头；
+///  - 每卡渲染前 20 名，卡内容超高时内部纵向滚动（与官方一致）。
+/// 热搜词条点击搜索，榜单歌曲点击直接播放。
 class _HotChartRail extends ConsumerWidget {
   const _HotChartRail({this.onWord});
 
@@ -1147,8 +1160,11 @@ class _HotChartRail extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    // 卡高：小屏至少 520，大屏至多 780，其余随屏幕余量伸缩
+    final double height =
+        (MediaQuery.sizeOf(context).height - 300).clamp(520.0, 780.0);
     return SizedBox(
-      height: 470,
+      height: height,
       child: ListView.separated(
         scrollDirection: Axis.horizontal,
         padding: const EdgeInsets.symmetric(horizontal: 20),
@@ -1170,7 +1186,8 @@ class _HotChartRail extends ConsumerWidget {
   }
 }
 
-/// 热搜榜列（需求：前三名带「爆」标，点击词条搜索）
+/// 热搜榜卡（前 20 名；第 1 名「爆」标，iconType==1 红色上升箭头，
+/// 点击词条搜索）
 class _HotSearchColumn extends ConsumerWidget {
   const _HotSearchColumn({this.onWord});
 
@@ -1193,13 +1210,17 @@ class _HotSearchColumn extends ConsumerWidget {
         error: (Object e, StackTrace st) => const _ColumnMessage('热搜加载失败'),
         data: (List<HotWord> words) {
           if (words.isEmpty) return const _ColumnMessage('暂无热搜');
-          return Column(
+          return ListView(
+            padding: const EdgeInsets.only(bottom: 6),
             children: <Widget>[
-              for (int i = 0; i < words.length && i < 10; i++)
+              for (int i = 0;
+                  i < words.length && i < _kChartRowCount;
+                  i++)
                 _ChartRow(
                   rank: i + 1,
                   text: words[i].word,
                   badge: i == 0 ? '爆' : null,
+                  rising: words[i].iconType == 1,
                   onTap: () => onWord?.call(words[i].word),
                 ),
             ],
@@ -1210,7 +1231,8 @@ class _HotSearchColumn extends ConsumerWidget {
   }
 }
 
-/// 榜单列（/playlist/track/all 前 10 行；点击行直接播放该曲）
+/// 榜单卡（/playlist/track/all 前 20 行；点击行直接播放该曲，
+/// 卡头「播放」一键播整榜）
 class _ChartColumn extends ConsumerWidget {
   const _ChartColumn({
     required this.id,
@@ -1225,22 +1247,35 @@ class _ChartColumn extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final AsyncValue<List<Song>> state = ref.watch(toplistPreviewProvider(id));
+    final List<Song> songs = state.value ?? const <Song>[];
     return _ChartCard(
       title: name,
       color: color,
       onTapHeader: () =>
           context.push('/toplist/$id?name=${Uri.encodeComponent(name)}'),
+      onPlay: songs.isEmpty
+          ? null
+          : () {
+              ref.read(playerProvider.notifier).playSongs(
+                    <Track>[for (final Song s in songs) s.toTrack()],
+                    queueTitle: name,
+                  );
+            },
       child: state.when(
         loading: () => const _ColumnLoading(),
         error: (Object e, StackTrace st) => const _ColumnMessage('加载失败'),
         data: (List<Song> songs) {
           if (songs.isEmpty) return const _ColumnMessage('暂无内容');
-          return Column(
+          return ListView(
+            padding: const EdgeInsets.only(bottom: 6),
             children: <Widget>[
-              for (int i = 0; i < songs.length && i < 10; i++)
+              for (int i = 0;
+                  i < songs.length && i < _kChartRowCount;
+                  i++)
                 _ChartRow(
                   rank: i + 1,
                   text: songs[i].name,
+                  subText: songs[i].artists,
                   onTap: () {
                     ref.read(playerProvider.notifier).playSongs(
                       <Track>[for (final Song s in songs) s.toTrack()],
@@ -1257,13 +1292,18 @@ class _ChartColumn extends ConsumerWidget {
   }
 }
 
-/// 双列榜单卡片容器
+/// 每卡渲染行数（第十七批需求：只渲染前二十的歌曲）
+const int _kChartRowCount = 20;
+
+/// 榜单卡片容器（官方 App 截图同款：单卡 ~84% 屏宽，圆角 16，
+/// 卡头「榜单名 + ▶播放胶囊」，卡身可内部纵向滚动看完整 20 行）
 class _ChartCard extends StatelessWidget {
   const _ChartCard({
     required this.title,
     required this.color,
     required this.child,
     this.onTapHeader,
+    this.onPlay,
   });
 
   final String title;
@@ -1271,10 +1311,13 @@ class _ChartCard extends StatelessWidget {
   final Widget child;
   final VoidCallback? onTapHeader;
 
+  /// 「▶ 播放」胶囊回调（热搜榜不展示胶囊）
+  final VoidCallback? onPlay;
+
   @override
   Widget build(BuildContext context) {
     final double width =
-        (MediaQuery.sizeOf(context).width - 20 * 2 - 12) / 2.05;
+        (MediaQuery.sizeOf(context).width - 20 * 2 - 12) * 0.84;
     return Container(
       width: width,
       decoration: BoxDecoration(
@@ -1309,9 +1352,51 @@ class _ChartCard extends StatelessWidget {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
-                          fontSize: 14.5, fontWeight: FontWeight.w700),
+                          fontSize: 15.5, fontWeight: FontWeight.w800),
                     ),
                   ),
+                  // 「▶ 播放」胶囊（截图同款：灰底圆胶囊，一键播整榜）
+                  if (onPlay != null)
+                    Padding(
+                      padding: const EdgeInsets.only(right: 6),
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(20),
+                        onTap: onPlay,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 10, vertical: 5),
+                          decoration: BoxDecoration(
+                            color: Theme.of(context)
+                                .colorScheme
+                                .onSurface
+                                .withValues(alpha: 0.08),
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: <Widget>[
+                              Icon(Icons.play_arrow_rounded,
+                                  size: 15,
+                                  color: Theme.of(context)
+                                      .colorScheme
+                                      .onSurface
+                                      .withValues(alpha: 0.85)),
+                              const SizedBox(width: 3),
+                              Text(
+                                '播放',
+                                style: TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w600,
+                                    color: Theme.of(context)
+                                        .colorScheme
+                                        .onSurface
+                                        .withValues(alpha: 0.85)),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
                   const Icon(Icons.chevron_right_rounded,
                       size: 17, color: Colors.white38),
                 ],
@@ -1325,18 +1410,27 @@ class _ChartCard extends StatelessWidget {
   }
 }
 
-/// 榜单行（前三名彩色名次；热搜第一名「爆」标）
+/// 榜单行（前三名彩色名次：红/橙/金；歌名 + 灰色歌手后缀；
+/// 「爆」标/红色上升箭头右对齐）
 class _ChartRow extends StatelessWidget {
   const _ChartRow({
     required this.rank,
     required this.text,
+    this.subText,
     this.badge,
+    this.rising = false,
     this.onTap,
   });
 
   final int rank;
   final String text;
+
+  /// 灰色后缀（歌曲榜 = 歌手名；热搜榜无）
+  final String? subText;
   final String? badge;
+
+  /// 红色 ↑ 上升箭头（热搜榜官方 iconType==1）
+  final bool rising;
   final VoidCallback? onTap;
 
   Color get _rankColor => switch (rank) {
@@ -1353,7 +1447,7 @@ class _ChartRow extends StatelessWidget {
       onTap: onTap,
       borderRadius: BorderRadius.circular(10),
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
         child: Row(
           children: <Widget>[
             SizedBox(
@@ -1361,7 +1455,7 @@ class _ChartRow extends StatelessWidget {
               child: Text(
                 '$rank',
                 style: TextStyle(
-                  fontSize: 13.5,
+                  fontSize: 14,
                   fontWeight: rank <= 3 ? FontWeight.w800 : FontWeight.w500,
                   color: _rankColor,
                 ),
@@ -1369,17 +1463,39 @@ class _ChartRow extends StatelessWidget {
             ),
             const SizedBox(width: 8),
             Expanded(
-              child: Text(
-                text,
+              child: RichText(
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  fontSize: 13,
-                  fontWeight: rank <= 3 ? FontWeight.w600 : FontWeight.w400,
-                  color: Theme.of(context)
-                      .colorScheme
-                      .onSurface
-                      .withValues(alpha: rank <= 3 ? 0.96 : 0.78),
+                text: TextSpan(
+                  style: DefaultTextStyle.of(context).style,
+                  children: <InlineSpan>[
+                    TextSpan(
+                      text: text,
+                      style: TextStyle(
+                        fontSize: 13.5,
+                        fontWeight:
+                            rank <= 3 ? FontWeight.w700 : FontWeight.w400,
+                        color: Theme.of(context)
+                            .colorScheme
+                            .onSurface
+                            .withValues(alpha: rank <= 3 ? 0.96 : 0.80),
+                      ),
+                    ),
+                    if (subText != null && subText!.isNotEmpty) ...<InlineSpan>[
+                      const WidgetSpan(
+                          child: SizedBox(width: 6)),
+                      TextSpan(
+                        text: subText,
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Theme.of(context)
+                              .colorScheme
+                              .onSurface
+                              .withValues(alpha: 0.38),
+                        ),
+                      ),
+                    ],
+                  ],
                 ),
               ),
             ),
@@ -1399,6 +1515,10 @@ class _ChartRow extends StatelessWidget {
                       fontWeight: FontWeight.w700),
                 ),
               ),
+            ] else if (rising) ...<Widget>[
+              const SizedBox(width: 6),
+              const Icon(Icons.north_rounded,
+                  size: 14, color: AppConstants.brandColor),
             ],
           ],
         ),
@@ -1441,34 +1561,197 @@ class _ColumnMessage extends StatelessWidget {
   }
 }
 
-// ---------------------------------------------------------------- 搜索建议
+// ---------------------------------------------------------------- 搜索联想
 
-class _SuggestList extends StatelessWidget {
+/// 搜索联想下拉（第十七批需求，对齐官方 App 搜索框下拉）：
+///  - 第 0 条直 hit 歌曲卡：封面 + 歌名 + 歌手 + 「原唱」标签，点击**直接播放**；
+///  - 联想词列表：highLightInfo 高亮分段（highLighted 段着品牌红，即官方
+///    App 的红色前缀），带「热搜」等标签，点击搜索该词；
+///  - 相关搜索（data.recTitle + recs）：同联想词行渲染。
+class _SuggestList extends ConsumerWidget {
   const _SuggestList({required this.suggest, required this.onTap});
 
-  final SearchSuggest suggest;
+  final KeywordSuggest suggest;
   final ValueChanged<String> onTap;
 
   @override
-  Widget build(BuildContext context) {
-    final List<String> keywords = <String>[
-      ...suggest.keywords,
-      ...suggest.artists.map((String a) => a),
-    ];
+  Widget build(BuildContext context, WidgetRef ref) {
+    final ThemeData theme = Theme.of(context);
+    final List<SuggestWord> words = suggest.words;
     return ListView(
       padding: const EdgeInsets.symmetric(vertical: 6),
       children: <Widget>[
-        for (final String kw in keywords)
-          ListTile(
-            leading: const Icon(Icons.search_rounded, size: 20),
-            title: Text(kw,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(fontSize: 14.5)),
-            dense: true,
-            onTap: () => onTap(kw),
+        // ---- 直 hit 歌曲卡（entity_card，点击直接播放整首） ----
+        if (suggest.directHit != null && suggest.directHit!.directHit != null)
+          _DirectHitCard(
+            song: suggest.directHit!.directHit!,
+            onPlay: () {
+              final Song s = suggest.directHit!.directHit!;
+              ref.read(playerProvider.notifier).playSongs(
+                    <Track>[s.toTrack()],
+                    queueTitle: '搜索直达：${s.name}',
+                  );
+            },
           ),
+        // ---- 联想词 ----
+        for (final SuggestWord w in words)
+          _SuggestWordRow(
+            word: w,
+            onTap: () => onTap(w.keyword),
+          ),
+        // ---- 相关搜索 ----
+        if (suggest.recs.isNotEmpty) ...<Widget>[
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 14, 16, 4),
+            child: Text(
+              suggest.recTitle,
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w700,
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ),
+          for (final String kw in suggest.recs)
+            _SuggestWordRow(
+              word: SuggestWord(keyword: kw),
+              onTap: () => onTap(kw),
+            ),
+        ],
       ],
+    );
+  }
+}
+
+/// 直 hit 歌曲卡（联想下拉顶部，点击直接播放）
+class _DirectHitCard extends StatelessWidget {
+  const _DirectHitCard({required this.song, required this.onPlay});
+
+  final Song song;
+  final VoidCallback onPlay;
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    return InkWell(
+      onTap: onPlay,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+        child: Row(
+          children: <Widget>[
+            ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: CoverImage(src: song.coverUrl, size: 52, radius: 8),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Text(
+                    song.name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                        fontSize: 15, fontWeight: FontWeight.w700),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    '${song.artists} · ${song.album}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                        fontSize: 12,
+                        color: theme.colorScheme.onSurfaceVariant),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+              decoration: BoxDecoration(
+                color: AppConstants.brandColor.withValues(alpha: 0.14),
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: <Widget>[
+                  const Icon(Icons.play_arrow_rounded,
+                      size: 16, color: AppConstants.brandColor),
+                  Text('播放',
+                      style: TextStyle(
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w700,
+                          color: AppConstants.brandColor)),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// 单条联想词行（高亮分段 + 标签）
+class _SuggestWordRow extends StatelessWidget {
+  const _SuggestWordRow({required this.word, required this.onTap});
+
+  final SuggestWord word;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    // 高亮分段：highLighted 段着品牌红（官方红色前缀），否则按常规文字
+    final List<InlineSpan> spans = <InlineSpan>[
+      for (final seg in word.segments)
+        TextSpan(
+          text: seg.text,
+          style: TextStyle(
+            fontSize: 14.5,
+            fontWeight:
+                seg.highlighted ? FontWeight.w600 : FontWeight.w400,
+            color: seg.highlighted
+                ? AppConstants.brandColor
+                : theme.colorScheme.onSurface,
+          ),
+        ),
+      // 无分段数据（旧接口兜底）：整词常规渲染
+      if (word.segments.isEmpty)
+        TextSpan(
+          text: word.keyword,
+          style: TextStyle(
+              fontSize: 14.5, color: theme.colorScheme.onSurface),
+        ),
+    ];
+    return ListTile(
+      leading: const Icon(Icons.search_rounded, size: 20),
+      title: RichText(
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        text: TextSpan(children: spans, style: DefaultTextStyle.of(context).style),
+      ),
+      dense: true,
+      trailing: word.tag == null
+          ? null
+          : Container(
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+              decoration: BoxDecoration(
+                color: AppConstants.brandColor.withValues(alpha: 0.13),
+                borderRadius: BorderRadius.circular(6),
+              ),
+              child: Text(
+                word.tag!,
+                style: const TextStyle(
+                    fontSize: 10.5,
+                    fontWeight: FontWeight.w700,
+                    color: AppConstants.brandColor),
+              ),
+            ),
+      onTap: onTap,
     );
   }
 }

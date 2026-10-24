@@ -47,11 +47,11 @@ final FutureProvider<List<Song>> topNewSongsProvider =
   (Ref ref) => ref.read(neteaseRepositoryProvider).topSongs(type: 0, limit: 20),
 );
 
-/// 榜单精选预览（需求：榜单卡片下直接展示前 10 行可点）
+/// 榜单精选预览（需求：榜单卡片下直接展示可点；第十七批：搜索页榜单 top20）
 final FutureProviderFamily<List<Song>, int> toplistPreviewProvider =
     FutureProvider.family<List<Song>, int>(
   (Ref ref, int id) =>
-      ref.read(neteaseRepositoryProvider).toplistPreview(id, limit: 10),
+      ref.read(neteaseRepositoryProvider).toplistPreview(id, limit: 20),
 );
 
 /// 每日推荐歌单（登录后含「雷达歌单」分组，需求：雷达歌单入口）

@@ -148,6 +148,29 @@ class NeteaseUserPlaylist {
       description: (j['description'] as String?) ?? '',
     );
   }
+
+  /// 本地缓存序列化（第十七批需求：我的页歌单重启直显）
+  Map<String, Object?> toCacheMap() => <String, Object?>{
+        'id': id,
+        'name': name,
+        'coverImgUrl': coverUrl,
+        'trackCount': trackCount,
+        'userId': creatorUserId,
+        'playCount': playCount,
+        'description': description,
+      };
+
+  /// 从缓存反序列化（与 toCacheMap 对成；fromMap 兼容官方 JSON 结构）
+  static NeteaseUserPlaylist fromCacheMap(Map<String, Object?> j) =>
+      NeteaseUserPlaylist(
+        id: (j['id'] as num?)?.toInt() ?? 0,
+        name: (j['name'] as String?) ?? '',
+        coverUrl: (j['coverImgUrl'] as String?) ?? '',
+        trackCount: (j['trackCount'] as num?)?.toInt() ?? 0,
+        creatorUserId: (j['userId'] as num?)?.toInt() ?? 0,
+        playCount: (j['playCount'] as num?)?.toInt() ?? 0,
+        description: (j['description'] as String?) ?? '',
+      );
 }
 
 /// 用户详情（/user/detail 的 profile 段，对齐 Zephyr）

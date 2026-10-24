@@ -83,7 +83,15 @@ class QueuePersistence {
   /// 不再持久化播放直链（有效期短，重启后由 restore 阶段统一重新获取）。
   /// 本地/自定义曲目无法通过 id 重建，仍保存完整 Track。
   ///
-  /// 格式 v2：{v:2, items:[<int id 或 track map>...], index, queueTitle}
+  /// 第十七批修正（v3）：网易云曲目在 id 之外**额外落盘展示元数据**
+  /// （标题/歌手/专辑/封面/时长/fee 等，不含直链）—— v2 只存 id 时，
+  /// 重启恢复的队列全是「加载中…」占位行，元数据补全失败（离线/接口抖动）
+  /// 就永远停在加载中（用户实测反馈：Mini 条不显示歌曲和封面而显示加载中）。
+  /// v3 让重启后 UI 立即显示真实歌曲信息，直链仍在 restore 阶段重解析。
+  ///
+  /// 格式 v3：{v:3, items:[<track map（netease 曲目 source 置空）或 track map>...],
+  /// index, queueTitle}
+  /// 兼容 v2：{v:2, items:[<int id 或 track map>...]}（网易云条目为纯 id）
   /// 兼容旧格式：{queue:[track map...], index, queueTitle}
   Future<void> saveQueueState(
     List<Track> queue,
@@ -92,10 +100,13 @@ class QueuePersistence {
   ) async {
     try {
       final String json = jsonEncode(<String, Object?>{
-        'v': 2,
+        'v': 3,
         'items': <Object?>[
           for (final Track t in queue)
-            t.neteaseId != null && t.neteaseId! > 0 ? t.neteaseId : t.toMap(),
+            t.neteaseId != null && t.neteaseId! > 0
+                // 网易云曲目：完整元数据 + 置空直链（直链 20 分钟过期，不落盘）
+                ? t.copyWith(source: '').toMap()
+                : t.toMap(),
         ],
         'index': index,
         'queueTitle': queueTitle,
@@ -106,8 +117,11 @@ class QueuePersistence {
     }
   }
 
-  /// 恢复队列状态的原始数据：网易云曲目仅返回 id（占位 Track，需上层
-  /// 经 /song/detail 补全元数据后重新解析直链）；本地/自定义曲目直接还原。
+  /// 恢复队列状态的原始数据：
+  ///  - v3：网易云曲目返回带元数据的 Track（source 已置空，需上层重新解析
+  ///    直链），UI 可立即显示真实歌曲信息；
+  ///  - v2：网易云曲目仅返回 id（「加载中…」占位，需上层经 /song/detail
+  ///    补全元数据）；本地/自定义曲目直接还原；
   /// 无存档返回 null。
   ({List<Track> queue, int index, String? queueTitle, bool hasNeteaseIds})?
       loadQueueState() {
@@ -117,14 +131,16 @@ class QueuePersistence {
       final Object? decoded = jsonDecode(json);
       if (decoded is! Map<String, Object?>) return null;
 
-      final bool isV2 = decoded['v'] == 2;
-      final Object? raw = isV2 ? decoded['items'] : decoded['queue'];
+      final int v = (decoded['v'] as num?)?.toInt() ?? 0;
+      final bool hasItemsKey = v == 2 || v == 3;
+      final Object? raw =
+          hasItemsKey ? decoded['items'] : decoded['queue'];
       if (raw is! List<Object?>) return null;
 
       final List<Track> tracks = <Track>[];
       bool hasNeteaseIds = false;
       for (final Object? item in raw) {
-        if (isV2 && item is num) {
+        if (v == 2 && item is num) {
           // v2：网易云歌曲 id 占位（元数据由 restore 阶段批量补全）
           final int id = item.toInt();
           if (id <= 0) continue;
@@ -140,7 +156,7 @@ class QueuePersistence {
           ));
         } else if (item is Map) {
           final Track t = Track.fromMap(item.cast<String, Object?>());
-          // 旧格式（v1）：网易云曲目持久化了完整 Track（含已过期直链）——
+          // 网易云曲目（v3 落盘 source 已置空 / v1 旧档持久化了已过期直链）：
           // 清空 source 强制重新解析（需求：退出重进自动刷新播放 URL）
           if (t.neteaseId != null && (t.neteaseId ?? 0) > 0) {
             hasNeteaseIds = true;
@@ -158,6 +174,8 @@ class QueuePersistence {
                 isNetwork: t.isNetwork,
                 isCustom: t.isCustom,
                 fee: t.fee,
+                artistId: t.artistId,
+                albumId: t.albumId,
               ));
               continue;
             }

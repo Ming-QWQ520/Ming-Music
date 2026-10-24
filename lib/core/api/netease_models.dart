@@ -5,6 +5,8 @@
 ///  - `/search` 旧版：`artists[]`、`album{}`、`duration`
 library;
 
+import 'dart:convert' show jsonDecode;
+
 import 'netease_api.dart' show normalizeNeteaseUrl;
 import '../../features/library/domain/track.dart';
 
@@ -350,14 +352,22 @@ class LyricData {
 
 /// 热搜词（/search/hot/detail）
 class HotWord {
-  const HotWord({required this.word, this.iconUrl});
+  const HotWord({required this.word, this.iconUrl, this.score = 0, this.iconType = 0});
 
   final String word;
   final String? iconUrl;
 
+  /// 热度值（/search/hot/detail 的 score，仅排序参考）
+  final double score;
+
+  /// 官方图标类型：1 = 上升（搜索页榜单行的红色 ↑ 箭头），0 = 无
+  final int iconType;
+
   static HotWord fromJson(Map<String, Object?> j) => HotWord(
         word: (j['searchWord'] as String?) ?? '',
         iconUrl: normalizeNeteaseUrl(j['iconUrl'] as String?),
+        score: (j['score'] as num?)?.toDouble() ?? 0,
+        iconType: (j['iconType'] as num?)?.toInt() ?? 0,
       );
 }
 
@@ -814,6 +824,129 @@ class SearchSuggest {
       albums: names(result['albums'] ?? result['album']),
     );
   }
+}
+
+// ---------------------------------------------------------------- 搜索联想词
+//
+// 第十七批需求：搜索联想词接口（官方 POST /search/suggest/keyword/get，
+// 参数 keyword 传 s 会返回 HTTP 400 空体）。响应结构（与官方 App 截图
+// 逐字段对齐）：
+//   data.suggests[]：第 0 条为直 hit 歌曲卡（resourceType == 'entity_card'，
+//   含整首歌曲数据 relatedResource.baseInfo.simpleSongData）；其后为联想词
+//   列表（keyword + tag「原唱/热搜」+ highLightInfo 高亮分段）；
+//   data.recTitle = 「相关搜索」、data.recs[] 为相关搜索推荐。
+
+/// 高亮分段：highLighted 为 true 的分段在联想下拉中着品牌红（官方 App 的
+/// 「红色前缀」即由此渲染）
+class SuggestSegment {
+  const SuggestSegment({required this.text, required this.highlighted});
+
+  final String text;
+  final bool highlighted;
+
+  static SuggestSegment fromJson(Map<String, Object?> j) => SuggestSegment(
+        text: (j['text'] as String?) ?? '',
+        highlighted: j['highLighted'] == true,
+      );
+}
+
+/// 单条联想词
+class SuggestWord {
+  const SuggestWord({
+    required this.keyword,
+    this.segments = const <SuggestSegment>[],
+    this.tag,
+    this.directHit,
+  });
+
+  /// 完整词（点击即搜索该词）
+  final String keyword;
+
+  /// 高亮分段（空则整词无高亮渲染）
+  final List<SuggestSegment> segments;
+
+  /// 标签：「原唱」「热搜」或 null
+  final String? tag;
+
+  /// 直 hit 歌曲（仅第 0 条 entity_card 有：点击直接播放而非搜索）
+  final Song? directHit;
+
+  bool get isDirectHit => directHit != null;
+
+  static SuggestWord fromJson(Map<String, Object?> j) {
+    SuggestSegment seg(Map<String, Object?> s) => SuggestSegment.fromJson(s);
+    List<SuggestSegment> parseSegments(Object? raw) {
+      // highLightInfo 为「JSON 字符串」（服务端序列化数组），需二次解码
+      List<Object?>? list;
+      if (raw is String && raw.isNotEmpty) {
+        try {
+          final Object? decoded = jsonDecode(raw);
+          if (decoded is List<Object?>) list = decoded;
+        } catch (_) {
+          // 脏分段 → 整词无高亮
+        }
+      } else if (raw is List<Object?>) {
+        list = raw;
+      }
+      if (list == null) return const <SuggestSegment>[];
+      final List<SuggestSegment> out = <SuggestSegment>[];
+      for (final Object? item in list) {
+        if (item is Map<String, Object?>) {
+          final SuggestSegment s = seg(item);
+          if (s.text.isNotEmpty) out.add(s);
+        }
+      }
+      return out;
+    }
+
+    // 直 hit 歌曲：relatedResource.baseInfo.simpleSongData（标准 song 结构，
+    // 复用 Song.fromCloudJson 解析 ar/al/dt 字段）
+    Song? hit;
+    if (j['resourceType'] == 'entity_card') {
+      final Object? related = j['relatedResource'];
+      final Object? baseInfo =
+          related is Map<String, Object?> ? related['baseInfo'] : null;
+      final Object? simple =
+          baseInfo is Map<String, Object?> ? baseInfo['simpleSongData'] : null;
+      if (simple is Map<String, Object?>) {
+        final Song s = Song.fromCloudJson(simple);
+        if (s.id != 0) hit = s;
+      }
+    }
+    return SuggestWord(
+      keyword: (j['keyword'] as String?) ?? '',
+      segments: parseSegments(j['highLightInfo']),
+      tag: j['tag'] is String && (j['tag'] as String).isNotEmpty
+          ? j['tag'] as String
+          : null,
+      directHit: hit,
+    );
+  }
+}
+
+/// 搜索联想词聚合（搜索框下拉整包数据）
+class KeywordSuggest {
+  const KeywordSuggest({
+    this.directHit,
+    this.words = const <SuggestWord>[],
+    this.recTitle = '相关搜索',
+    this.recs = const <String>[],
+  });
+
+  /// 第 0 条直 hit 歌曲卡（可为空：老接口兜底时没有）
+  final SuggestWord? directHit;
+
+  /// 联想词列表（含「热搜」标签词条）
+  final List<SuggestWord> words;
+
+  /// 相关搜索标题（官方 data.recTitle）
+  final String recTitle;
+
+  /// 相关搜索词
+  final List<String> recs;
+
+  bool get isEmpty =>
+      directHit == null && words.isEmpty && recs.isEmpty;
 }
 
 // ---------------------------------------------------------------- 搜索分类结果
