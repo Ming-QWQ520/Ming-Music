@@ -135,10 +135,10 @@ class NpPlayerSettings {
     this.yrcPlayed = const Color(0xFFFFFFFF),
     this.yrcUnplayed = const Color(0x66FFFFFF),
     this.highlightPlayed = false,
-    this.lyricAlwaysCenter = false,
+    // 第十五批需求：「时刻保持居中」默认开启
+    this.lyricAlwaysCenter = true,
     // 第十三批需求：封面页歌词预览默认两行（旧默认一行）
     this.coverLyrics = NpCoverLyricsMode.two,
-    this.heartEffect = true,
     this.showMvBadge = true,
     this.playerKeepScreenOn = false,
     this.miniStyle = MiniPlayerStyle.classic,
@@ -147,7 +147,7 @@ class NpPlayerSettings {
     this.stripButtons = kStripButtonDefaults,
   });
 
-  static const int version = 3;
+  static const int version = 4;
 
   static const NpPlayerSettings defaults = NpPlayerSettings();
 
@@ -217,9 +217,6 @@ class NpPlayerSettings {
   /// 可选 一行/两行；第十三批起默认两行）
   final NpCoverLyricsMode coverLyrics;
 
-  /// 红心动效（喜欢时心形迸发动画）
-  final bool heartEffect;
-
   /// MV 徽标开关（需求：播放页歌名旁 MV 胶囊可开关显示，默认开启）
   final bool showMvBadge;
 
@@ -247,7 +244,6 @@ class NpPlayerSettings {
     bool? highlightPlayed,
     bool? lyricAlwaysCenter,
     NpCoverLyricsMode? coverLyrics,
-    bool? heartEffect,
     bool? showMvBadge,
     bool? playerKeepScreenOn,
     MiniPlayerStyle? miniStyle,
@@ -271,7 +267,6 @@ class NpPlayerSettings {
       highlightPlayed: highlightPlayed ?? this.highlightPlayed,
       lyricAlwaysCenter: lyricAlwaysCenter ?? this.lyricAlwaysCenter,
       coverLyrics: coverLyrics ?? this.coverLyrics,
-      heartEffect: heartEffect ?? this.heartEffect,
       showMvBadge: showMvBadge ?? this.showMvBadge,
       playerKeepScreenOn: playerKeepScreenOn ?? this.playerKeepScreenOn,
       miniStyle: miniStyle ?? this.miniStyle,
@@ -298,7 +293,6 @@ class NpPlayerSettings {
         'highlightPlayed': highlightPlayed,
         'lyricAlwaysCenter': lyricAlwaysCenter,
         'coverLyrics': coverLyrics.name,
-        'heartEffect': heartEffect,
         'showMvBadge': showMvBadge,
         'playerKeepScreenOn': playerKeepScreenOn,
         'miniStyle': miniStyle.name,
@@ -327,9 +321,13 @@ class NpPlayerSettings {
     //  - 非活跃行效果改统一强度（不再按行距辐射渐暗）；模糊由倍率
     //    改为直接 px 且默认关闭（Zephyr 默认 lyricBlur=0），旧档
     //    （含 v2 的 1.0 倍率）统一升为 0，需要时可在设置中重开。
+    // 版本迁移（v4，第十五批需求）：
+    //  - 「时刻保持居中」默认开启（旧档未开启的用户升为开启，
+    //    升级后可再自行关闭）；红心动效设置项已移除，旧键自然忽略。
     final int storedVersion = (map['_v'] as num?)?.toInt() ?? 1;
     final bool migrateToV2 = storedVersion < 2;
     final bool migrateToV3 = storedVersion < 3;
+    final bool migrateToV4 = storedVersion < 4;
 
     return NpPlayerSettings(
       displayMode: NpDisplayMode.values.firstWhere(
@@ -369,16 +367,14 @@ class NpPlayerSettings {
       yrcPlayed: colorOf(map['yrcPlayed'], defaults.yrcPlayed),
       yrcUnplayed: colorOf(map['yrcUnplayed'], defaults.yrcUnplayed),
       highlightPlayed: map['highlightPlayed'] == true,
-      lyricAlwaysCenter: map['lyricAlwaysCenter'] == true,
+      lyricAlwaysCenter: migrateToV4 || map['lyricAlwaysCenter'] == true,
       coverLyrics: migrateToV2
           ? NpCoverLyricsMode.two
           : NpCoverLyricsMode.values.firstWhere(
               (NpCoverLyricsMode m) => m.name == map['coverLyrics'],
               orElse: () => defaults.coverLyrics,
             ),
-      heartEffect: map['heartEffect'] is bool
-          ? map['heartEffect']! as bool
-          : defaults.heartEffect,
+      // 第十五批需求：heartEffect（红心动效）字段已移除，旧档键自然忽略
       showMvBadge: map['showMvBadge'] is bool
           ? map['showMvBadge']! as bool
           : defaults.showMvBadge,

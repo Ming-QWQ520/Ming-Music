@@ -235,6 +235,9 @@ class _CenterNavBar extends StatelessWidget {
       return Expanded(
         child: InkWell(
           onTap: () => onSelect(index),
+          // 第十五批需求：圆角容器内的涟漪须带圆角（导航栏为圆角胶囊
+          // 玻璃面板，InkWell 涟漪默认矩形会溢出面板圆角）
+          borderRadius: BorderRadius.circular(16),
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: <Widget>[

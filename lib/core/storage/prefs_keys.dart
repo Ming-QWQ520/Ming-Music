@@ -45,4 +45,8 @@ class PrefsKeys {
 
   /// 我的页歌单排列方式（grid=宫格 / list=列表；需求：默认宫格）
   static const String libraryPlaylistLayout = 'library.playlistLayout';
+
+  /// 本地音乐歌曲总数（第十五批需求：进入本地音乐页授权扫描后记录，
+  /// 我的页「本地音乐」tile 副标题显示总数）
+  static const String localMusicCount = 'library.localMusicCount';
 }

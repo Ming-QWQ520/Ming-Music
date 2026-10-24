@@ -87,6 +87,24 @@ final FutureProvider<PlaylistMeta?> personalRadarMetaProvider =
   }
 });
 
+/// 音乐云盘快照（第十五批需求：登录后自动同步云盘歌曲）：
+///
+///  - 登录成功后由 app.dart 监听 authProvider 预热读取（keepAlive，
+///    非 autoDispose），云盘页/我的页云盘 tile 直接消费缓存数据，
+///    打开即显示歌曲列表与总数，无需每次进页再拉取；
+///  - 上传/删除后调用方 invalidate 本 provider 触发重新同步。
+typedef CloudDriveSnapshot = (List<CloudSong>, CloudDriveInfo);
+
+final FutureProvider<CloudDriveSnapshot> cloudDriveProvider =
+    FutureProvider<CloudDriveSnapshot>((Ref ref) async {
+  final NeteaseRepository repo = ref.read(neteaseRepositoryProvider);
+  final List<dynamic> r = await Future.wait<dynamic>(<Future<dynamic>>[
+    repo.cloudList(),
+    repo.cloudInfo(),
+  ]);
+  return (r[0] as List<CloudSong>, r[1] as CloudDriveInfo);
+});
+
 // ---------------------------------------------------------------- 榜单精选自定义
 
 /// 发现页「榜单精选」自定义勾选（需求：跟 Zephyr-Music 一样的自定义 ——

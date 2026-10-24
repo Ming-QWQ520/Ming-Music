@@ -27,9 +27,10 @@ void main() {
       expect(restored.highlightPlayed, s.highlightPlayed);
       expect(restored.lyricAlwaysCenter, s.lyricAlwaysCenter);
       expect(restored.coverLyrics, s.coverLyrics);
-      expect(restored.heartEffect, s.heartEffect);
       expect(restored.miniStyle, s.miniStyle);
       expect(restored.stripButtons, s.stripButtons);
+      // 第十五批需求：heartEffect 字段已移除，旧档键不再出现在 toMap
+      expect(s.toMap().containsKey('heartEffect'), isFalse);
     });
 
     test('自定义值往返：全部非默认字段保全', () {
@@ -51,7 +52,6 @@ void main() {
         highlightPlayed: true,
         lyricAlwaysCenter: true,
         coverLyrics: NpCoverLyricsMode.two,
-        heartEffect: false,
         miniStyle: MiniPlayerStyle.compact,
         stripButtons: <String>['wiki', 'output'],
       );
@@ -76,7 +76,6 @@ void main() {
       expect(restored.highlightPlayed, isTrue);
       expect(restored.lyricAlwaysCenter, isTrue);
       expect(restored.coverLyrics, NpCoverLyricsMode.two);
-      expect(restored.heartEffect, isFalse);
       expect(restored.miniStyle, MiniPlayerStyle.compact);
       expect(restored.stripButtons, <String>['wiki', 'output']);
     });
@@ -157,8 +156,8 @@ void main() {
       // 第十四批需求：v1/v2 旧档迁移到 v3 —— 非活跃行改统一强度，
       // 模糊语义改直接 px 且默认关闭（Zephyr 默认 lyricBlur=0）
       expect(legacy.lyricBlur, 0);
-      expect(legacy.lyricAlwaysCenter, isFalse);
-      expect(legacy.heartEffect, isTrue);
+      // 第十五批需求：v4 迁移 —— 「时刻保持居中」默认开启
+      expect(legacy.lyricAlwaysCenter, isTrue);
     });
 
     test('v2 旧档迁移到 v3：模糊倍率作废统一升为 0，其余字段保留', () {
@@ -172,8 +171,24 @@ void main() {
       expect(v2.lyricBlur, 0);
       expect(v2.lyricFade, closeTo(0.6, 1e-9));
       expect(v2.coverLyrics, NpCoverLyricsMode.one);
-      // 迁移后写回即为 v3
+      // 迁移后写回即为 v4
       expect(v2.toMap()['_v'], NpPlayerSettings.version);
+    });
+
+    test('v4 迁移：时刻保持居中升为开启；v4 档保留用户显式关闭', () {
+      // v3 及更早旧档：lyricAlwaysCenter 升为 true（第十五批需求）
+      final NpPlayerSettings old = NpPlayerSettings.fromMap(<Object?, Object?>{
+        '_v': 3,
+        'lyricAlwaysCenter': false,
+      });
+      expect(old.lyricAlwaysCenter, isTrue);
+      // v4 新档：用户显式关闭后保留关闭态
+      final NpPlayerSettings current =
+          NpPlayerSettings.fromMap(<Object?, Object?>{
+        '_v': 4,
+        'lyricAlwaysCenter': false,
+      });
+      expect(current.lyricAlwaysCenter, isFalse);
     });
 
     test('stripButtons 顺序按 kStripButtonIds 规范化', () {

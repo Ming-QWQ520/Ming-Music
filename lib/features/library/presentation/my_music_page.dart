@@ -16,14 +16,14 @@ import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
-import '../../../core/api/netease_models.dart'
-    show PlaylistMeta, CloudDriveInfo;
+import '../../../core/api/netease_models.dart' show PlaylistMeta;
 import '../../../core/constants/app_constants.dart';
 import '../../../core/widgets/cover_image.dart';
 import '../../auth/data/netease_auth_repository.dart' show NeteaseUserPlaylist;
 import '../../auth/presentation/login_sheet.dart';
 import '../../auth/providers/auth_providers.dart';
 import '../../discover/data/netease_providers.dart';
+import '../data/local_music_count.dart' show localMusicCountProvider;
 import '../../settings/domain/settings_models.dart' show LibraryPlaylistLayout;
 import '../../settings/providers/settings_providers.dart'
     show libraryPlaylistLayoutProvider;
@@ -196,8 +196,10 @@ class _MyMusicPageState extends ConsumerState<MyMusicPage> {
                     ..._collectedList,
                   ],
                   createdCount: _createdList.length,
+                  onCreate: () => _createPlaylist(context),
                 )
               else ...<Widget>[
+                // 第十五批需求：创建的歌单右侧「>」改为「+」新建歌单
                 _PlaylistSection(
                   header: '创建的歌单',
                   count: _createdList.length,
@@ -205,6 +207,7 @@ class _MyMusicPageState extends ConsumerState<MyMusicPage> {
                   expanded: _createdExpanded,
                   onToggle: () =>
                       setState(() => _createdExpanded = !_createdExpanded),
+                  onCreate: () => _createPlaylist(context),
                 ),
                 if (_collectedList.isNotEmpty) ...<Widget>[
                   const SizedBox(height: 4),
@@ -450,6 +453,9 @@ class _QuickGrid extends ConsumerWidget {
     final AuthState auth = ref.watch(authProvider);
     final String likeSub =
         auth.loggedIn ? '${auth.likedIds.length} 首' : '登录后可用';
+    // 第十五批需求：本地音乐授权扫描后在我的页显示歌曲总数
+    final int? localCount = ref.watch(localMusicCountProvider);
+    final String localSub = localCount != null ? '$localCount 首歌曲' : '扫描设备音频';
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
@@ -502,7 +508,7 @@ class _QuickGrid extends ConsumerWidget {
                   icon: Icons.library_music_rounded,
                   gradient: _gradients[2],
                   title: '本地音乐',
-                  subtitle: '扫描设备音频',
+                  subtitle: localSub,
                   onTap: () => context.push('/local-music'),
                 ),
               ),
@@ -524,42 +530,25 @@ class _QuickGrid extends ConsumerWidget {
 }
 
 /// 音乐云盘宫格 tile（需求：原「我的云盘」行样式上移至此）——
-/// 云盘绿渐变图标块 + 「音乐云盘」标题 + 登录后显示云盘歌曲数；
-/// 未登录/获取失败回退「登录后可用」。点击进云盘页。
-class _CloudDriveTile extends ConsumerStatefulWidget {
+/// 云盘绿渐变图标块 + 「音乐云盘」标题；第十五批需求改为直接消费
+/// 全局云盘快照（登录后 app.dart 自动预热），无需进页后才拉取。
+/// 点击进云盘页。
+class _CloudDriveTile extends ConsumerWidget {
   const _CloudDriveTile();
 
   @override
-  ConsumerState<_CloudDriveTile> createState() => _CloudDriveTileState();
-}
-
-class _CloudDriveTileState extends ConsumerState<_CloudDriveTile> {
-  int? _count;
-
-  @override
-  void initState() {
-    super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _loadCount());
-  }
-
-  Future<void> _loadCount() async {
-    final AuthState auth = ref.read(authProvider);
-    if (!auth.loggedIn) return;
-    try {
-      final CloudDriveInfo info =
-          await ref.read(neteaseRepositoryProvider).cloudInfo();
-      if (!mounted) return;
-      setState(() => _count = info.count);
-    } catch (_) {
-      // 云盘信息获取失败静默（仍可进入云盘页查看）
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final AuthState auth = ref.watch(authProvider);
-    final String subtitle =
-        auth.loggedIn && _count != null ? '$_count 首歌曲已同步' : '登录后可用';
+    String subtitle = '登录后可用';
+    if (auth.loggedIn) {
+      // 第十五批需求：直接消费全局云盘快照（登录后自动预热）
+      final AsyncValue<CloudDriveSnapshot> snap = ref.watch(cloudDriveProvider);
+      subtitle = snap.when(
+        data: (CloudDriveSnapshot d) => '${d.$2.count} 首歌曲已同步',
+        loading: () => '正在同步云盘…',
+        error: (Object e, StackTrace st) => '同步失败，进云盘页重试',
+      );
+    }
     return _QuickHubTile(
       icon: Icons.cloud_rounded,
       gradient: const <Color>[Color(0xFF9BE7A4), Color(0xFF4ADE80)],
@@ -710,6 +699,7 @@ class _PlaylistGridSection extends StatelessWidget {
   const _PlaylistGridSection({
     required this.playlists,
     required this.createdCount,
+    this.onCreate,
   });
 
   /// 已按 [created..., collected...] 顺序拼接的完整列表
@@ -717,6 +707,9 @@ class _PlaylistGridSection extends StatelessWidget {
 
   /// 创建的歌单数量（标题计数用）
   final int createdCount;
+
+  /// 第十五批需求：创建的歌单标题行最右侧显示「+」新建歌单
+  final VoidCallback? onCreate;
 
   @override
   Widget build(BuildContext context) {
@@ -727,7 +720,7 @@ class _PlaylistGridSection extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
             child: Row(
               children: <Widget>[
                 Text('创建的歌单',
@@ -738,6 +731,20 @@ class _PlaylistGridSection extends StatelessWidget {
                     style: TextStyle(
                         fontSize: 12,
                         color: theme.colorScheme.onSurfaceVariant)),
+                const Spacer(),
+                // 第十五批需求：最右侧「+」= 新建歌单
+                if (onCreate != null)
+                  SizedBox(
+                    width: 34,
+                    height: 34,
+                    child: IconButton(
+                      tooltip: '新建歌单',
+                      padding: EdgeInsets.zero,
+                      icon: Icon(Icons.add_rounded,
+                          size: 22, color: theme.colorScheme.onSurface),
+                      onPressed: onCreate,
+                    ),
+                  ),
               ],
             ),
           ),
@@ -832,6 +839,7 @@ class _PlaylistSection extends StatelessWidget {
     required this.playlists,
     required this.expanded,
     required this.onToggle,
+    this.onCreate,
   });
 
   final String header;
@@ -840,6 +848,10 @@ class _PlaylistSection extends StatelessWidget {
   final bool expanded;
   final VoidCallback onToggle;
 
+  /// 第十五批需求：非空时标题行最右侧显示「+」（新建歌单），
+  /// 替换原有「>」箭头（创建的歌单专用；收藏的歌单不传即保持原样）
+  final VoidCallback? onCreate;
+
   @override
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
@@ -847,37 +859,59 @@ class _PlaylistSection extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
       child: Column(
         children: <Widget>[
-          InkWell(
-            borderRadius: BorderRadius.circular(12),
-            onTap: onToggle,
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
-              child: Row(
-                children: <Widget>[
-                  AnimatedRotation(
-                    turns: expanded ? 0.0 : -0.25,
-                    duration: const Duration(milliseconds: 200),
-                    child: Icon(Icons.expand_more_rounded,
-                        size: 20, color: theme.colorScheme.onSurfaceVariant),
+          Row(
+            children: <Widget>[
+              Expanded(
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(12),
+                  onTap: onToggle,
+                  child: Padding(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+                    child: Row(
+                      children: <Widget>[
+                        AnimatedRotation(
+                          turns: expanded ? 0.0 : -0.25,
+                          duration: const Duration(milliseconds: 200),
+                          child: Icon(Icons.expand_more_rounded,
+                              size: 20,
+                              color: theme.colorScheme.onSurfaceVariant),
+                        ),
+                        const SizedBox(width: 6),
+                        Text(header,
+                            style: const TextStyle(
+                                fontSize: 15.5, fontWeight: FontWeight.w700)),
+                        const SizedBox(width: 6),
+                        Text('$count',
+                            style: TextStyle(
+                                fontSize: 12,
+                                color: theme.colorScheme.onSurfaceVariant)),
+                      ],
+                    ),
                   ),
-                  const SizedBox(width: 6),
-                  Text(header,
-                      style: const TextStyle(
-                          fontSize: 15.5, fontWeight: FontWeight.w700)),
-                  const SizedBox(width: 6),
-                  Text('$count',
-                      style: TextStyle(
-                          fontSize: 12,
-                          color: theme.colorScheme.onSurfaceVariant)),
-                  const Spacer(),
-                  Icon(
-                    Icons.keyboard_arrow_right_rounded,
-                    size: 18,
-                    color: theme.colorScheme.onSurfaceVariant,
-                  ),
-                ],
+                ),
               ),
-            ),
+              // 第十五批需求：创建的歌单最右侧「>」改「+」＝新建歌单
+              //（独立于折叠开关，避免点击「+」误触收起/展开）
+              if (onCreate != null)
+                SizedBox(
+                  width: 34,
+                  height: 34,
+                  child: IconButton(
+                    tooltip: '新建歌单',
+                    padding: EdgeInsets.zero,
+                    icon: Icon(Icons.add_rounded,
+                        size: 22, color: theme.colorScheme.onSurface),
+                    onPressed: onCreate,
+                  ),
+                )
+              else
+                Icon(
+                  Icons.keyboard_arrow_right_rounded,
+                  size: 18,
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+            ],
           ),
           AnimatedCrossFade(
             firstChild: const SizedBox(width: double.infinity),
@@ -887,14 +921,24 @@ class _PlaylistSection extends StatelessWidget {
                     .withValues(alpha: 0.5),
                 borderRadius: BorderRadius.circular(16),
               ),
-              child: Column(
-                children: <Widget>[
-                  for (int i = 0; i < playlists.length; i++)
-                    _PlaylistRowTile(
-                      playlist: playlists[i],
-                      isLast: i == playlists.length - 1,
-                    ),
-                ],
+              // 第十五批需求：圆角容器内行涟漪防溢出 —— Material 带
+              // shape + clipBehavior 裁剪 InkFeatures（外层 ClipRRect
+              // 裁不住 Material 层的涟漪）
+              child: Material(
+                color: Colors.transparent,
+                clipBehavior: Clip.antiAlias,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                child: Column(
+                  children: <Widget>[
+                    for (int i = 0; i < playlists.length; i++)
+                      _PlaylistRowTile(
+                        playlist: playlists[i],
+                        isLast: i == playlists.length - 1,
+                      ),
+                  ],
+                ),
               ),
             ),
             crossFadeState:

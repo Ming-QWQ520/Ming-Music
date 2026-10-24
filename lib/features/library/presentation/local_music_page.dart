@@ -1,4 +1,7 @@
 /// 本地音乐（MediaStore 音频库扫描 + 本地播放）。
+///
+/// 第十五批需求：授权同意并扫描成功后，将歌曲总数持久化
+///（localMusicCountProvider），我的页「本地音乐」tile 副标题同步显示。
 library;
 
 import 'package:flutter/material.dart';
@@ -8,6 +11,7 @@ import 'package:permission_handler/permission_handler.dart';
 import '../../../core/constants/app_constants.dart';
 import '../../../core/utils/duration_utils.dart' show DurationX;
 import '../../../core/utils/platform_actions.dart';
+import '../data/local_music_count.dart' show localMusicCountProvider;
 import '../../library/domain/track.dart';
 import '../../player/providers/player_providers.dart';
 
@@ -52,6 +56,8 @@ class _LocalMusicPageState extends ConsumerState<LocalMusicPage> {
       _files = files;
       _denied = false;
     });
+    // 第十五批需求：授权同意 + 扫描成功 → 持久化总数供我的页显示
+    ref.read(localMusicCountProvider.notifier).set(files.length);
   }
 
   List<Track> _asTracks(List<Map<String, Object?>> files) => <Track>[

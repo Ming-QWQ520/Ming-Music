@@ -1,4 +1,8 @@
-/// 音乐云盘（/user/cloud）：列表 / 播放 / 删除 / 上传本地音乐。
+/// 音乐云盘：列表 / 播放 / 删除 / 上传本地音乐。
+///
+/// 第十五批需求：数据源接全局 [cloudDriveProvider]（登录后由 app.dart
+/// 自动预热）—— 打开即显示已同步的歌曲，无需每次进页重新拉取；
+/// 上传/删除后 invalidate 触发重新同步。
 library;
 
 import 'package:flutter/material.dart';
@@ -26,49 +30,18 @@ class CloudDrivePage extends ConsumerStatefulWidget {
 }
 
 class _CloudDrivePageState extends ConsumerState<CloudDrivePage> {
-  List<CloudSong>? _songs;
-  CloudDriveInfo? _info;
-  String? _error;
   int? _deletingId;
 
-  @override
-  void initState() {
-    super.initState();
-    _load();
+  /// 上传后本地补拉（invalidate 共享 provider 即重新同步）
+  Future<void> _refresh() async {
+    ref.invalidate(cloudDriveProvider);
   }
 
-  Future<void> _load() async {
-    setState(() {
-      _error = null;
-      _songs = null;
-    });
-    try {
-      // 需求：云盘显示总歌曲数和总容量（count/size/maxSize 与列表同时拉取）
-      final List<dynamic> r = await Future.wait<dynamic>(<Future<dynamic>>[
-        ref.read(neteaseRepositoryProvider).cloudList(),
-        ref.read(neteaseRepositoryProvider).cloudInfo(),
-      ]);
-      if (!mounted) return;
-      setState(() {
-        _songs = r[0] as List<CloudSong>;
-        _info = r[1] as CloudDriveInfo;
-      });
-    } catch (e) {
-      if (!mounted) return;
-      setState(() => _error = '$e');
-    }
-  }
-
-  List<Track> _asTracks(List<CloudSong> songs) => <Track>[
-        for (final CloudSong c in songs) c.song.toTrack(),
-      ];
-
-  void _playAt(int index) {
-    final List<CloudSong>? songs = _songs;
-    if (songs == null || songs.isEmpty) return;
-    ref
-        .read(playerProvider.notifier)
-        .playSongs(_asTracks(songs), startIndex: index, queueTitle: '音乐云盘');
+  void _playAt(List<CloudSong> songs, int index) {
+    if (songs.isEmpty) return;
+    ref.read(playerProvider.notifier).playSongs(
+        <Track>[for (final CloudSong c in songs) c.song.toTrack()],
+        startIndex: index, queueTitle: '音乐云盘');
   }
 
   Future<void> _delete(CloudSong item) async {
@@ -97,7 +70,7 @@ class _CloudDrivePageState extends ConsumerState<CloudDrivePage> {
       if (!mounted) return;
       ScaffoldMessenger.of(context)
           .showSnackBar(const SnackBar(content: Text('已删除')));
-      await _load();
+      await _refresh();
     } catch (e) {
       if (!mounted) return;
       setState(() => _deletingId = null);
@@ -122,7 +95,7 @@ class _CloudDrivePageState extends ConsumerState<CloudDrivePage> {
           IconButton(
             tooltip: '刷新',
             icon: const Icon(Icons.refresh_rounded, size: 22),
-            onPressed: _load,
+            onPressed: _refresh,
           ),
         ],
       ),
@@ -151,31 +124,34 @@ class _CloudDrivePageState extends ConsumerState<CloudDrivePage> {
   }
 
   Widget _buildBody() {
-    if (_error != null) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: <Widget>[
-            Text('加载失败：$_error',
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                    color: Theme.of(context).colorScheme.onSurfaceVariant)),
-            const SizedBox(height: 12),
-            OutlinedButton(onPressed: _load, child: const Text('重试')),
-          ],
-        ),
-      );
-    }
-    final List<CloudSong>? songs = _songs;
-    if (songs == null) {
-      return const Center(
+    // 第十五批需求：消费全局云盘快照（登录后已预热，打开即显示）
+    final AsyncValue<CloudDriveSnapshot> snap = ref.watch(cloudDriveProvider);
+    return snap.when(
+      loading: () => const Center(
         child: SizedBox(
           width: 28,
           height: 28,
           child: CircularProgressIndicator(strokeWidth: 2.6),
         ),
-      );
-    }
+      ),
+      error: (Object e, StackTrace _) => Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: <Widget>[
+            Text('加载失败：$e',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant)),
+            const SizedBox(height: 12),
+            OutlinedButton(onPressed: _refresh, child: const Text('重试')),
+          ],
+        ),
+      ),
+      data: (CloudDriveSnapshot data) => _buildList(data.$1, data.$2),
+    );
+  }
+
+  Widget _buildList(List<CloudSong> songs, CloudDriveInfo info) {
     if (songs.isEmpty) {
       return Center(
         child: Text(
@@ -202,8 +178,8 @@ class _CloudDrivePageState extends ConsumerState<CloudDrivePage> {
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
-                  '共 ${_info?.count ?? songs.length} 首 · 已用 ${_sizeTotal(_info?.size ?? 0)}'
-                  '${(_info?.maxSize ?? 0) > 0 ? ' / ${_sizeTotal(_info!.maxSize)}' : ''}',
+                  '共 ${info.count} 首 · 已用 ${_sizeTotal(info.size)}'
+                  '${info.maxSize > 0 ? ' / ${_sizeTotal(info.maxSize)}' : ''}',
                   style: TextStyle(
                     fontSize: 12.5,
                     color: Theme.of(context).colorScheme.onSurfaceVariant,
@@ -233,7 +209,7 @@ class _CloudDrivePageState extends ConsumerState<CloudDrivePage> {
         Expanded(
           child: RefreshIndicator(
             color: AppConstants.brandColor,
-            onRefresh: _load,
+            onRefresh: _refresh,
             child: ListView.builder(
               physics: const AlwaysScrollableScrollPhysics(),
               itemCount: songs.length,
@@ -284,7 +260,7 @@ class _CloudDrivePageState extends ConsumerState<CloudDrivePage> {
                                   .onSurfaceVariant),
                           onPressed: () => _delete(item),
                         ),
-                  onTap: () => _playAt(index),
+                  onTap: () => _playAt(songs, index),
                   onLongPress: () => showSongActionsSheet(context, s.toTrack()),
                 );
               },
@@ -320,8 +296,8 @@ class _CloudDrivePageState extends ConsumerState<CloudDrivePage> {
     }
     if (!granted) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('需要「音频」权限以上传本地音乐')));
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('需要「音频」权限以上传本地音乐')));
       return;
     }
     final List<Map<String, Object?>> files =
@@ -345,9 +321,8 @@ class _CloudDrivePageState extends ConsumerState<CloudDrivePage> {
 
   Future<void> _uploadFile(Map<String, Object?> file) async {
     final String path = '${file['path'] ?? ''}';
-    final String name = path.isEmpty
-        ? '${file['title'] ?? '未命名'}.mp3'
-        : path.split('/').last;
+    final String name =
+        path.isEmpty ? '${file['title'] ?? '未命名'}.mp3' : path.split('/').last;
     if (path.isEmpty || !name.contains('.')) {
       if (!mounted) return;
       ScaffoldMessenger.of(context)
@@ -391,7 +366,7 @@ class _CloudDrivePageState extends ConsumerState<CloudDrivePage> {
       Navigator.of(context, rootNavigator: true).pop(); // 关进度弹窗
       ScaffoldMessenger.of(context)
           .showSnackBar(SnackBar(content: Text('已上传「$name」到云盘')));
-      await _load();
+      await _refresh();
     } on ApiException catch (e) {
       if (!mounted) return;
       Navigator.of(context, rootNavigator: true).pop();
@@ -467,8 +442,8 @@ class _LocalAudioPickerSheet extends StatelessWidget {
             Expanded(
               child: ListView.separated(
                 itemCount: files.length.clamp(0, 500),
-                separatorBuilder: (_, __) =>
-                    Divider(height: 1, color: Colors.white.withValues(alpha: 0.06)),
+                separatorBuilder: (_, __) => Divider(
+                    height: 1, color: Colors.white.withValues(alpha: 0.06)),
                 itemBuilder: (BuildContext ctx, int index) {
                   final Map<String, Object?> f = files[index];
                   final String title = '${f['title'] ?? '未知曲目'}';
@@ -489,10 +464,13 @@ class _LocalAudioPickerSheet extends StatelessWidget {
                     title: Text(title,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                            color: Colors.white, fontSize: 14)),
+                        style:
+                            const TextStyle(color: Colors.white, fontSize: 14)),
                     subtitle: Text(
-                      artist + (size != null && size > 0 ? ' · ${_fmtSize(size)}' : ''),
+                      artist +
+                          (size != null && size > 0
+                              ? ' · ${_fmtSize(size)}'
+                              : ''),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(

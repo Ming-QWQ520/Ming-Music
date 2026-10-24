@@ -1,6 +1,7 @@
 /// 应用根 Widget：主题模式 + go_router 路由入口 + 全局 Mini 播放条宿主。
 library;
 
+import 'dart:async' show unawaited;
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -10,6 +11,8 @@ import 'package:go_router/go_router.dart' show RouteMatchBase;
 
 import 'core/router.dart';
 import 'core/theme/app_theme.dart';
+import 'features/auth/providers/auth_providers.dart';
+import 'features/discover/data/netease_providers.dart' show cloudDriveProvider;
 import 'features/player/presentation/widgets/mini_player.dart';
 import 'features/player/providers/player_providers.dart';
 import 'features/settings/providers/settings_providers.dart';
@@ -20,6 +23,17 @@ class MingMusicApp extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final ThemeMode mode = ref.watch(themeModeProvider);
+    // 第十五批需求：登录后自动同步音乐云盘 —— 监听登录态，变为已登录
+    // （含启动恢复与首次扫码/手机登录）时预热云盘快照 provider，
+    // 云盘页与我的页云盘 tile 打开即显示歌曲；失败静默（可下拉重试）
+    ref.listen<AuthState>(authProvider, (AuthState? prev, AuthState next) {
+      if (next.loggedIn && (prev?.loggedIn != true)) {
+        // 静默预热：失败不阻断 UI，进云盘页/下拉可重试
+        unawaited(ref
+            .read(cloudDriveProvider.future)
+            .then<void>((_) {}, onError: (Object _) {}));
+      }
+    });
     // 需求：LRU 缓存上限/开关 → SongCacheService 同步（应用级常驻）
     ref.watch(cacheConfigSyncProvider);
     // 需求：全局图片背景（除播放页外）—— 启用时页面底色透明化，

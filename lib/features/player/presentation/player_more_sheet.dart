@@ -456,20 +456,7 @@ class _PlayerMoreSheetState extends ConsumerState<_PlayerMoreSheet> {
                     ),
                     onTap: () => _showStylePicker(cfg),
                   ),
-                  _MoreRow(
-                    icon: Icons.favorite_rounded,
-                    label: '红心动效',
-                    trailing: Switch.adaptive(
-                      value: cfg.heartEffect,
-                      activeThumbColor: AppConstants.brandColor,
-                      onChanged: (bool v) => ref
-                          .read(npSettingsProvider.notifier)
-                          .setHeartEffect(v),
-                    ),
-                    onTap: () => ref
-                        .read(npSettingsProvider.notifier)
-                        .setHeartEffect(!cfg.heartEffect),
-                  ),
+                  // 第十五批需求：红心动效已移除
                   const _SectionLabel('场景与模式'),
                   _MoreRow(
                     icon: Icons.timer_outlined,
