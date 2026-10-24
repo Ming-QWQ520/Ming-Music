@@ -10,6 +10,9 @@
 ///      覆盖 api.github.com 与 avatars.githubusercontent.com；
 ///    · 三个端点独立加载：仓库信息失败才报错；最新发布无 release 时
 ///      返回 404 属正常情况，不再拖垮整页；贡献者同理；
+///  - 第十七批新增：检查更新（与启动自动检查同套逻辑，手动触发不受
+///    「跳过此版本」限制）+ 版本更新日志（/releases 前 10 条，Markdown
+///    渲染发布说明，与更新弹窗共用数据源）；
 ///  - 版式对齐 kgka：应用 Logo + 名称/版本头部 → 信息分组行（_InfoRow
 ///    同构：label 左 value 右）→ 统计宫格 → 贡献者头像列表 → 最新版本
 ///    可折叠卡片（Markdown 纯文本呈现 release body）；
@@ -22,8 +25,13 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_markdown/flutter_markdown.dart';
+import 'package:package_info_plus/package_info_plus.dart';
+
 import '../../../core/constants/app_constants.dart';
 import '../../../core/utils/platform_actions.dart';
+import 'widgets/update_dialog.dart';
+import '../services/app_update_service.dart';
 
 /// 从 repoUrl 解析 owner/repo（AppConstants 单一来源，不另写死）
 (String, String) _parseRepoSlug() {
@@ -47,8 +55,14 @@ class _GithubProjectPageState extends State<GithubProjectPage> {
   Map<String, Object?>? _repo;
   Map<String, Object?>? _release;
   List<Map<String, Object?>> _contributors = <Map<String, Object?>>[];
+
+  /// 版本更新日志（第十七批需求：/releases 前 10 条，进入页面后台拉取）
+  List<AppRelease> _releases = <AppRelease>[];
   String? _error;
   bool _loading = true;
+
+  /// 「检查更新」进行中状态
+  bool _checkingUpdate = false;
 
   @override
   void initState() {
@@ -90,6 +104,47 @@ class _GithubProjectPageState extends State<GithubProjectPage> {
           : const <Map<String, Object?>>[];
       _loading = false;
     });
+    // 版本更新日志：独立加载，失败不拖垮页面（第十七批需求）
+    _loadReleaseLog();
+  }
+
+  Future<void> _loadReleaseLog() async {
+    final List<AppRelease> logs = await AppUpdateService.fetchReleases()
+        .timeout(const Duration(seconds: 25), onTimeout: () => const <AppRelease>[]);
+    if (!mounted) return;
+    setState(() => _releases = logs);
+  }
+
+  /// 「检查更新」（第十七批需求）：与启动自动检查同一套版本比对 +
+  /// 跳过逻辑；手动触发不受「跳过此版本」限制，无更新时给出提示。
+  Future<void> _checkUpdate() async {
+    if (_checkingUpdate) return;
+    setState(() => _checkingUpdate = true);
+    try {
+      final AppRelease? latest =
+          await AppUpdateService.fetchLatestRelease();
+      if (!mounted) return;
+      if (latest == null) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('暂未获取到更新信息，请稍后重试')));
+        return;
+      }
+      final PackageInfo info = await PackageInfo.fromPlatform();
+      if (!mounted) return;
+      if (AppUpdateService.isNewer(latest.tagName, info.version)) {
+        await showUpdateDialog(context, release: latest);
+        await _loadReleaseLog();
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text('当前已是最新版本 v${info.version}')));
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('检查更新失败：$e')));
+    } finally {
+      if (mounted) setState(() => _checkingUpdate = false);
+    }
   }
 
   /// GitHub API GET（自带 UA；无 token 匿名限额 60 次/时足够本页使用）。
@@ -301,6 +356,14 @@ class _GithubProjectPageState extends State<GithubProjectPage> {
             onTap: () =>
                 _openRepo('${repo['html_url'] ?? AppConstants.repoUrl}'),
           ),
+          // 检查更新（第十七批需求）：与启动自动检查同套逻辑，
+          // 手动触发不受「跳过此版本」限制
+          _ActionRow(
+            label: '检查更新',
+            value: _checkingUpdate ? '检查中…' : '当前 v${AppConstants.appVersion}',
+            busy: _checkingUpdate,
+            onTap: _checkingUpdate ? null : _checkUpdate,
+          ),
         ]),
 
         // ---- 贡献者（API 列表）----
@@ -320,6 +383,19 @@ class _GithubProjectPageState extends State<GithubProjectPage> {
                 ),
             ],
           ),
+        ],
+
+        // ---- 版本更新日志（第十七批需求：/releases 前 10 条，
+        //      Markdown 渲染发布说明，与启动更新弹窗同数据源）----
+        if (_releases.isNotEmpty) ...<Widget>[
+          const SizedBox(height: 20),
+          _SectionHeader(icon: Icons.history_rounded, text: '版本更新日志'),
+          const SizedBox(height: 8),
+          for (final AppRelease r in _releases)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: _ReleaseLogCard(release: r),
+            ),
         ],
 
         // ---- 最新发布说明（可折叠卡片，kgka _VersionCard 同构）----
@@ -624,6 +700,182 @@ class _ContributorRow extends StatelessWidget {
               style: TextStyle(
                   fontSize: 11.5, color: theme.colorScheme.onSurfaceVariant)),
         ],
+      ),
+    );
+  }
+}
+
+/// 可点击信息行（检查更新等动作行；kgka 设置行同构）
+class _ActionRow extends StatelessWidget {
+  const _ActionRow({
+    required this.label,
+    required this.value,
+    required this.busy,
+    required this.onTap,
+  });
+
+  final String label;
+  final String value;
+  final bool busy;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(8),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 10),
+        child: Row(
+          children: <Widget>[
+            Text(label,
+                style: TextStyle(
+                    fontSize: 13.5,
+                    fontWeight: FontWeight.w600,
+                    color: theme.colorScheme.onSurfaceVariant)),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Text(
+                value,
+                textAlign: TextAlign.end,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                    fontSize: 13.5,
+                    fontWeight: FontWeight.w800,
+                    color: theme.colorScheme.primary),
+              ),
+            ),
+            const SizedBox(width: 6),
+            if (busy)
+              const SizedBox(
+                width: 14,
+                height: 14,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              )
+            else
+              Icon(Icons.refresh_rounded,
+                  size: 18, color: theme.colorScheme.primary),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// 版本更新日志卡片（第十七批需求）：tag + 日期头部，正文 Markdown 渲染，
+/// 默认折叠、点击展开；与启动更新弹窗共用 release body 数据源
+class _ReleaseLogCard extends StatefulWidget {
+  const _ReleaseLogCard({required this.release});
+
+  final AppRelease release;
+
+  @override
+  State<_ReleaseLogCard> createState() => _ReleaseLogCardState();
+}
+
+class _ReleaseLogCardState extends State<_ReleaseLogCard> {
+  bool _expanded = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    final String body = widget.release.body.trim();
+    return Container(
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(16),
+          onTap: () => setState(() => _expanded = !_expanded),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Row(
+                  children: <Widget>[
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: theme.colorScheme.primary,
+                        borderRadius: BorderRadius.circular(7),
+                      ),
+                      child: Text(
+                        widget.release.tagName,
+                        style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w800),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        widget.release.title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                            fontSize: 13, fontWeight: FontWeight.w700),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Text(widget.release.dateText,
+                        style: TextStyle(
+                            fontSize: 11.5,
+                            color: theme.colorScheme.onSurfaceVariant)),
+                    AnimatedRotation(
+                      turns: _expanded ? 0.0 : -0.25,
+                      duration: const Duration(milliseconds: 200),
+                      child: Icon(Icons.expand_more_rounded,
+                          size: 18,
+                          color: theme.colorScheme.onSurfaceVariant),
+                    ),
+                  ],
+                ),
+                AnimatedCrossFade(
+                  firstChild: const SizedBox(width: double.infinity),
+                  secondChild: Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: MarkdownBody(
+                      data: body.isEmpty ? '（未提供发布说明）' : body,
+                      styleSheet: MarkdownStyleSheet(
+                        p: TextStyle(
+                            fontSize: 12.5, height: 1.55,
+                            color: theme.colorScheme.onSurface),
+                        listBullet: TextStyle(
+                            fontSize: 12.5, height: 1.5,
+                            color: theme.colorScheme.onSurface),
+                        h1: TextStyle(
+                            fontSize: 14.5, fontWeight: FontWeight.w800,
+                            color: theme.colorScheme.onSurface),
+                        h2: TextStyle(
+                            fontSize: 14, fontWeight: FontWeight.w800,
+                            color: theme.colorScheme.onSurface),
+                        h3: TextStyle(
+                            fontSize: 13.5, fontWeight: FontWeight.w700,
+                            color: theme.colorScheme.onSurface),
+                        code: TextStyle(
+                            fontSize: 11.5,
+                            backgroundColor: theme.colorScheme.surface),
+                      ),
+                    ),
+                  ),
+                  crossFadeState: _expanded
+                      ? CrossFadeState.showSecond
+                      : CrossFadeState.showFirst,
+                  duration: const Duration(milliseconds: 220),
+                  sizeCurve: Curves.easeOutCubic,
+                ),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }

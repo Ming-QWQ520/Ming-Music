@@ -12,6 +12,9 @@
     <!-- Android 13+ 通知栏媒体控制需要运行时申请 -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
+    <!-- 应用内更新：下载 APK 后拉起系统安装器（Android 8+ 允许安装未知来源） -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+
     <!-- 封面保存至相册（仅 Android 9- 公共目录写入需要；10+ 走 MediaStore 免权限） -->
     <uses-permission
         android:name="android.permission.WRITE_EXTERNAL_STORAGE"

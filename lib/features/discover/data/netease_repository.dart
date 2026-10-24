@@ -224,13 +224,105 @@ class NeteaseRepository {
     }
   }
 
-  /// 搜索建议（/search/suggest，type=mobile 返回 allMatch）
+  /// 搜索建议（/search/suggest，type=mobile 返回 allMatch）。
+  /// 作为联想词新接口三层兜底的最后一层。
   Future<SearchSuggest> searchSuggest(String keywords) async {
     final Map<String, Object?> res = await _api.get('/search/suggest',
         <String, String>{'keywords': keywords, 'type': 'mobile'});
     final Object? result = res['result'];
     if (result is! Map<String, Object?>) return const SearchSuggest();
     return SearchSuggest.fromJson(result);
+  }
+
+  /// 新接口实际命中的路径（进程内记忆，避免每次按键都试错三层）：
+  /// 0 = /api 前缀（官方文档路径）；1 = 无前缀（增强 API 风格）；-1 = 未定
+  static int _kwSuggestPath = -1;
+
+  /// 搜索联想词（第十七批需求，对齐官方 App 搜索框下拉）：
+  /// POST /search/suggest/keyword/get（参数是 keyword，传 s 会 HTTP 400）。
+  ///
+  /// 当前线上增强 API 尚未部署该模块（404），故做三层兜底：
+  ///  1. /api/search/suggest/keyword/get —— 上传文档（官方 weapi 实测）路径；
+  ///  2. /search/suggest/keyword/get —— 增强型 NeteaseCloudMusicAPI 风格路径
+  ///     （服务器补齐该模块后自动生效）；
+  ///  3. 旧 /search/suggest —— 联想词降级（无直 hit 卡与高亮，功能不缺席）。
+  /// 成功路径进程内记忆，后续按键直达；全部失败抛出由调用方清空下拉。
+  Future<KeywordSuggest> searchKeywordSuggest(String keyword) async {
+    final String kw = keyword.trim();
+    if (kw.isEmpty) return const KeywordSuggest();
+    final Map<String, String> body = <String, String>{
+      'keyword': kw,
+      'limit': '11',
+    };
+    const List<String> paths = <String>[
+      '/api/search/suggest/keyword/get',
+      '/search/suggest/keyword/get',
+    ];
+    // 记忆路径直达
+    if (_kwSuggestPath >= 0 && _kwSuggestPath < paths.length) {
+      try {
+        return _parseKeywordSuggest(
+            await _api.post(paths[_kwSuggestPath], body));
+      } catch (_) {
+        _kwSuggestPath = -1; // 记忆失效，重新试错
+      }
+    }
+    for (int i = 0; i < paths.length; i++) {
+      try {
+        final KeywordSuggest s =
+            _parseKeywordSuggest(await _api.post(paths[i], body));
+        _kwSuggestPath = i;
+        return s;
+      } catch (_) {
+        // 404/网络抖动 → 下一层
+      }
+    }
+    // 第三层：旧接口兜底（联想词可用，无直 hit 卡/高亮/相关搜索）
+    final SearchSuggest legacy = await searchSuggest(kw);
+    return KeywordSuggest(
+      words: <SuggestWord>[
+        for (final String w in legacy.keywords)
+          SuggestWord(keyword: w),
+      ],
+    );
+  }
+
+  static KeywordSuggest _parseKeywordSuggest(Map<String, Object?> res) {
+    final Object? data = res['data'];
+    if (data is! Map<String, Object?>) return const KeywordSuggest();
+    final Object? suggests = data['suggests'];
+    final List<SuggestWord> words = <SuggestWord>[];
+    SuggestWord? directHit;
+    if (suggests is List<Object?>) {
+      for (final Object? item in suggests) {
+        if (item is! Map<String, Object?>) continue;
+        final SuggestWord w = SuggestWord.fromJson(item);
+        if (w.keyword.isEmpty && !w.isDirectHit) continue;
+        if (w.isDirectHit && directHit == null) {
+          directHit = w; // 第 0 条直 hit 歌曲卡
+        } else {
+          words.add(w);
+        }
+      }
+    }
+    final List<String> recs = <String>[];
+    final Object? rawRecs = data['recs'];
+    if (rawRecs is List<Object?>) {
+      for (final Object? item in rawRecs) {
+        if (item is String && item.isNotEmpty) {
+          recs.add(item);
+        } else if (item is Map<String, Object?>) {
+          final String? kw = item['keyword'] as String?;
+          if (kw != null && kw.isNotEmpty) recs.add(kw);
+        }
+      }
+    }
+    return KeywordSuggest(
+      directHit: directHit,
+      words: words,
+      recTitle: (data['recTitle'] as String?) ?? '相关搜索',
+      recs: recs,
+    );
   }
 
   /// 热搜词（详细版，带icon与热度）

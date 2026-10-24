@@ -388,10 +388,15 @@ class PlayerNotifier extends Notifier<PlayerState> {
 
   /// 启动恢复（需求：退出重进后自动刷新当前播放歌单的播放 URL ——
   /// 直链约 20 分钟过期，落盘只存歌曲 id）：
-  ///  1. 先用占位曲目立即回填 UI（不阻塞首帧）；
-  ///  2. 后台经 /song/detail 批量补全元数据（200/批）；
+  ///  1. 先用落盘元数据立即回填 UI（不阻塞首帧；v3 存档自带真实
+  ///     标题/歌手/封面，Mini 条不再显示「加载中…」）；
+  ///  2. 后台经 /song/detail 批量补全元数据（v2 旧档占位行；200/批）；
   ///  3. 静默批量重新解析直链（缓存命中直接用本地文件）；
-  ///  4. 预加载下一首。全程不自动播放；失败降级为播放时重解析。
+  ///  4. **静默装载播放内核队列（不自动播放）** —— 第十七批修复：
+  ///     旧实现只回填 Riverpod 状态、内核 after 重启仍是空队列，
+  ///     点击播放 play() 无源可放（名称/封面永不变），媒体会话无
+  ///     MediaItem → 通知栏不出现控制栏。装载后通知栏/锁屏立即可控；
+  ///  5. 预加载下一首。全程不自动播放；失败降级为播放时重解析。
   Future<void> restoreQueue() async {
     final saved = ref.read(queuePersistenceProvider).loadQueueState();
     if (saved == null || state.loaded) return;
@@ -405,9 +410,13 @@ class PlayerNotifier extends Notifier<PlayerState> {
       // 需求：私人漫游队列跨启动恢复后仍自动补歌（按队列名回推标记）
       isFm: saved.queueTitle == '私人漫游',
     );
-    if (!saved.hasNeteaseIds) return; // 纯本地/自定义队列：无需刷新
+    if (!saved.hasNeteaseIds) {
+      // 纯本地/自定义队列：直链就在落盘数据里，直接装载内核
+      await _loadKernelIfIdle(initial, saved.index);
+      return;
+    }
 
-    // ---- 1) 批量补全元数据（离线时保留占位，播放时经 requeue 重试）
+    // ---- 1) 批量补全元数据（离线时保留落盘/占位，播放时经 requeue 重试）
     final NeteaseRepository repo = ref.read(neteaseRepositoryProvider);
     final List<int> ids = <int>[
       for (final Track t in initial)
@@ -467,8 +476,26 @@ class PlayerNotifier extends Notifier<PlayerState> {
       debugPrint('restoreQueue: 直链刷新失败（播放时会自动重试）：$e');
     }
 
-    // ---- 3) 预加载下一首
+    // ---- 3) 静默装载内核（第十七批：通知栏控制栏/点击播放立即可用）
+    await _loadKernelIfIdle(state.queue, state.index);
+
+    // ---- 4) 预加载下一首
     _schedulePreload();
+  }
+
+  /// 内核空闲（无音源）时静默装载队列：仅当每首曲目直链就绪才装载
+  /// （空 source 的曲目会被内核当 asset 路径解析，必须先过滤/重解析）。
+  /// 不触发播放，只回填 MediaItem/PlaybackState → 通知栏/锁屏立即可见。
+  Future<void> _loadKernelIfIdle(List<Track> queue, int index) async {
+    if (queue.isEmpty) return;
+    if (_handler.player.audioSources.isNotEmpty) return;
+    if (queue.any((Track t) => t.needsUrlResolve)) return; // 播放时再解析
+    try {
+      await _handler.loadQueue(queue, initialIndex: index.clamp(0, queue.length - 1));
+      _syncNotificationLike();
+    } catch (e) {
+      debugPrint('restoreQueue: 内核装载失败（播放时会重试）：$e');
+    }
   }
 
   // ------------------------------------------------------------ 播放统计
@@ -1145,6 +1172,18 @@ class PlayerNotifier extends Notifier<PlayerState> {
       // 队列直链可能已过期（跨次启动/长时间挂起）：先尝试恢复
       if (s.processing == AppProcessingState.idle) {
         await requeueIfNeeded();
+      }
+      // 第十七批兜底：内核仍为空（恢复流程未装载/装载被跳过）时
+      // 强制装载一次 —— 否则 play() 无源可放，点击播放毫无反应
+      if (_handler.player.audioSources.isEmpty && state.queue.isNotEmpty) {
+        try {
+          await _handler.loadQueue(
+            state.queue,
+            initialIndex: state.index.clamp(0, state.queue.length - 1),
+          );
+        } catch (e) {
+          debugPrint('playPause: 内核兜底装载失败：$e');
+        }
       }
       // 播完自然停止后再次点击 → 从头播放
       if (s.processing == AppProcessingState.completed) {

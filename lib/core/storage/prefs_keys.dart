@@ -53,4 +53,11 @@ class PrefsKeys {
   /// 「添加到歌单」记忆（第十六批需求：记录上次添加成功的歌单 id，
   /// 下次打开弹窗置顶展示；仅本地显示顺序，不改云端真实歌单排序）
   static const String addToPlaylistLast = 'library.addToPlaylistLast';
+
+  /// 我的页歌单列表缓存（第十七批需求：重启后创建/收藏歌单立即显示，
+  /// 不再必须手动刷新；json = NeteaseUserPlaylist.toMap 数组）
+  static const String libraryUserPlaylistsCache = 'library.userPlaylistsCache';
+
+  /// 应用内更新：跳过此版本（不再提示的版本号 tag，如 v1.1.1）
+  static const String updaterSkippedVersion = 'updater.skippedVersion';
 }

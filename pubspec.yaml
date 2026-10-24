@@ -46,6 +46,11 @@ dependencies:
   device_info_plus: ^11.3.0  # 低端机自动降级液态玻璃 (Android SDK 版本判定)
   permission_handler: ^11.4.0 # Android 13+ 通知权限
 
+  # --- 应用内自动更新（第十七批需求） ---
+  package_info_plus: ^8.3.0  # 读取当前版本号（与 Releases 最新版比对）
+  flutter_markdown: ^0.7.7   # 更新弹窗 / 版本更新日志渲染 release body
+  open_filex: ^4.7.0         # APK 下载完成后拉起系统安装器
+
   cupertino_icons: ^1.0.8
 
 dev_dependencies:

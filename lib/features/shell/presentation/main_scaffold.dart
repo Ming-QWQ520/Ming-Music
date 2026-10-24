@@ -18,9 +18,12 @@ import 'package:audio_service/audio_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show SystemNavigator;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:package_info_plus/package_info_plus.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../core/constants/app_constants.dart';
 import '../../../core/router.dart' show openFullPlayer;
+import '../../../core/storage/prefs_keys.dart';
 import '../../../core/widgets/liquid_glass_container.dart'
     show LiquidGlassBarPanel;
 import '../../discover/presentation/discover_page.dart';
@@ -29,6 +32,8 @@ import '../../player/domain/np_settings.dart';
 import '../../player/presentation/widgets/mini_player.dart';
 import '../../player/providers/np_settings_providers.dart';
 import '../../player/providers/player_providers.dart';
+import '../../settings/presentation/widgets/update_dialog.dart';
+import '../../settings/services/app_update_service.dart';
 
 /// 当前 Tab
 final NotifierProvider<TabNotifier, int> selectedTabProvider =
@@ -93,6 +98,35 @@ class _MainScaffoldState extends ConsumerState<MainScaffold> {
       _playerOpen = true;
       openFullPlayer(context).whenComplete(() => _playerOpen = false);
     });
+    // 第十七批需求：每次进入 App 后请求一次 Releases API，
+    // 有更新且未被「跳过此版本」时弹出更新弹窗。
+    // 延迟到首帧后（不阻塞渲染），整体超时兜底，失败静默。
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      () async {
+        try {
+          await _checkUpdateOnLaunch().timeout(const Duration(seconds: 25));
+        } catch (_) {
+          // 更新检查失败静默：不影响使用
+        }
+      }();
+    });
+  }
+
+  /// 启动时自动检查更新（每次进入 App 一次）
+  Future<void> _checkUpdateOnLaunch() async {
+    final AppRelease? latest = await AppUpdateService.fetchLatestRelease();
+    if (latest == null || !mounted) return;
+    final PackageInfo info = await PackageInfo.fromPlatform();
+    if (!mounted) return;
+    // 版本比对：远端 tag 必须新于当前版本（package_info 的 version）
+    if (!AppUpdateService.isNewer(latest.tagName, info.version)) return;
+    // 「跳过此版本」：该 tag 不再提示（下次发新版自动恢复提示）
+    final SharedPreferences prefs = await SharedPreferences.getInstance();
+    final String skipped =
+        prefs.getString(PrefsKeys.updaterSkippedVersion) ?? '';
+    if (skipped.isNotEmpty && skipped == latest.tagName) return;
+    if (!mounted) return;
+    await showUpdateDialog(context, release: latest);
   }
 
   @override
