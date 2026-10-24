@@ -71,6 +71,14 @@ final GoRouter appRouter = GoRouter(
           ),
         ),
         GoRoute(
+          path: 'daily',
+          name: 'daily-songs',
+          // 第十三批需求：每日推荐打开歌单详情查看（虚拟歌单，
+          // 数据 /recommend/songs，播放时入队 queueTitle=每日推荐）
+          builder: (BuildContext context, GoRouterState state) =>
+              PlaylistDetailPage.daily(),
+        ),
+        GoRoute(
           path: 'playlist/:id',
           name: 'playlist',
           builder: (BuildContext context, GoRouterState state) {
@@ -253,6 +261,18 @@ final GoRouter appRouter = GoRouter(
 /// `Null check operator used on a null value`。
 /// 因此统一走全局 [appRouter] 实例（不依赖 context 查找）；
 /// 参数保留以兼容既有调用点。
+///
+/// 第十三批需求「有时点击 Mini 条无法进入播放页」修复：播放页进出
+/// 转场（380ms 进 / 320ms 出）期间封面 Hero flight 正在进行，此刻
+/// 再 push 会出现同 tag Hero 冲突导致点击看似无效；对重复打开做
+/// 350ms 节流 —— 转场结束后的点击立即生效，转场中的误触被安全忽略。
+DateTime _lastPlayerPushAt = DateTime.fromMillisecondsSinceEpoch(0);
+
 Future<void> openFullPlayer(BuildContext context) {
+  final DateTime now = DateTime.now();
+  if (now.difference(_lastPlayerPushAt) < const Duration(milliseconds: 350)) {
+    return Future<void>.value();
+  }
+  _lastPlayerPushAt = now;
   return appRouter.push<void>('/player');
 }

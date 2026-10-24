@@ -42,6 +42,7 @@ class PlaylistDetailPage extends ConsumerStatefulWidget {
     required this.playlistId,
     this.meta,
     required this.title,
+    this.isDaily = false,
   });
 
   /// 歌单入口（meta 已有封面/名称，头部直接展示）
@@ -52,9 +53,19 @@ class PlaylistDetailPage extends ConsumerStatefulWidget {
   factory PlaylistDetailPage.toplist({required int id, required String name}) =>
       PlaylistDetailPage._(playlistId: id, title: name);
 
+  /// 每日推荐入口（第十三批需求：点击发现页「每日推荐」打开歌单查看）。
+  /// 无真实歌单 id：数据来自 /recommend/songs，playlistId 传 0，
+  /// 不读写磁盘缓存（内容每日变化）；meta.id=0 时封面不包 Hero（
+  /// 避免与队列页同 id 冲突）。
+  factory PlaylistDetailPage.daily() =>
+      const PlaylistDetailPage._(playlistId: 0, title: '每日推荐', isDaily: true);
+
   final int playlistId;
   final PlaylistMeta? meta;
   final String title;
+
+  /// 每日推荐虚拟歌单模式（/recommend/songs 实时数据）
+  final bool isDaily;
 
   @override
   ConsumerState<PlaylistDetailPage> createState() => _PlaylistDetailPageState();
@@ -75,10 +86,13 @@ class _PlaylistDetailPageState extends ConsumerState<PlaylistDetailPage> {
   }
 
   Future<void> _initialLoad() async {
-    final PlaylistDetail? cached = await _readDiskCache();
-    if (!mounted) return;
-    if (cached != null && cached.tracks.isNotEmpty) {
-      setState(() => _data = cached);
+    // 每日推荐：内容每日变化，不走磁盘缓存
+    if (!widget.isDaily) {
+      final PlaylistDetail? cached = await _readDiskCache();
+      if (!mounted) return;
+      if (cached != null && cached.tracks.isNotEmpty) {
+        setState(() => _data = cached);
+      }
     }
     _refresh();
   }
@@ -86,6 +100,28 @@ class _PlaylistDetailPageState extends ConsumerState<PlaylistDetailPage> {
   Future<void> _refresh() async {
     setState(() => _loading = true);
     try {
+      // 每日推荐虚拟歌单（第十三批需求）：/recommend/songs 实时组装，
+      // meta.id=0（不包 Hero）、副标题为今日日期；不写磁盘缓存
+      if (widget.isDaily) {
+        final List<Song> songs =
+            await ref.read(neteaseRepositoryProvider).recommendSongs();
+        if (!mounted) return;
+        final DateTime now = DateTime.now();
+        setState(() {
+          _data = PlaylistDetail(
+            meta: PlaylistMeta(
+              id: 0,
+              name: '每日推荐',
+              coverUrl: songs.isEmpty ? null : songs.first.coverUrl,
+              trackCount: songs.length,
+              description: '${now.month}月${now.day}日 每日专属好歌推荐',
+            ),
+            tracks: songs,
+          );
+          _error = null;
+        });
+        return;
+      }
       final PlaylistDetail fresh = await ref
           .read(neteaseRepositoryProvider)
           .playlistDetail(widget.playlistId);
@@ -374,26 +410,31 @@ class _DetailBodyState extends ConsumerState<_DetailBody> {
                 onTap: () async {
                   Navigator.of(ctx).pop();
                   await PlatformActions.shareText(
-                    '$_title https://music.163.com/#/playlist?id=${widget.meta.id}',
+                    // 每日推荐无真实歌单 id：分享文案只带歌单名
+                    widget.meta.id > 0
+                        ? '$_title https://music.163.com/#/playlist?id=${widget.meta.id}'
+                        : '$_title（MingMusic 每日推荐）',
                   );
                 },
               ),
-              ListTile(
-                leading: Icon(
-                  _subscribed
-                      ? Icons.bookmark_added_rounded
-                      : Icons.bookmark_add_outlined,
-                  size: 22,
+              // 每日推荐虚拟歌单：无真实 id，不提供收藏/移除操作
+              if (widget.meta.id > 0)
+                ListTile(
+                  leading: Icon(
+                    _subscribed
+                        ? Icons.bookmark_added_rounded
+                        : Icons.bookmark_add_outlined,
+                    size: 22,
+                  ),
+                  title: Text(
+                    _subscribed ? '取消收藏歌单' : '收藏歌单',
+                    style: const TextStyle(fontSize: 15),
+                  ),
+                  onTap: () {
+                    Navigator.of(ctx).pop();
+                    _toggleSubscribe();
+                  },
                 ),
-                title: Text(
-                  _subscribed ? '取消收藏歌单' : '收藏歌单',
-                  style: const TextStyle(fontSize: 15),
-                ),
-                onTap: () {
-                  Navigator.of(ctx).pop();
-                  _toggleSubscribe();
-                },
-              ),
               if (widget.isMine)
                 ListTile(
                   leading: const Icon(

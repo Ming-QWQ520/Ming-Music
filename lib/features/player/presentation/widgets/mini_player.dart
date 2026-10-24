@@ -119,8 +119,8 @@ class _RingPainter extends CustomPainter {
 // ---------------------------------------------------------------- 出入动画
 
 /// Mini 条统一出现/消失动画（需求：消失时向下移动缩小，出现时向上移动放大；
-/// 第十二批需求：动画时长增加 1s → 360ms + 1000ms = 1360ms，出入场
-/// 更从容）：
+/// 第十三批需求：动画时长定稿 700ms —— 第十二批的 1.36s 偏拖沓，回调为
+/// 介于原 360ms 与 +1s 之间的从容节奏）：
 ///  - 出现：从下方 1.35 倍高度处上滑 + 0.72 → 1.0 放大，easeOutCubic；
 ///  - 消失：反向播放（下滑 + 缩小），easeInCubic；
 ///  - AnimatedSwitcher 同时驱动新旧 child，退出动画期间旧条仍在移动，
@@ -137,8 +137,8 @@ class MiniBarSwitcher extends StatelessWidget {
 
   final Widget child;
 
-  /// 需求：出入场动画时长在原 360ms 基础上增加 1s
-  static const Duration _kDuration = Duration(milliseconds: 1360);
+  /// 需求（第十三批）：出入场动画定稿 700ms
+  static const Duration _kDuration = Duration(milliseconds: 700);
 
   @override
   Widget build(BuildContext context) {
@@ -268,6 +268,8 @@ class _NavCompact extends ConsumerWidget {
     final String? cover = track?.cover;
 
     return GestureDetector(
+      // opaque：Hero flight 期间封面被 Overlay 取走仍可命中
+      behavior: HitTestBehavior.opaque,
       onTap: () => openFullPlayer(context),
       child: SizedBox(
         width: 46,
@@ -324,7 +326,11 @@ class _FloatClassic extends ConsumerWidget {
             child: Row(
               children: <Widget>[
                 // 左：圆形封面（Hero，点击进全屏）
+                // 第十三批需求：偶发点击无响应修复 —— Hero flight 期间
+                // child 被 Overlay 拿走，deferToChild 行为下封面区域
+                // 命中失败；改 opaque 后整个区域始终可点。
                 GestureDetector(
+                  behavior: HitTestBehavior.opaque,
                   onTap: () => openFullPlayer(context),
                   child: Hero(
                     tag: heroTagOf(cover),

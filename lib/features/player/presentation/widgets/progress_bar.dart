@@ -3,9 +3,11 @@
 ///    trackHeight，旧 M3 Slider 实现两条观感粗细不一致的问题根除）；
 ///  - 手动拖动时两条**以同一倍数平滑变粗**（4 → 8），松手回弹 ——
 ///    Apple Music 效果；
-///  - 高潮点白点：**固定小尺寸**（6px，第十二批需求修复 —— 旧实现
-///    9px ≈ 拖动态条高，用户观感“点的大小是拖动时放大后的总条”），
-///    不随拖动放大，仅显示不拦截拖动；
+///  - 高潮点白点（第十三批需求修复）：直径 = 当前条高，与总进度条
+///    **同大小同时变化**（常态 4px / 拖动 8px 同步插值）；旧实现固定
+///    6px 且被 Positioned tight 高度约束压缩成 6×H 椭圆（穿过进度条
+///    时肉眼可见形变）—— 现用 OverflowBox 解除高度约束 + 直径绑定
+///    条高插值，双问题根治；仅显示不拦截拖动；
 ///  - 自绘替代 SliderTheme：根治 M3 RoundedRectTrackShape 在无圆点
 ///    配置下 active/inactive 分段圆角与间隙的观感差异，并保证轨道
 ///    两侧内收与 m:s 时间标签对齐；
@@ -125,7 +127,12 @@ class _PlayerProgressBarState extends ConsumerState<PlayerProgressBar> {
                         ),
                       ),
                     ),
-                    // 高潮点白点：仅显示（不拦截拖动），位置对齐轨道
+                    // 高潮点白点（第十三批需求）：直径与当前条高一致
+                    //（同大小同时变化：常态 4px / 拖动 8px 同步插值）。
+                    // 椭圆形变根因：Positioned top+bottom 传入 tight
+                    // 高度约束，Center→SizedBox(34x30)→白点 6x6 被压缩成
+                    // 6×H（H=条高插值）→ 穿过进度条时可见椭圆；OverflowBox
+                    // 解除约束后白点以条高为直径正圆绘制。
                     if (chorusMs != null &&
                         chorusMs > 0 &&
                         chorusMs < safeDuration)
@@ -138,42 +145,40 @@ class _PlayerProgressBarState extends ConsumerState<PlayerProgressBar> {
                         top: 0,
                         bottom: 0,
                         child: Center(
-                          child: Tooltip(
-                            message:
-                                '高潮点 ${Duration(milliseconds: chorusMs).clock}',
-                            triggerMode: TooltipTriggerMode.longPress,
-                            preferBelow: false,
-                            verticalOffset: 24,
-                            decoration: BoxDecoration(
-                              color: Colors.white.withValues(alpha: 0.14),
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            textStyle: const TextStyle(
-                                fontSize: 11.5, color: Colors.white),
-                            // 命中区放宽到 34x30，白点本体固定 6px
-                            //（第十二批需求：不随拖动变大的总进度条尺寸）
-                            child: SizedBox(
-                              width: 34,
-                              height: 30,
-                              child: Center(
-                                child: Container(
-                                  width: 6,
-                                  height: 6,
-                                  decoration: BoxDecoration(
-                                    shape: BoxShape.circle,
-                                    color: Colors.white,
-                                    border: Border.all(
-                                      color:
-                                          Colors.black.withValues(alpha: 0.35),
-                                      width: 1,
-                                    ),
-                                    boxShadow: <BoxShadow>[
-                                      BoxShadow(
-                                        color:
-                                            Colors.black.withValues(alpha: 0.4),
-                                        blurRadius: 3,
+                          child: OverflowBox(
+                            alignment: Alignment.center,
+                            maxWidth: double.infinity,
+                            maxHeight: double.infinity,
+                            child: Tooltip(
+                              message:
+                                  '高潮点 ${Duration(milliseconds: chorusMs).clock}',
+                              triggerMode: TooltipTriggerMode.longPress,
+                              preferBelow: false,
+                              verticalOffset: 24,
+                              decoration: BoxDecoration(
+                                color: Colors.white.withValues(alpha: 0.14),
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              textStyle: const TextStyle(
+                                  fontSize: 11.5, color: Colors.white),
+                              // 命中区固定 34x34（不随条高压缩），
+                              // 白点本体直径 = 条高 height
+                              child: SizedBox(
+                                width: 34,
+                                height: 34,
+                                child: Center(
+                                  child: Container(
+                                    width: height,
+                                    height: height,
+                                    decoration: BoxDecoration(
+                                      shape: BoxShape.circle,
+                                      color: Colors.white,
+                                      border: Border.all(
+                                        color: Colors.black
+                                            .withValues(alpha: 0.35),
+                                        width: 0.8,
                                       ),
-                                    ],
+                                    ),
                                   ),
                                 ),
                               ),
@@ -225,33 +230,42 @@ class _PlayerProgressBarState extends ConsumerState<PlayerProgressBar> {
             child: bar,
           ),
           Padding(
-            // 与轨道内收量一致：时间文本与轨道端点齐平
+            // 与轨道内收量一致：时间文本与轨道端点齐平。
+            // 第十三批需求（音质按键抖动修复）：左右时间套固定宽度，
+            // 分/时位数变化（1:23 → 10:23）不再推移中央标签位置。
             padding: const EdgeInsets.only(
                 left: _kTrackInset, right: _kTrackInset, top: 2),
             child: Row(
               children: <Widget>[
-                Text(
-                  Duration(milliseconds: value.round()).clock,
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontFeatures: const <FontFeature>[
-                      FontFeature.tabularFigures()
-                    ],
-                    color: Colors.white.withValues(alpha: 0.62),
+                SizedBox(
+                  width: 44,
+                  child: Text(
+                    Duration(milliseconds: value.round()).clock,
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontFeatures: const <FontFeature>[
+                        FontFeature.tabularFigures()
+                      ],
+                      color: Colors.white.withValues(alpha: 0.62),
+                    ),
                   ),
                 ),
                 Expanded(
                   child: Center(
                       child: widget.centerLabel ?? const SizedBox.shrink()),
                 ),
-                Text(
-                  Duration(milliseconds: safeDuration.round()).clock,
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontFeatures: const <FontFeature>[
-                      FontFeature.tabularFigures()
-                    ],
-                    color: Colors.white.withValues(alpha: 0.62),
+                SizedBox(
+                  width: 44,
+                  child: Text(
+                    Duration(milliseconds: safeDuration.round()).clock,
+                    textAlign: TextAlign.right,
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontFeatures: const <FontFeature>[
+                        FontFeature.tabularFigures()
+                      ],
+                      color: Colors.white.withValues(alpha: 0.62),
+                    ),
                   ),
                 ),
               ],
