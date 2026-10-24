@@ -1,10 +1,11 @@
 /// 播放页自定义面板（参考 Zephyr-Music SettingsPanel；
-/// 需求：UI 排列优化 —— 每页按「样式类 → 数值类 → 开关类」从上到下排列，
-/// 数值滑杆紧跟其作用对象，说明文案统一 _HintText 风格）：
-///  - 显示：显示模式 / Mini 播放条样式；
-///  - 封面：样式 / 封面歌词 / 大小 / 投影 / MV 标识；
-///  - 背景：类型（流体/封面模糊/自定义图）/ 效果（模糊/变暗）；
-///  - 歌词：字号 / 行距 / 对齐 / 翻译 / 非活跃淡出与模糊 / 逐字颜色。
+/// 需求：UI 排列优化 —— 每页按「主属性 → 派生属性 → 开关」从上到下排列，
+/// 同类属性聚合为一组，说明文案统一 _HintText 风格）：
+///  - 显示：显示模式（布局）→ Mini 播放条（样式）；
+///  - 封面：样式 → 封面歌词 → 大小 → 投影 → MV 标识（徽标归尾）；
+///  - 背景：类型 → 自定义图 → 效果（模糊 → 变暗）；
+///  - 歌词：排版（字号/行距/对齐/翻译/居中）→ 效果（淡出/模糊/高亮）
+///    → 逐字颜色 → 动效（红心动效）。
 library;
 
 import 'package:flutter/material.dart';
@@ -133,7 +134,7 @@ class _DisplayPane extends ConsumerWidget {
               ref.read(npSettingsProvider.notifier).setMiniStyle(v),
         ),
         const _HintText(
-            '经典条：无色玻璃长条悬浮导航栏上方；底板颜色/透明度在「设置 → Mini 播放条」中自定义'),
+            '经典条：高透明液态玻璃长条悬浮导航栏上方；底板颜色/透明度在「设置 → Mini 播放条」中自定义'),
       ],
     );
   }
@@ -161,13 +162,6 @@ class _CoverPane extends ConsumerWidget {
           onChanged: (NpCoverStyle v) =>
               ref.read(npSettingsProvider.notifier).setCoverStyle(v),
         ),
-        _SwitchRow(
-          label: 'MV 标识',
-          hint: '歌名旁显示 MV 胶囊入口（点击播放 MV）',
-          value: cfg.showMvBadge,
-          onChanged: (bool v) =>
-              ref.read(npSettingsProvider.notifier).setShowMvBadge(v),
-        ),
         _SegmentedRow<NpCoverLyricsMode>(
           label: '封面歌词',
           hint: '借鉴 kgka_Music_hl：封面下方显示当前行歌词预览',
@@ -193,6 +187,14 @@ class _CoverPane extends ConsumerWidget {
           value: cfg.coverShadow,
           onChanged: (bool v) =>
               ref.read(npSettingsProvider.notifier).setCoverShadow(v),
+        ),
+        // 需求：UI 排列优化 —— MV 标识是歌名旁徽标，归入本页末尾而非夹在封面属性中
+        _SwitchRow(
+          label: 'MV 标识',
+          hint: '歌名旁显示 MV 胶囊入口（点击播放 MV）',
+          value: cfg.showMvBadge,
+          onChanged: (bool v) =>
+              ref.read(npSettingsProvider.notifier).setShowMvBadge(v),
         ),
       ],
     );
@@ -312,25 +314,11 @@ class _LyricsPane extends ConsumerWidget {
               ref.read(npSettingsProvider.notifier).setShowTranslation(v),
         ),
         _SwitchRow(
-          label: '高亮已播放歌词',
-          hint: '关：只高亮当前播放行/字；开：已唱部分保持高亮（经典卡拉OK）',
-          value: cfg.highlightPlayed,
-          onChanged: (bool v) =>
-              ref.read(npSettingsProvider.notifier).setHighlightPlayed(v),
-        ),
-        _SwitchRow(
           label: '时刻保持居中',
           hint: '当前行始终位于可视区中部，歌曲开头/结尾不贴边；拖动浏览不受影响，松手后恢复跟随',
           value: cfg.lyricAlwaysCenter,
           onChanged: (bool v) =>
               ref.read(npSettingsProvider.notifier).setLyricAlwaysCenter(v),
-        ),
-        _SwitchRow(
-          label: '红心动效',
-          hint: '点击喜欢时播放心形迸发动画',
-          value: cfg.heartEffect,
-          onChanged: (bool v) =>
-              ref.read(npSettingsProvider.notifier).setHeartEffect(v),
         ),
         const _GroupTitle('效果'),
         _SliderRow(
@@ -347,6 +335,13 @@ class _LyricsPane extends ConsumerWidget {
           onChanged: (double v) =>
               ref.read(npSettingsProvider.notifier).setLyricBlur(v * 10),
         ),
+        _SwitchRow(
+          label: '高亮已播放歌词',
+          hint: '关：只高亮当前播放行/字；开：已唱部分保持高亮（经典卡拉OK）',
+          value: cfg.highlightPlayed,
+          onChanged: (bool v) =>
+              ref.read(npSettingsProvider.notifier).setHighlightPlayed(v),
+        ),
         const _GroupTitle('逐字颜色'),
         _ColorRow(
           label: '已唱颜色',
@@ -361,6 +356,14 @@ class _LyricsPane extends ConsumerWidget {
           onChanged: (Color c) => ref
               .read(npSettingsProvider.notifier)
               .setYrcColors(cfg.yrcPlayed, c),
+        ),
+        const _GroupTitle('动效'),
+        _SwitchRow(
+          label: '红心动效',
+          hint: '点击喜欢时播放心形迸发动画',
+          value: cfg.heartEffect,
+          onChanged: (bool v) =>
+              ref.read(npSettingsProvider.notifier).setHeartEffect(v),
         ),
       ],
     );

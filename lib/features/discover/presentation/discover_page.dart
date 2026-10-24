@@ -54,62 +54,92 @@ class DiscoverPage extends ConsumerWidget {
           const SliverToBoxAdapter(child: _SongRailSection.newSong()),
           const SliverToBoxAdapter(child: _HotWordsSection()),
           const SliverToBoxAdapter(child: _ToplistCustomSection()),
-          const SliverToBoxAdapter(child: SizedBox(height: 24)),
+          // 需求：主骨架 extendBody（导航栏/Mini 条液态玻璃透出内容）——
+          // 列表尾部按「导航栏 + Mini 条 + 安全区」留白，末尾卡片可滚出玻璃条
+          const SliverToBoxAdapter(child: _BottomSpacer()),
         ],
       ),
     );
   }
 }
 
+/// 发现页尾部留白：导航栏 64 + 悬浮 Mini 条 70 + 缓冲 36 + 系统安全区。
+class _BottomSpacer extends StatelessWidget {
+  const _BottomSpacer();
+
+  @override
+  Widget build(BuildContext context) {
+    final double safe = MediaQuery.paddingOf(context).bottom;
+    return SizedBox(height: safe + 64 + 70 + 36);
+  }
+}
+
 // ---------------------------------------------------------------- 快捷入口
 
-/// 顶部圆形快捷入口（Zephyr-Music 首页顶部样式：渐变圆 + 下方标签）。
+/// 顶部个性化推荐类入口（需求：显示歌单封面，对齐 Zephyr-Music 推荐页 ——
+/// 网易云样式圆角方块，有封面的入口直接用封面图）：
+///  - 每日推荐：品牌红渐变方块 + 当日日期（网易云日历样式）；
+///  - 私人漫游：蓝渐变 + 图标；
+///  - 私人雷达：私人雷达歌单**封面**（轻量 /playlist/detail，失败回退图标）；
+///  - 心动模式：粉渐变 + 图标；
+///  - 雷达歌单：首个推荐歌单**封面**（/recommend/resource 首项，回退图标）；
+///  - 相似歌曲：琥珀渐变 + 图标。
 class _QuickEntries extends ConsumerWidget {
   const _QuickEntries();
 
   Future<void> _toast(BuildContext context, String msg) {
-    ScaffoldMessenger.of(context)
-        .showSnackBar(SnackBar(content: Text(msg)));
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
     return Future<void>.value();
   }
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final List<({IconData icon, Color color, String label, VoidCallback onTap})>
-        entries = <({IconData icon, Color color, String label, VoidCallback onTap})>[
+    final AsyncValue<PlaylistMeta?> radar =
+        ref.watch(personalRadarMetaProvider);
+    final AsyncValue<List<PlaylistMeta>> daily =
+        ref.watch(dailyPlaylistProvider);
+    final String dayLabel = '${DateTime.now().day}';
+
+    final List<({Widget visual, String label, VoidCallback onTap})> entries =
+        <({Widget visual, String label, VoidCallback onTap})>[
       (
-        icon: Icons.calendar_today_rounded,
-        color: const Color(0xFFE2483D),
+        visual: _QuickTile.date(dayLabel),
         label: '每日推荐',
         onTap: () => _openDaily(context, ref),
       ),
       (
-        icon: Icons.sensors_rounded,
-        color: const Color(0xFF2E7CF6),
+        visual: const _QuickTile.icon(Icons.sensors_rounded, Color(0xFF2E7CF6)),
         label: '私人漫游',
         onTap: () => _openPersonalFm(context, ref),
       ),
       (
-        icon: Icons.radar_rounded,
-        color: const Color(0xFF7B4DFF),
+        visual: _QuickTile.cover(
+          cover: radar.valueOrNull?.coverUrl,
+          fallbackIcon: Icons.radar_rounded,
+          fallbackColor: const Color(0xFF7B4DFF),
+        ),
         label: '私人雷达',
-        onTap: () => context.push('/toplist/3136952023?name=${Uri.encodeComponent('私人雷达')}'),
+        onTap: () => context
+            .push('/toplist/3136952023?name=${Uri.encodeComponent('私人雷达')}'),
       ),
       (
-        icon: Icons.favorite_rounded,
-        color: const Color(0xFFFF6FA5),
+        visual:
+            const _QuickTile.icon(Icons.favorite_rounded, Color(0xFFFF6FA5)),
         label: '心动模式',
         onTap: () => _openHeartbeat(context, ref),
       ),
       (
-        icon: Icons.travel_explore_rounded,
-        color: const Color(0xFF17B8A6),
+        visual: _QuickTile.cover(
+          cover: daily.valueOrNull?.firstOrNull?.coverUrl,
+          fallbackIcon: Icons.travel_explore_rounded,
+          fallbackColor: const Color(0xFF17B8A6),
+        ),
         label: '雷达歌单',
         onTap: () => _openRadarPlaylists(context, ref),
       ),
       (
-        icon: Icons.graphic_eq_rounded,
-        color: const Color(0xFFF5A623),
+        visual:
+            const _QuickTile.icon(Icons.graphic_eq_rounded, Color(0xFFF5A623)),
         label: '相似歌曲',
         onTap: () => _openSimilar(context, ref),
       ),
@@ -128,26 +158,12 @@ class _QuickEntries extends ConsumerWidget {
                   padding: const EdgeInsets.symmetric(vertical: 6),
                   child: Column(
                     children: <Widget>[
-                      Container(
-                        width: 46,
-                        height: 46,
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          gradient: LinearGradient(
-                            begin: Alignment.topLeft,
-                            end: Alignment.bottomRight,
-                            colors: <Color>[
-                              e.color.withValues(alpha: 0.95),
-                              e.color.withValues(alpha: 0.65),
-                            ],
-                          ),
-                        ),
-                        child:
-                            Icon(e.icon, color: Colors.white, size: 22),
-                      ),
+                      e.visual,
                       const SizedBox(height: 6),
                       Text(
                         e.label,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                         style: TextStyle(
                           fontSize: 11,
                           color: Theme.of(context)
@@ -187,42 +203,32 @@ class _QuickEntries extends ConsumerWidget {
         return;
       }
       ref.read(playerProvider.notifier).playSongs(
-            <Track>[for (final Song s in songs) s.toTrack()],
-            queueTitle: '每日推荐',
-          );
+        <Track>[for (final Song s in songs) s.toTrack()],
+        queueTitle: '每日推荐',
+      );
     } catch (_) {
       if (context.mounted) _toast(context, '获取每日推荐失败，请稍后重试');
     }
   }
 
-  /// 私人漫游（需求：/personal_fm → 入队播放）
+  /// 私人漫游（需求：对齐 Zephyr-Music 的处理方式 —— 不再把
+  /// /personal_fm 返回的 3 首当固定队列，改走 startPersonalFm()：
+  /// isFm 队列在临近队尾时自动再拉一批追加，漫游不再只播三首）
   Future<void> _openPersonalFm(BuildContext context, WidgetRef ref) async {
     if (!ref.read(authProvider).loggedIn) {
       _requireLogin(context, ref);
       return;
     }
     _toast(context, '正在进入私人漫游…');
-    try {
-      final List<Song> songs =
-          await ref.read(neteaseRepositoryProvider).personalFm();
-      if (!context.mounted) return;
-      if (songs.isEmpty) {
-        _toast(context, '私人漫游暂无可用歌曲');
-        return;
-      }
-      ref.read(playerProvider.notifier).playSongs(
-            <Track>[for (final Song s in songs) s.toTrack()],
-            queueTitle: '私人漫游',
-          );
-    } catch (_) {
-      if (context.mounted) _toast(context, '进入私人漫游失败，请稍后重试');
-    }
+    final String? err =
+        await ref.read(playerProvider.notifier).startPersonalFm();
+    if (!context.mounted) return;
+    if (err != null) _toast(context, err);
   }
 
   /// 心动模式（需求：/playmode/intelligence/list，基于当前播放歌曲）
   Future<void> _openHeartbeat(BuildContext context, WidgetRef ref) async {
-    final Track? current =
-        ref.read(playerProvider).currentTrack;
+    final Track? current = ref.read(playerProvider).currentTrack;
     final int? songId = current?.neteaseId;
     if (!ref.read(authProvider).loggedIn) {
       _requireLogin(context, ref);
@@ -243,17 +249,16 @@ class _QuickEntries extends ConsumerWidget {
         return;
       }
       ref.read(playerProvider.notifier).playSongs(
-            <Track>[for (final Song s in songs) s.toTrack()],
-            queueTitle: '心动模式',
-          );
+        <Track>[for (final Song s in songs) s.toTrack()],
+        queueTitle: '心动模式',
+      );
     } catch (_) {
       if (context.mounted) _toast(context, '心动模式获取失败，请稍后重试');
     }
   }
 
   /// 雷达歌单（需求：登录后 /recommend/resource 列表选择）
-  Future<void> _openRadarPlaylists(
-      BuildContext context, WidgetRef ref) async {
+  Future<void> _openRadarPlaylists(BuildContext context, WidgetRef ref) async {
     if (!ref.read(authProvider).loggedIn) {
       _requireLogin(context, ref);
       return;
@@ -284,12 +289,110 @@ class _QuickEntries extends ConsumerWidget {
         return;
       }
       ref.read(playerProvider.notifier).playSongs(
-            <Track>[for (final Song s in songs) s.toTrack()],
-            queueTitle: '相似歌曲',
-          );
+        <Track>[for (final Song s in songs) s.toTrack()],
+        queueTitle: '相似歌曲',
+      );
     } catch (_) {
       if (context.mounted) _toast(context, '获取相似歌曲失败，请稍后重试');
     }
+  }
+}
+
+/// 顶部入口圆角方块（46×46，radius 14；网易云推荐页样式）：
+///  - date：品牌红渐变 + 当日日期数字（每日推荐专用）；
+///  - icon：彩色渐变底 + 白图标（无封面入口）；
+///  - cover：歌单封面图（封面加载失败回退 icon 形态）。
+class _QuickTile extends StatelessWidget {
+  const _QuickTile.icon(this.icon, this.color)
+      : coverUrl = null,
+        dayNumber = null;
+
+  const _QuickTile.date(this.dayNumber)
+      : icon = null,
+        color = AppConstants.brandColor,
+        coverUrl = null;
+
+  const _QuickTile.cover({
+    String? cover,
+    required IconData fallbackIcon,
+    required Color fallbackColor,
+  })  : coverUrl = cover,
+        icon = fallbackIcon,
+        color = fallbackColor,
+        dayNumber = null;
+
+  final IconData? icon;
+  final Color color;
+  final String? coverUrl;
+  final String? dayNumber;
+
+  static const double _size = 46;
+
+  @override
+  Widget build(BuildContext context) {
+    final String? cover = coverUrl;
+    if (cover != null && cover.isNotEmpty) {
+      return _frame(
+        ClipRRect(
+          borderRadius: BorderRadius.circular(14),
+          child: CoverImage(src: cover, size: _size, radius: 14),
+        ),
+      );
+    }
+    final String? day = dayNumber;
+    if (day != null) {
+      // 每日推荐：网易云日历样式 —— 红渐变方块 + 白色日期数字
+      return _frame(
+        Container(
+          width: _size,
+          height: _size,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(14),
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: <Color>[
+                color.withValues(alpha: 0.95),
+                color.withValues(alpha: 0.72),
+              ],
+            ),
+          ),
+          alignment: Alignment.center,
+          child: Text(
+            day,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 20,
+              fontWeight: FontWeight.w900,
+              height: 1,
+            ),
+          ),
+        ),
+      );
+    }
+    return _frame(
+      Container(
+        width: _size,
+        height: _size,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(14),
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: <Color>[
+              color.withValues(alpha: 0.95),
+              color.withValues(alpha: 0.65),
+            ],
+          ),
+        ),
+        alignment: Alignment.center,
+        child: Icon(icon, color: Colors.white, size: 22),
+      ),
+    );
+  }
+
+  Widget _frame(Widget child) {
+    return SizedBox(width: _size, height: _size, child: child);
   }
 }
 
@@ -338,8 +441,8 @@ class _RadarPlaylistSheet extends ConsumerWidget {
                 error: (Object e, StackTrace st) => Center(
                   child: Text(
                     '雷达歌单加载失败，请稍后重试',
-                    style: TextStyle(
-                        color: Colors.white.withValues(alpha: 0.5)),
+                    style:
+                        TextStyle(color: Colors.white.withValues(alpha: 0.5)),
                   ),
                 ),
                 data: (List<PlaylistMeta> list) {
@@ -353,14 +456,13 @@ class _RadarPlaylistSheet extends ConsumerWidget {
                   return ListView.separated(
                     itemCount: list.length,
                     separatorBuilder: (_, __) => Divider(
-                        height: 1,
-                        color: Colors.white.withValues(alpha: 0.06)),
+                        height: 1, color: Colors.white.withValues(alpha: 0.06)),
                     itemBuilder: (BuildContext ctx, int index) {
                       final PlaylistMeta p = list[index];
                       return ListTile(
                         dense: true,
-                        leading: CoverImage(
-                            src: p.coverUrl, size: 44, radius: 8),
+                        leading:
+                            CoverImage(src: p.coverUrl, size: 44, radius: 8),
                         title: Text(p.name,
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
@@ -412,8 +514,8 @@ class _ToplistCustomSection extends ConsumerWidget {
             child: Row(
               children: <Widget>[
                 const Text('榜单精选',
-                    style: TextStyle(
-                        fontSize: 19, fontWeight: FontWeight.w700)),
+                    style:
+                        TextStyle(fontSize: 19, fontWeight: FontWeight.w700)),
                 const Spacer(),
                 // 需求：榜单精选自定义（Zephyr 同款勾选）
                 TextButton.icon(
@@ -421,9 +523,8 @@ class _ToplistCustomSection extends ConsumerWidget {
                   icon: const Icon(Icons.tune_rounded, size: 17),
                   label: const Text('自定义', style: TextStyle(fontSize: 12.5)),
                   style: TextButton.styleFrom(
-                    foregroundColor: Theme.of(context)
-                        .colorScheme
-                        .onSurfaceVariant,
+                    foregroundColor:
+                        Theme.of(context).colorScheme.onSurfaceVariant,
                     padding: const EdgeInsets.symmetric(horizontal: 8),
                     minimumSize: const Size(0, 32),
                   ),
@@ -457,8 +558,7 @@ class _ToplistCustomSection extends ConsumerWidget {
       context,
       isScrollControlled: true,
       barrierLabel: '榜单精选自定义',
-      builder: (BuildContext ctx) =>
-          _ToplistEditorSheet(selected: current),
+      builder: (BuildContext ctx) => _ToplistEditorSheet(selected: current),
     );
     if (result != null) {
       ref.read(discoverToplistIdsProvider.notifier).setIds(result);
@@ -555,8 +655,8 @@ class _ToplistEditorSheetState extends State<_ToplistEditorSheet> {
                       ),
                       title: Text(
                         t.name,
-                        style: const TextStyle(
-                            color: Colors.white, fontSize: 14),
+                        style:
+                            const TextStyle(color: Colors.white, fontSize: 14),
                       ),
                       onChanged: (bool? v) {
                         setState(() {
@@ -790,8 +890,7 @@ class _SongRailSection extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final String title =
-        _kind == _RailKind.music ? '推荐新音乐' : '新歌速递';
+    final String title = _kind == _RailKind.music ? '推荐新音乐' : '新歌速递';
     final AsyncValue<List<Song>> state = _kind == _RailKind.music
         ? ref.watch(personalizedNewSongsProvider)
         : ref.watch(topNewSongsProvider);
@@ -856,10 +955,10 @@ class _SongRailCard extends ConsumerWidget {
 
   void _play(BuildContext context, WidgetRef ref) {
     ref.read(playerProvider.notifier).playSongs(
-          <Track>[for (final Song s in songs) s.toTrack()],
-          startIndex: index,
-          queueTitle: title,
-        );
+      <Track>[for (final Song s in songs) s.toTrack()],
+      startIndex: index,
+      queueTitle: title,
+    );
   }
 
   @override
@@ -931,8 +1030,7 @@ class _HotWordsSection extends ConsumerWidget {
                         color: i < 3
                             ? AppConstants.brandColor
                             : Theme.of(context).colorScheme.onSurface,
-                        fontWeight:
-                            i < 3 ? FontWeight.w600 : FontWeight.w400,
+                        fontWeight: i < 3 ? FontWeight.w600 : FontWeight.w400,
                       ),
                     ),
                     backgroundColor: Theme.of(context)

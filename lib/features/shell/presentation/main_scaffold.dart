@@ -184,6 +184,10 @@ class _MainScaffoldState extends ConsumerState<MainScaffold> {
         _handleExitIntent();
       },
       child: Scaffold(
+        // 需求：底部导航栏真透明液态玻璃 —— extendBody 让页面内容延伸到
+        // 导航栏/悬浮 Mini 条背后，BackdropFilter 才有真实内容可采样模糊，
+        // 否则玻璃底色只剩 Scaffold 背景色（看起来就是一块不透明黑板）。
+        extendBody: true,
         body: IndexedStack(index: tab, children: MainScaffold._pages),
         bottomNavigationBar: Column(
           mainAxisSize: MainAxisSize.min,
@@ -288,8 +292,9 @@ class _CenterNavBar extends StatelessWidget {
   }
 }
 
-/// 导航栏玻璃底板：BackdropFilter 模糊 + 半透明深色渐变 + 顶描边高光。
-/// 玻璃关闭/低端机（Android < 12）自动降级为不透明深色底。
+/// 导航栏玻璃底板：BackdropFilter 模糊 + 极低透明度白色叠加 + 顶描边高光。
+/// 需求（第十一批）：高透明低液态玻璃 —— 内容透出为主，玻璃只负责
+/// 模糊与一层极淡的白色提亮；玻璃关闭时降级为半透明深色底（非纯黑）。
 class _GlassNavBarSurface extends ConsumerWidget {
   const _GlassNavBarSurface({required this.child});
 
@@ -300,29 +305,30 @@ class _GlassNavBarSurface extends ConsumerWidget {
     final bool glass = ref.watch(glassEnabledProvider);
     final Brightness brightness = Theme.of(context).brightness;
     final Color fallback = brightness == Brightness.dark
-        ? const Color(0xF714101B)
-        : const Color(0xF7F2F1F8);
+        ? const Color(0xCC14101B)
+        : const Color(0xCCF2F1F8);
 
     if (!glass) {
       return Container(color: fallback, child: child);
     }
     return ClipRect(
       child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 22, sigmaY: 22),
+        filter: ImageFilter.blur(sigmaX: 24, sigmaY: 24),
         child: Container(
           decoration: BoxDecoration(
+            // 需求：高透明 —— 白色叠加层降到 0.05/0.015，内容清晰透出
             gradient: LinearGradient(
               begin: Alignment.topCenter,
               end: Alignment.bottomCenter,
               colors: <Color>[
-                Colors.white.withValues(alpha: 0.10),
-                Colors.white.withValues(alpha: 0.04),
+                Colors.white.withValues(alpha: 0.05),
+                Colors.white.withValues(alpha: 0.015),
               ],
             ),
             border: Border(
               top: BorderSide(
-                color: Colors.white.withValues(alpha: 0.14),
-                width: 0.8,
+                color: Colors.white.withValues(alpha: 0.10),
+                width: 0.6,
               ),
             ),
           ),

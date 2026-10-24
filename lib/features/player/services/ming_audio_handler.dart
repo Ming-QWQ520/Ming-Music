@@ -157,6 +157,20 @@ class MingAudioHandler extends BaseAudioHandler with SeekHandler {
     return true;
   }
 
+  /// 队尾批量追加曲目（需求：私人漫游自动补歌，对齐 Zephyr-Music）——
+  /// just_audio addAudioSources 仅在尾部追加音源，当前音轨不重载，
+  /// 播放完全无感；audio_service 队列同步追加（通知栏/队列面板一致）。
+  Future<void> appendTracks(List<Track> tracks) async {
+    if (tracks.isEmpty) return;
+    await _player.addAudioSources(<ja.AudioSource>[
+      for (final Track t in tracks) _sourceOf(t),
+    ]);
+    queue.add(<MediaItem>[
+      ...queue.value,
+      for (final Track t in tracks) _mediaItemOf(t),
+    ]);
+  }
+
   MediaItem _mediaItemOf(Track t) {
     final String? cover = t.cover;
     final bool isUrlCover = cover != null && cover.startsWith('http');

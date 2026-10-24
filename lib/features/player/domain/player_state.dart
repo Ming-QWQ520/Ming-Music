@@ -27,6 +27,7 @@ class PlayerState {
     this.processing = AppProcessingState.idle,
     this.error,
     this.queueTitle,
+    this.isFm = false,
   });
 
   final List<Track> queue;
@@ -43,6 +44,11 @@ class PlayerState {
 
   /// 当前队列的来源名（歌单名/榜单名/搜索结果），播放页顶部展示
   final String? queueTitle;
+
+  /// 私人漫游（FM）队列标记（需求：对齐 Zephyr-Music 漫游处理 ——
+  /// /personal_fm 每次只返回 3 首，FM 队列在临近队尾时自动再拉一批
+  /// 追加到队尾，在线状态下永不播完；非 FM 队列不触发补歌）
+  final bool isFm;
 
   bool get hasQueue => queue.isNotEmpty;
 
@@ -62,6 +68,7 @@ class PlayerState {
     AppProcessingState? processing,
     String? error,
     String? queueTitle,
+    bool? isFm,
     bool clearError = false,
     bool clearQueueTitle = false,
   }) {
@@ -76,6 +83,7 @@ class PlayerState {
       processing: processing ?? this.processing,
       error: clearError ? null : (error ?? this.error),
       queueTitle: clearQueueTitle ? null : (queueTitle ?? this.queueTitle),
+      isFm: isFm ?? this.isFm,
     );
   }
 }

@@ -121,6 +121,42 @@ class GlassPrefNotifier extends Notifier<GlassPref> {
   }
 }
 
+// ---------------------------------------------------------------- 我的页歌单排列
+
+/// 我的页歌单排列方式（需求：宫格/列表切换，默认宫格，持久化）
+final NotifierProvider<LibraryLayoutNotifier, LibraryPlaylistLayout>
+    libraryPlaylistLayoutProvider =
+    NotifierProvider<LibraryLayoutNotifier, LibraryPlaylistLayout>(
+        LibraryLayoutNotifier.new);
+
+class LibraryLayoutNotifier extends Notifier<LibraryPlaylistLayout> {
+  late SharedPreferences _prefs;
+
+  @override
+  LibraryPlaylistLayout build() {
+    _prefs = ref.watch(sharedPreferencesProvider);
+    final String? raw = _prefs.getString(PrefsKeys.libraryPlaylistLayout);
+    if (raw != null) {
+      return LibraryPlaylistLayout.values.firstWhere(
+        (LibraryPlaylistLayout v) => v.name == raw,
+        orElse: () => LibraryPlaylistLayout.grid,
+      );
+    }
+    return LibraryPlaylistLayout.grid; // 需求：默认宫格排序
+  }
+
+  void set(LibraryPlaylistLayout layout) {
+    state = layout;
+    _prefs.setString(PrefsKeys.libraryPlaylistLayout, layout.name);
+  }
+
+  void toggle() => set(
+        state == LibraryPlaylistLayout.grid
+            ? LibraryPlaylistLayout.list
+            : LibraryPlaylistLayout.grid,
+      );
+}
+
 /// 设备是否具备流畅运行液态玻璃的能力（异步探测，默认按支持处理）
 final FutureProvider<bool> deviceGlassCapableProvider =
     FutureProvider<bool>((Ref ref) async {

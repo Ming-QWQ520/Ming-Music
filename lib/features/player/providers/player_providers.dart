@@ -239,6 +239,10 @@ class PlayerNotifier extends Notifier<PlayerState> {
   /// 预加载下一首的防抖定时器（快速切歌不重复预热）
   Timer? _preloadTimer;
 
+  /// 私人漫游补歌防并发标志（需求：对齐 Zephyr-Music —— FM 队列临近
+  /// 队尾自动再拉 /personal_fm 追加，避免同一次切歌触发多次批量拉取）
+  bool _fmReplenishing = false;
+
   @override
   set state(PlayerState value) {
     _lastState = value;
@@ -265,6 +269,8 @@ class PlayerNotifier extends Notifier<PlayerState> {
       _syncNotificationLike();
       // 需求「只需播放一首缓存一首」：仅在实际开播的曲目上后台落盘
       unawaited(_cacheCurrentTrack());
+      // 需求：私人漫游临近队尾自动补歌（对齐 Zephyr-Music）
+      unawaited(_maybeReplenishFm());
     });
     _processingSub = _handler.player.processingStateStream
         .map(_mapProcessing)
@@ -394,6 +400,8 @@ class PlayerNotifier extends Notifier<PlayerState> {
       queueTitle: saved.queueTitle,
       loaded: true,
       processing: AppProcessingState.idle,
+      // 需求：私人漫游队列跨启动恢复后仍自动补歌（按队列名回推标记）
+      isFm: saved.queueTitle == '私人漫游',
     );
     if (!saved.hasNeteaseIds) return; // 纯本地/自定义队列：无需刷新
 
@@ -538,11 +546,13 @@ class PlayerNotifier extends Notifier<PlayerState> {
 
   /// 播放一批网易云歌曲（发现/搜索/歌单/榜单入口统一走这里）：
   ///  1. 批量解析播放直链（VIP 灰曲自动剔除并提示）；
-  ///  2. 装载内核队列并从 [startIndex] 开始播放。
+  ///  2. 装载内核队列并从 [startIndex] 开始播放；
+  ///  3. [isFm] 私人漫游标记：临近队尾自动补歌（对齐 Zephyr-Music）。
   Future<void> playSongs(
     List<Track> tracks, {
     int startIndex = 0,
     String? queueTitle,
+    bool isFm = false,
   }) async {
     if (tracks.isEmpty) return;
     final int safeStart = startIndex.clamp(0, tracks.length - 1);
@@ -551,6 +561,7 @@ class PlayerNotifier extends Notifier<PlayerState> {
       clearError: true,
       queueTitle: queueTitle,
       clearQueueTitle: queueTitle == null,
+      isFm: isFm,
     );
     try {
       final List<Track> resolved = await resolveTracks(tracks);
@@ -597,6 +608,8 @@ class PlayerNotifier extends Notifier<PlayerState> {
       _schedulePlayStat(resolved[startIdx]);
       _schedulePersist();
       _schedulePreload();
+      // FM 首批装载后立即检查是否需要预取（首批仅 3 首）
+      unawaited(_maybeReplenishFm());
     } catch (e) {
       state = state.copyWith(
         processing: AppProcessingState.idle,
@@ -991,8 +1004,72 @@ class PlayerNotifier extends Notifier<PlayerState> {
       playing: false,
       clearQueueTitle: true,
       processing: AppProcessingState.idle,
+      isFm: false,
     );
     await ref.read(queuePersistenceProvider).clearQueueState();
+  }
+
+  /// 私人漫游（需求：对齐 Zephyr-Music 的处理方式 ——
+  /// /personal_fm 每次只返回 3 首，旧实现直接把 3 首当固定队列，
+  /// 播完三首就停；现在首装载即带 isFm 标记，配合 _maybeReplenishFm
+  /// 在临近队尾自动再拉一批追加，在线状态下漫游永不播完）。
+  /// 返回错误文案（null 成功）。
+  Future<String?> startPersonalFm() async {
+    state = state.copyWith(
+        processing: AppProcessingState.loading, clearError: true);
+    try {
+      final List<Song> songs =
+          await ref.read(neteaseRepositoryProvider).personalFm();
+      if (songs.isEmpty) {
+        state = state.copyWith(processing: AppProcessingState.idle);
+        return '私人漫游暂无可用歌曲';
+      }
+      await playSongs(
+        <Track>[for (final Song s in songs) s.toTrack()],
+        queueTitle: '私人漫游',
+        isFm: true,
+      );
+      return null;
+    } catch (e) {
+      state = state.copyWith(processing: AppProcessingState.idle);
+      return '进入私人漫游失败：$e';
+    }
+  }
+
+  /// FM 队列补歌（需求：对齐 Zephyr-Music）：
+  ///  - 仅 isFm 队列触发；当前曲目是最后一首时再拉一批 /personal_fm；
+  ///  - 去重（按 neteaseId，FM 批次间偶有重叠）；
+  ///  - 增量追加到内核队尾（当前音轨不重载，播放无感）；
+  ///  - 失败静默（下首切歌时重新触发），防并发标志避免重复拉取。
+  Future<void> _maybeReplenishFm() async {
+    if (!state.isFm || !state.hasQueue) return;
+    if (_fmReplenishing) return;
+    // 临近队尾（当前曲目是最后一首 / 仅剩一首缓冲）才补
+    if (state.index < state.queue.length - 1) return;
+    _fmReplenishing = true;
+    try {
+      final List<Song> songs =
+          await ref.read(neteaseRepositoryProvider).personalFm();
+      if (!state.isFm) return; // 期间队列已被替换
+      final Set<int> existing = <int>{
+        for (final Track t in state.queue)
+          if (t.neteaseId != null) t.neteaseId!,
+      };
+      final List<Track> fresh = <Track>[
+        for (final Song s in songs)
+          if (!existing.contains(s.id)) s.toTrack(),
+      ];
+      if (fresh.isEmpty) return;
+      final List<Track> resolved = await resolveTracks(fresh);
+      if (resolved.isEmpty || !state.isFm) return;
+      await _handler.appendTracks(resolved);
+      state = state.copyWith(queue: <Track>[...state.queue, ...resolved]);
+      _schedulePersist();
+    } catch (_) {
+      // 补歌失败静默：下次切歌到队尾时重新触发
+    } finally {
+      _fmReplenishing = false;
+    }
   }
 
   /// 心动模式漫游：优先 /playmode/intelligence/list（登录态个性化），

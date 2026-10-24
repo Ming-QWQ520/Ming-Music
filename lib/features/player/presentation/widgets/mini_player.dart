@@ -355,7 +355,9 @@ class _FloatClassic extends ConsumerWidget {
 }
 
 /// 无色液态玻璃面板（需求：不带颜色，65% 透明；颜色/透明度可在设置自定义）。
-/// 玻璃关闭/低端机自动降级为高不透明实色底。
+/// 第十一批需求：低液态玻璃高透明 —— 投影与描边大幅弱化
+/// （旧实现 black 0.20~0.36 / blur 18 在高透明底上形成一圈明显"黑边"）；
+/// 玻璃关闭时降级为半透明深色底（非高不透明黑板）。
 class _GlassBarPanel extends ConsumerWidget {
   const _GlassBarPanel({required this.child});
 
@@ -368,10 +370,13 @@ class _GlassBarPanel extends ConsumerWidget {
 
     // 需求：无色（白玻璃中性底）默认，可自定义底色；
     // 填充不透明度 = 1 - 透明度（默认 65% 透明 → 0.35 alpha）
-    final Color tint = np.miniColor != null ? Color(np.miniColor!) : Colors.white;
+    final bool dark = Theme.of(context).brightness == Brightness.dark;
+    final Color tint = np.miniColor != null
+        ? Color(np.miniColor!)
+        : (dark ? const Color(0xFF1A1626) : Colors.white);
     final double fillAlpha = glass
         ? (1.0 - np.miniTransparency).clamp(0.05, 0.85)
-        : 0.88; // 降级：高不透明实底保证可读
+        : 0.90; // 降级：按主题深浅的半透明底保证可读（去"黑板"感）
 
     final Widget content = Container(
       height: 58,
@@ -380,14 +385,14 @@ class _GlassBarPanel extends ConsumerWidget {
         borderRadius: BorderRadius.circular(29),
         color: tint.withValues(alpha: fillAlpha),
         border: Border.all(
-          color: Colors.white.withValues(alpha: 0.10 + fillAlpha * 0.16),
-          width: 1,
+          color: Colors.white.withValues(alpha: 0.08 + fillAlpha * 0.10),
+          width: 0.8,
         ),
         boxShadow: <BoxShadow>[
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.20 + fillAlpha * 0.16),
-            blurRadius: 18,
-            offset: const Offset(0, 6),
+            color: Colors.black.withValues(alpha: 0.08 + fillAlpha * 0.06),
+            blurRadius: 12,
+            offset: const Offset(0, 3),
           ),
         ],
       ),

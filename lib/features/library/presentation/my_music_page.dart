@@ -24,6 +24,9 @@ import '../../auth/data/netease_auth_repository.dart' show NeteaseUserPlaylist;
 import '../../auth/presentation/login_sheet.dart';
 import '../../auth/providers/auth_providers.dart';
 import '../../discover/data/netease_providers.dart';
+import '../../settings/domain/settings_models.dart' show LibraryPlaylistLayout;
+import '../../settings/providers/settings_providers.dart'
+    show libraryPlaylistLayoutProvider;
 import '../../player/presentation/cache_songs_page.dart';
 import '../../player/providers/player_providers.dart';
 
@@ -120,6 +123,9 @@ class _MyMusicPageState extends ConsumerState<MyMusicPage> {
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
     final AuthState auth = ref.watch(authProvider);
+    // 需求：宫格/列表排序切换（默认宫格，持久化）
+    final LibraryPlaylistLayout layout =
+        ref.watch(libraryPlaylistLayoutProvider);
 
     return Scaffold(
       appBar: AppBar(
@@ -129,6 +135,19 @@ class _MyMusicPageState extends ConsumerState<MyMusicPage> {
           style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900),
         ),
         actions: <Widget>[
+          if (auth.loggedIn)
+            IconButton(
+              tooltip:
+                  layout == LibraryPlaylistLayout.grid ? '切换为列表排序' : '切换为宫格排序',
+              icon: Icon(
+                layout == LibraryPlaylistLayout.grid
+                    ? Icons.view_list_rounded
+                    : Icons.grid_view_rounded,
+                size: 23,
+              ),
+              onPressed: () =>
+                  ref.read(libraryPlaylistLayoutProvider.notifier).toggle(),
+            ),
           if (auth.loggedIn)
             IconButton(
               tooltip: '新建歌单',
@@ -148,7 +167,10 @@ class _MyMusicPageState extends ConsumerState<MyMusicPage> {
         onRefresh: _refresh,
         child: ListView(
           physics: const AlwaysScrollableScrollPhysics(),
-          padding: const EdgeInsets.only(top: 4, bottom: 120),
+          // 需求：extendBody 后底部留白须覆盖 导航栏64 + Mini条70 + 安全区，
+          // 末尾内容可完整滚出玻璃条
+          padding: EdgeInsets.only(
+              top: 4, bottom: MediaQuery.paddingOf(context).bottom + 170),
           children: <Widget>[
             _ProfileHeader(
               loggedIn: auth.loggedIn,
@@ -164,27 +186,37 @@ class _MyMusicPageState extends ConsumerState<MyMusicPage> {
             const SizedBox(height: 10),
             // 功能行：听歌排行榜
             const _RankRow(),
-            // 折叠分组：创建 / 收藏的歌单 + 云盘
+            // 歌单分组：宫格（创建+收藏连续排列，无收藏折叠栏）/ 列表（原折叠分组）
             if (auth.loggedIn) ...<Widget>[
               const SizedBox(height: 8),
-              _PlaylistSection(
-                header: '创建的歌单',
-                count: _createdList.length,
-                playlists: _createdList,
-                expanded: _createdExpanded,
-                onToggle: () =>
-                    setState(() => _createdExpanded = !_createdExpanded),
-              ),
-              if (_collectedList.isNotEmpty) ...<Widget>[
-                const SizedBox(height: 4),
+              if (layout == LibraryPlaylistLayout.grid)
+                _PlaylistGridSection(
+                  playlists: <NeteaseUserPlaylist>[
+                    ..._createdList,
+                    ..._collectedList,
+                  ],
+                  createdCount: _createdList.length,
+                )
+              else ...<Widget>[
                 _PlaylistSection(
-                  header: '收藏的歌单',
-                  count: _collectedList.length,
-                  playlists: _collectedList,
-                  expanded: _collectedExpanded,
+                  header: '创建的歌单',
+                  count: _createdList.length,
+                  playlists: _createdList,
+                  expanded: _createdExpanded,
                   onToggle: () =>
-                      setState(() => _collectedExpanded = !_collectedExpanded),
+                      setState(() => _createdExpanded = !_createdExpanded),
                 ),
+                if (_collectedList.isNotEmpty) ...<Widget>[
+                  const SizedBox(height: 4),
+                  _PlaylistSection(
+                    header: '收藏的歌单',
+                    count: _collectedList.length,
+                    playlists: _collectedList,
+                    expanded: _collectedExpanded,
+                    onToggle: () => setState(
+                        () => _collectedExpanded = !_collectedExpanded),
+                  ),
+                ],
               ],
               // 需求：底部「我的云盘」行已移除 —— 云盘入口与样式
               // 已上移至顶部功能宫格的「音乐云盘」tile（登录后显示
@@ -669,6 +701,124 @@ class _RankRow extends StatelessWidget {
 }
 
 // ---------------------------------------------------------------- 歌单分组
+
+/// 宫格歌单区（需求：默认宫格排序 ——
+///  - 不显示收藏的歌单收起/弹出栏；
+///  - 收藏的歌单从最后一个创建的歌单下按默认顺序自上而下续排；
+///  - 3 列封面网格（封面 + 名称 + 曲目数），网易云「我的」样式）。
+class _PlaylistGridSection extends StatelessWidget {
+  const _PlaylistGridSection({
+    required this.playlists,
+    required this.createdCount,
+  });
+
+  /// 已按 [created..., collected...] 顺序拼接的完整列表
+  final List<NeteaseUserPlaylist> playlists;
+
+  /// 创建的歌单数量（标题计数用）
+  final int createdCount;
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+            child: Row(
+              children: <Widget>[
+                Text('创建的歌单',
+                    style: const TextStyle(
+                        fontSize: 15.5, fontWeight: FontWeight.w700)),
+                const SizedBox(width: 6),
+                Text('$createdCount',
+                    style: TextStyle(
+                        fontSize: 12,
+                        color: theme.colorScheme.onSurfaceVariant)),
+              ],
+            ),
+          ),
+          GridView.builder(
+            shrinkWrap: true,
+            padding: EdgeInsets.zero,
+            physics: const NeverScrollableScrollPhysics(),
+            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: 3,
+              mainAxisSpacing: 14,
+              crossAxisSpacing: 10,
+              childAspectRatio: 0.78,
+            ),
+            itemCount: playlists.length,
+            itemBuilder: (BuildContext context, int index) =>
+                _PlaylistGridCard(playlist: playlists[index]),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// 宫格歌单卡：方形圆角封面 + 两行名称 + 曲目数
+class _PlaylistGridCard extends StatelessWidget {
+  const _PlaylistGridCard({required this.playlist});
+
+  final NeteaseUserPlaylist playlist;
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    return GestureDetector(
+      onTap: () => context.push(
+        '/playlist/${playlist.id}?name=${Uri.encodeComponent(playlist.name)}',
+        extra: PlaylistMeta(
+          id: playlist.id,
+          name: playlist.name,
+          coverUrl: playlist.coverUrl,
+          trackCount: playlist.trackCount,
+          creatorUserId: playlist.creatorUserId,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          AspectRatio(
+            aspectRatio: 1,
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(10),
+              child: CoverImage(
+                src: playlist.coverUrl,
+                size: 120,
+                radius: 10,
+              ),
+            ),
+          ),
+          const SizedBox(height: 5),
+          Text(
+            playlist.name,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              fontSize: 12,
+              height: 1.25,
+              color: theme.colorScheme.onSurface,
+            ),
+          ),
+          Text(
+            '${playlist.trackCount}首',
+            maxLines: 1,
+            style: TextStyle(
+              fontSize: 10.5,
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
 
 class _PlaylistSection extends StatelessWidget {
   const _PlaylistSection({
