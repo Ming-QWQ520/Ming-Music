@@ -404,15 +404,15 @@ class _KaraokeLyricsViewState extends ConsumerState<KaraokeLyricsView> {
 /// 行内水平 padding（左右各 28）
 const double _kRowHPadding = 28;
 
-/// 非活跃行效果（第十五批需求重定义「淡出」）：
+/// 非活跃行效果（第十六批需求重定义「淡出」语义）：
 ///
-///  - 淡出 = **以上下歌词边界为起点、向当前播放行扩散的轻模糊感**：
-///    距边界越近模糊越明显（最高 sigma ≈ 2.8px × fade），到边缘
-///    扩散区（视口高度 34%）尽头恢复清晰 —— 即用户所述「让歌词
-///    上下边界有淡淡的模糊感」；[edgeT] 为行中心距边界的接近度
-///    （0 = 清晰，1 = 贴边），由列表层按滚动偏移实时计算；
-///  - 淡出滑杆同时控制非活跃行整体压暗（alpha = 1 - fade×0.55，
-///    默认 1.0 → 0.45 经典灰，维持当前行视觉层级）；
+///  - **淡出 = 套在非活跃行上的模糊效果，不再联动亮度**：滑杆控制
+///    上下边界向当前行扩散的模糊强度（距边界越近越模糊，最高
+///    sigma ≈ 3.4px × fade），滑杆为 0 时无模糊；[edgeT] 为行中心
+///    距边界的接近度（0 = 清晰，1 = 贴边），由列表层按滚动偏移实时计算；
+///  - **非活跃行基线压暗恒定 0.45，不随滑杆变化** —— 修复「淡出设为 0
+///    时歌词几乎同色同亮」：非活跃行永远比当前行暗，淡出只加模糊、
+///    绝不变亮歌词；
 ///  - 模糊（lyricBlur）保留为统一额外模糊，默认 0 = 关闭；
 ///  - 当前播放行永不受影响（active 时直通）。
 /// RepaintBoundary 隔离模糊层，避免滚动时全列表重绘。
@@ -425,9 +425,9 @@ Widget _applyInactiveEffect(
 }) {
   if (active) return child;
   Widget result = child;
-  // 边界扩散模糊（淡出主体）+ 统一额外模糊（设置项，默认 0）
+  // 边界扩散模糊（淡出主体，滑杆唯一作用点）+ 统一额外模糊（设置项，默认 0）
   final double fadeV = fade.clamp(0.0, 1.0);
-  final double edgeSigma = edgeT.clamp(0.0, 1.0) * 2.8 * fadeV;
+  final double edgeSigma = edgeT.clamp(0.0, 1.0) * 3.4 * fadeV;
   final double sigma = (blur.clamp(0.0, 3.0) + edgeSigma).clamp(0.0, 4.5);
   if (sigma > 0.02) {
     result = RepaintBoundary(
@@ -441,9 +441,11 @@ Widget _applyInactiveEffect(
       ),
     );
   }
-  // 统一压暗 + 越贴边越透（与 ShaderMask 边缘渐隐同向叠加）
-  final double baseAlpha = (1 - fadeV * 0.55).clamp(0.0, 1.0);
-  final double edgeAlpha = 1 - edgeT.clamp(0.0, 1.0) * 0.28 * fadeV;
+  // 第十六批修复：非活跃行基线压暗恒定（0.45），不随淡出滑杆变化 ——
+  // 滑杆为 0 时非活跃行不再亮回全白（用户报「同色同亮」的根因）；
+  // 越贴边越透的边缘衰减保留（只更暗，不变亮）
+  const double baseAlpha = 0.45;
+  final double edgeAlpha = 1 - edgeT.clamp(0.0, 1.0) * 0.25 * fadeV;
   final double alpha = (baseAlpha * edgeAlpha).clamp(0.0, 1.0);
   if (alpha < 1.0) {
     result = Opacity(opacity: alpha, child: result);

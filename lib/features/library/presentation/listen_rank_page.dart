@@ -148,7 +148,8 @@ class _ListenRankPageState extends ConsumerState<ListenRankPage> {
       );
     }
     return ListView.builder(
-      padding: const EdgeInsets.only(bottom: 24),
+      padding: EdgeInsets.only(
+          bottom: MediaQuery.paddingOf(context).bottom + 96),
       itemCount: items.length,
       itemBuilder: (BuildContext context, int index) {
         final PlayRecordSong r = items[index];

@@ -224,7 +224,7 @@ class _MyMusicPageState extends ConsumerState<MyMusicPage> {
               // 需求：底部「我的云盘」行已移除 —— 云盘入口与样式
               // 已上移至顶部功能宫格的「音乐云盘」tile（登录后显示
               // 云盘歌曲数）。
-              const SizedBox(height: 8),
+              const SizedBox(height: 12),
               // 需求：我的页增加数据缓存入口（无网环境体验保障，可在此清理）
               const _CacheRow(),
             ],
@@ -708,7 +708,8 @@ class _PlaylistGridSection extends StatelessWidget {
   /// 创建的歌单数量（标题计数用）
   final int createdCount;
 
-  /// 第十五批需求：创建的歌单标题行最右侧显示「+」新建歌单
+  /// 第十六批需求：「新建歌单」不再独立悬浮在标题行右侧，而是作为
+  /// 与歌单同层次的宫格磁贴（创建歌单组首位）
   final VoidCallback? onCreate;
 
   @override
@@ -731,20 +732,6 @@ class _PlaylistGridSection extends StatelessWidget {
                     style: TextStyle(
                         fontSize: 12,
                         color: theme.colorScheme.onSurfaceVariant)),
-                const Spacer(),
-                // 第十五批需求：最右侧「+」= 新建歌单
-                if (onCreate != null)
-                  SizedBox(
-                    width: 34,
-                    height: 34,
-                    child: IconButton(
-                      tooltip: '新建歌单',
-                      padding: EdgeInsets.zero,
-                      icon: Icon(Icons.add_rounded,
-                          size: 22, color: theme.colorScheme.onSurface),
-                      onPressed: onCreate,
-                    ),
-                  ),
               ],
             ),
           ),
@@ -756,11 +743,66 @@ class _PlaylistGridSection extends StatelessWidget {
               crossAxisCount: 3,
               mainAxisSpacing: 14,
               crossAxisSpacing: 10,
-              childAspectRatio: 0.78,
+              // 第十六批修复：0.78 时「封面+两行名称+曲目数」实际高度
+              // 超出磁贴，最后一行名称/数量溢出绘制、与下方数据缓存卡
+              // 重叠 —— 放宽到 0.68 使磁贴高度完整容纳内容
+              childAspectRatio: 0.68,
             ),
-            itemCount: playlists.length,
-            itemBuilder: (BuildContext context, int index) =>
-                _PlaylistGridCard(playlist: playlists[index]),
+            // 需求：「新建歌单」磁贴与歌单同层次，置于创建歌单组首位
+            itemCount: playlists.length + (onCreate != null ? 1 : 0),
+            itemBuilder: (BuildContext context, int index) {
+              if (onCreate != null && index == 0) {
+                return _CreatePlaylistTile(onTap: onCreate!);
+              }
+              final int i = onCreate != null ? index - 1 : index;
+              return _PlaylistGridCard(playlist: playlists[i]);
+            },
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// 新建歌单磁贴（第十六批：与歌单磁贴同层次同尺寸，虚线边框 + 加号）
+class _CreatePlaylistTile extends StatelessWidget {
+  const _CreatePlaylistTile({required this.onTap});
+
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    return GestureDetector(
+      onTap: onTap,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          AspectRatio(
+            aspectRatio: 1,
+            child: Container(
+              decoration: BoxDecoration(
+                color: theme.colorScheme.surfaceContainerHighest
+                    .withValues(alpha: 0.35),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(
+                  color: theme.colorScheme.outlineVariant.withValues(alpha: 0.6),
+                  width: 1.2,
+                ),
+              ),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: <Widget>[
+                  Icon(Icons.add_rounded,
+                      size: 30, color: theme.colorScheme.onSurfaceVariant),
+                  const SizedBox(height: 2),
+                  Text('新建歌单',
+                      style: TextStyle(
+                          fontSize: 11.5,
+                          color: theme.colorScheme.onSurfaceVariant)),
+                ],
+              ),
+            ),
           ),
         ],
       ),
@@ -848,8 +890,8 @@ class _PlaylistSection extends StatelessWidget {
   final bool expanded;
   final VoidCallback onToggle;
 
-  /// 第十五批需求：非空时标题行最右侧显示「+」（新建歌单），
-  /// 替换原有「>」箭头（创建的歌单专用；收藏的歌单不传即保持原样）
+  /// 第十六批需求：「新建歌单」不再独立悬浮在标题行右侧，而是作为
+  /// 与歌单同层次的行磁贴（创建歌单组内首位，收藏的歌单不传即无此行）
   final VoidCallback? onCreate;
 
   @override
@@ -891,26 +933,13 @@ class _PlaylistSection extends StatelessWidget {
                   ),
                 ),
               ),
-              // 第十五批需求：创建的歌单最右侧「>」改「+」＝新建歌单
-              //（独立于折叠开关，避免点击「+」误触收起/展开）
-              if (onCreate != null)
-                SizedBox(
-                  width: 34,
-                  height: 34,
-                  child: IconButton(
-                    tooltip: '新建歌单',
-                    padding: EdgeInsets.zero,
-                    icon: Icon(Icons.add_rounded,
-                        size: 22, color: theme.colorScheme.onSurface),
-                    onPressed: onCreate,
-                  ),
-                )
-              else
-                Icon(
-                  Icons.keyboard_arrow_right_rounded,
-                  size: 18,
-                  color: theme.colorScheme.onSurfaceVariant,
-                ),
+              // 第十六批需求：标题行尾部恢复「>」箭头（新建歌单已改为
+              // 与歌单同层次的行磁贴，不再独立于标题行右侧）
+              Icon(
+                Icons.keyboard_arrow_right_rounded,
+                size: 18,
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
             ],
           ),
           AnimatedCrossFade(
@@ -932,6 +961,9 @@ class _PlaylistSection extends StatelessWidget {
                 ),
                 child: Column(
                   children: <Widget>[
+                    // 第十六批需求：新建歌单行与歌单同层次（组内首位）
+                    if (onCreate != null)
+                      _CreatePlaylistRowTile(onTap: onCreate!),
                     for (int i = 0; i < playlists.length; i++)
                       _PlaylistRowTile(
                         playlist: playlists[i],
@@ -948,6 +980,46 @@ class _PlaylistSection extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// 新建歌单行磁贴（第十六批：与歌单行同层次，创建歌单组内首位）
+class _CreatePlaylistRowTile extends StatelessWidget {
+  const _CreatePlaylistRowTile({required this.onTap});
+
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    return ListTile(
+      dense: true,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 3),
+      leading: Container(
+        width: 46,
+        height: 46,
+        decoration: BoxDecoration(
+          color:
+              theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.35),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(
+            color: theme.colorScheme.outlineVariant.withValues(alpha: 0.6),
+            width: 1.2,
+          ),
+        ),
+        child: Icon(Icons.add_rounded,
+            size: 24, color: theme.colorScheme.onSurfaceVariant),
+      ),
+      title: Text('新建歌单',
+          style: TextStyle(
+              fontSize: 14.5,
+              fontWeight: FontWeight.w600,
+              color: theme.colorScheme.onSurface)),
+      subtitle: Text('创建一个新歌单',
+          style:
+              TextStyle(fontSize: 11, color: theme.colorScheme.onSurfaceVariant)),
+      onTap: onTap,
     );
   }
 }

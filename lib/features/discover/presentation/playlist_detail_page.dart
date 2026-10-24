@@ -760,7 +760,13 @@ class _DetailBodyState extends ConsumerState<_DetailBody> {
               );
             },
           ),
-        const SliverToBoxAdapter(child: SizedBox(height: 24)),
+        const SliverToBoxAdapter(child: SizedBox(height: 12)),
+        // 第十六批需求：底部留出冗余 —— 全局 Mini 条悬浮在页面之上，
+        // 不留白会遮挡末尾歌曲行导致无法交互
+        SliverPadding(
+          padding: EdgeInsets.only(
+              bottom: MediaQuery.paddingOf(context).bottom + 96),
+        ),
       ],
     );
   }

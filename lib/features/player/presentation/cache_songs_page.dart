@@ -114,7 +114,8 @@ class CacheSongsPage extends ConsumerWidget {
                       ref.refresh(cacheEntriesProvider.future),
                   child: ListView.builder(
                     physics: const AlwaysScrollableScrollPhysics(),
-                    padding: const EdgeInsets.only(bottom: 24),
+                    padding: EdgeInsets.only(
+                        bottom: MediaQuery.paddingOf(context).bottom + 96),
                     itemCount: entries.length,
                     itemBuilder: (BuildContext ctx, int i) {
                       final CacheEntry e = entries[i];

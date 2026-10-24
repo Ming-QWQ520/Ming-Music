@@ -64,7 +64,8 @@ class _ArtistSongsPageState extends ConsumerState<ArtistSongsPage> {
             );
           }
           return ListView.builder(
-            padding: const EdgeInsets.only(bottom: 24),
+            padding: EdgeInsets.only(
+                bottom: MediaQuery.paddingOf(context).bottom + 96),
             itemCount: songs.length,
             itemBuilder: (BuildContext ctx, int index) {
               final Song s = songs[index];

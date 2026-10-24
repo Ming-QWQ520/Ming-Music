@@ -49,4 +49,8 @@ class PrefsKeys {
   /// 本地音乐歌曲总数（第十五批需求：进入本地音乐页授权扫描后记录，
   /// 我的页「本地音乐」tile 副标题显示总数）
   static const String localMusicCount = 'library.localMusicCount';
+
+  /// 「添加到歌单」记忆（第十六批需求：记录上次添加成功的歌单 id，
+  /// 下次打开弹窗置顶展示；仅本地显示顺序，不改云端真实歌单排序）
+  static const String addToPlaylistLast = 'library.addToPlaylistLast';
 }

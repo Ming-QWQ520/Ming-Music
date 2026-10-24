@@ -212,6 +212,9 @@ class _CloudDrivePageState extends ConsumerState<CloudDrivePage> {
             onRefresh: _refresh,
             child: ListView.builder(
               physics: const AlwaysScrollableScrollPhysics(),
+              // 第十六批：底部留白防 Mini 条遮挡末尾行
+              padding: EdgeInsets.only(
+                  bottom: MediaQuery.paddingOf(context).bottom + 96),
               itemCount: songs.length,
               itemBuilder: (BuildContext context, int index) {
                 final CloudSong item = songs[index];
@@ -441,6 +444,9 @@ class _LocalAudioPickerSheet extends StatelessWidget {
             ),
             Expanded(
               child: ListView.separated(
+                // 第十六批：底部留白防 Mini 条遮挡末尾行
+                padding: EdgeInsets.only(
+                    bottom: MediaQuery.paddingOf(context).bottom + 96),
                 itemCount: files.length.clamp(0, 500),
                 separatorBuilder: (_, __) => Divider(
                     height: 1, color: Colors.white.withValues(alpha: 0.06)),

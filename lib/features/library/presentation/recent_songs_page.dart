@@ -154,7 +154,12 @@ class _RecentSongsPageState extends ConsumerState<RecentSongsPage> {
             );
           },
         ),
-        const SliverToBoxAdapter(child: SizedBox(height: 24)),
+        const SliverToBoxAdapter(child: SizedBox(height: 12)),
+        // 第十六批需求：底部留出冗余，防 Mini 条遮挡末尾行无法交互
+        SliverPadding(
+          padding: EdgeInsets.only(
+              bottom: MediaQuery.paddingOf(context).bottom + 96),
+        ),
       ],
     );
   }
