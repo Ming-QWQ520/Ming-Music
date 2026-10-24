@@ -127,11 +127,11 @@ class NpPlayerSettings {
     this.lyricLineGap = 14,
     this.lyricAlign = NpLyricAlign.left,
     this.showTranslation = true,
-    // 第十三批需求：非活跃行淡出/模糊对齐 Zephyr-Music（RNP 按行距公式）——
-    // 淡出 1.0 = 纯 Zephyr 衰减曲线（相邻行全亮，远处衰减到下限 0.3）；
-    // 模糊改为强度倍率（1.0 = Zephyr 标准 blurByOffset，0 = 关闭）
+    // 第十四批需求：非活跃行效果改统一强度（不再按行距辐射渐暗，
+    // 用户反馈「以当前播放行向外辐射从亮变暗观感不好」）——
+    // 淡出 1.0 = 非活跃行统一压暗到 0.45；模糊 0 = 关闭（Zephyr 默认）
     this.lyricFade = 1.0,
-    this.lyricBlur = 1.0,
+    this.lyricBlur = 0,
     this.yrcPlayed = const Color(0xFFFFFFFF),
     this.yrcUnplayed = const Color(0x66FFFFFF),
     this.highlightPlayed = false,
@@ -147,7 +147,7 @@ class NpPlayerSettings {
     this.stripButtons = kStripButtonDefaults,
   });
 
-  static const int version = 2;
+  static const int version = 3;
 
   static const NpPlayerSettings defaults = NpPlayerSettings();
 
@@ -192,10 +192,12 @@ class NpPlayerSettings {
   /// 显示翻译副行
   final bool showTranslation;
 
-  /// 非活跃行淡出强度（0 - 1；1.0 = 纯 Zephyr 按行距衰减曲线）
+  /// 非活跃行淡出强度（0 - 1；1.0 = 非活跃行统一压暗到 0.45，
+  /// 第十四批起不再按行距辐射衰减）
   final double lyricFade;
 
-  /// 非活跃行模糊强度倍率（0 - 3；1.0 = Zephyr 标准 blurByOffset）
+  /// 非活跃行模糊强度 px（0 - 3；0 = 关闭，Zephyr 默认；
+  /// 第十四批起由「倍率」改为直接 px，所有非活跃行统一）
   final double lyricBlur;
 
   /// 逐字已唱颜色
@@ -321,8 +323,13 @@ class NpPlayerSettings {
     //  - 非活跃行淡出/模糊改用 Zephyr（RNP）按行距公式，旧档统一升到
     //    新标准（淡出 1.0 / 模糊倍率 1.0），用户后续可再自行调整；
     //  - 封面页歌词预览默认从一行升为两行（旧档存的 'one' 升级）。
+    // 版本迁移（v3，第十四批需求）：
+    //  - 非活跃行效果改统一强度（不再按行距辐射渐暗）；模糊由倍率
+    //    改为直接 px 且默认关闭（Zephyr 默认 lyricBlur=0），旧档
+    //    （含 v2 的 1.0 倍率）统一升为 0，需要时可在设置中重开。
     final int storedVersion = (map['_v'] as num?)?.toInt() ?? 1;
     final bool migrateToV2 = storedVersion < 2;
+    final bool migrateToV3 = storedVersion < 3;
 
     return NpPlayerSettings(
       displayMode: NpDisplayMode.values.firstWhere(
@@ -355,7 +362,8 @@ class NpPlayerSettings {
       lyricFade: migrateToV2
           ? defaults.lyricFade
           : clampD(map['lyricFade'], 0, 1, defaults.lyricFade),
-      lyricBlur: migrateToV2
+      // v3：模糊倍率语义作废，旧档（含 v2 的 1.0）统一升为 0 = 关闭
+      lyricBlur: migrateToV3
           ? defaults.lyricBlur
           : clampD(map['lyricBlur'], 0, 3, defaults.lyricBlur),
       yrcPlayed: colorOf(map['yrcPlayed'], defaults.yrcPlayed),

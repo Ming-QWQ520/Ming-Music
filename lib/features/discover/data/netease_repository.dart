@@ -74,6 +74,127 @@ class NeteaseRepository {
     return _fillMissingCovers(parsed);
   }
 
+  /// 分类搜索（第十四批需求：对齐 Zephyr-Music WIP —— /search type 全量：
+  /// 1 单曲 / 10 专辑 / 100 歌手 / 1000 歌单 / 1002 用户 / 1004 MV /
+  /// 1006 歌词 / 1018 综合）。单曲沿用 search() 的 cloudsearch 兜底，
+  /// 其余分类直接解析对应键；综合(1018)按 result.order 还原区块顺序。
+  Future<SearchResults> searchByType(
+    String keywords,
+    int type, {
+    int limit = 30,
+  }) async {
+    final Map<String, String> params = <String, String>{
+      'keywords': keywords,
+      'limit': '$limit',
+      'offset': '0',
+      'type': '$type',
+    };
+
+    // 单曲 / 歌词：复用既有解析（老字段 artists/album）+ 封面补全
+    if (type == 1 || type == 1006) {
+      final List<Song> songs = type == 1
+          ? await search(keywords, limit: limit)
+          : await _searchRawSongs(params);
+      return SearchResults(type: type, songs: songs);
+    }
+
+    final Map<String, Object?> res = await _api.get('/search', params);
+    final Object? result = res['result'];
+    if (result is! Map<String, Object?>) {
+      return SearchResults(type: type);
+    }
+
+    switch (type) {
+      case 10: // 专辑
+        return SearchResults(type: type, albums: _albumsFrom(result['albums']));
+      case 100: // 歌手
+        return SearchResults(
+            type: type, artists: _artistsFrom(result['artists']));
+      case 1000: // 歌单
+        return SearchResults(
+            type: type, playlists: _playlistsFrom(result['playlists']));
+      case 1002: // 用户（键名 userprofiles）
+        return SearchResults(
+            type: type, users: _usersFrom(result['userprofiles']));
+      case 1004: // MV
+        return SearchResults(type: type, mvs: _mvsFrom(result['mvs']));
+      case 1018: // 综合：order + 各区块
+        final List<String> order = <String>[
+          if (result['order'] is List<Object?>)
+            for (final Object? o in result['order'] as List<Object?>)
+              if (o is String) o,
+        ];
+        Map<String, Object?> section(String key) =>
+            (result[key] as Map<String, Object?>?) ?? const <String, Object?>{};
+        return SearchResults(
+          type: type,
+          order: order,
+          songs: _songsFrom(section('song')['songs']),
+          playlists: _playlistsFrom(section('playList')['playLists']),
+          artists: _artistsFrom(section('artist')['artists']),
+          albums: _albumsFrom(section('album')['albums']),
+          users: _usersFrom(section('user')['users']),
+          mvs: _mvsFrom(section('mv')['mvs']),
+        );
+      default:
+        return SearchResults(type: type);
+    }
+  }
+
+  /// /search 单次解析（无 cloudsearch 兜底，歌词分类专用）
+  Future<List<Song>> _searchRawSongs(Map<String, String> params) async {
+    final Map<String, Object?> res = await _api.get('/search', params);
+    final Object? result = res['result'];
+    final Object? songs =
+        (result is Map<String, Object?>) ? result['songs'] : null;
+    return _fillMissingCovers(_songsFrom(songs));
+  }
+
+  List<SearchAlbum> _albumsFrom(Object? raw) {
+    if (raw is! List<Object?>) return const <SearchAlbum>[];
+    return raw
+        .whereType<Map<String, Object?>>()
+        .map(SearchAlbum.fromJson)
+        .where((SearchAlbum a) => a.id != 0)
+        .toList(growable: false);
+  }
+
+  List<SearchArtist> _artistsFrom(Object? raw) {
+    if (raw is! List<Object?>) return const <SearchArtist>[];
+    return raw
+        .whereType<Map<String, Object?>>()
+        .map(SearchArtist.fromJson)
+        .where((SearchArtist a) => a.id != 0)
+        .toList(growable: false);
+  }
+
+  List<PlaylistMeta> _playlistsFrom(Object? raw) {
+    if (raw is! List<Object?>) return const <PlaylistMeta>[];
+    return raw
+        .whereType<Map<String, Object?>>()
+        .map(PlaylistMeta.fromJson)
+        .where((PlaylistMeta p) => p.id != 0)
+        .toList(growable: false);
+  }
+
+  List<SearchUser> _usersFrom(Object? raw) {
+    if (raw is! List<Object?>) return const <SearchUser>[];
+    return raw
+        .whereType<Map<String, Object?>>()
+        .map(SearchUser.fromJson)
+        .where((SearchUser u) => u.userId != 0)
+        .toList(growable: false);
+  }
+
+  List<SearchMv> _mvsFrom(Object? raw) {
+    if (raw is! List<Object?>) return const <SearchMv>[];
+    return raw
+        .whereType<Map<String, Object?>>()
+        .map(SearchMv.fromJson)
+        .where((SearchMv m) => m.id != 0)
+        .toList(growable: false);
+  }
+
   /// 封面缺失批量补全：对 coverUrl 为空的歌请求 /song/detail（
   /// 响应含 al.picUrl），按 id 回填；失败静默返回原列表。
   Future<List<Song>> _fillMissingCovers(List<Song> songs) async {

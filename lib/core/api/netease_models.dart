@@ -815,3 +815,178 @@ class SearchSuggest {
     );
   }
 }
+
+// ---------------------------------------------------------------- 搜索分类结果
+//
+// 第十四批需求：搜索对齐 Zephyr-Music WIP 分支 —— /search 的 type 全量
+// 支持（1 单曲 / 10 专辑 / 100 歌手 / 1000 歌单 / 1002 用户 / 1004 MV /
+// 1006 歌词 / 1018 综合）。以下为各分类的轻量展示模型（仅搜索页使用）。
+
+/// 专辑搜索结果（/search type=10 → result.albums[]）
+class SearchAlbum {
+  const SearchAlbum({
+    required this.id,
+    required this.name,
+    required this.artist,
+    this.picUrl,
+    this.songCount,
+    this.publishTime,
+  });
+
+  final int id;
+  final String name;
+  final String artist;
+  final String? picUrl;
+  final int? songCount;
+  final int? publishTime;
+
+  static SearchAlbum fromJson(Map<String, Object?> j) {
+    final Object? artist = j['artist'];
+    return SearchAlbum(
+      id: (j['id'] as num?)?.toInt() ?? 0,
+      name: (j['name'] as String?) ?? '未知专辑',
+      artist: artist is Map<String, Object?>
+          ? ((artist['name'] as String?) ?? '未知歌手')
+          : '未知歌手',
+      picUrl: _picOf(j['picUrl'] as String? ?? j['pic'] as String?),
+      songCount: (j['size'] as num?)?.toInt(),
+      publishTime: (j['publishTime'] as num?)?.toInt(),
+    );
+  }
+
+  static String? _picOf(String? raw) =>
+      (raw == null || raw.isEmpty) ? null : normalizeNeteaseUrl(raw);
+}
+
+/// 歌手搜索结果（/search type=100 → result.artists[]）
+class SearchArtist {
+  const SearchArtist({
+    required this.id,
+    required this.name,
+    this.picUrl,
+    this.alias = '',
+    this.albumSize,
+    this.musicSize,
+    this.mvSize,
+  });
+
+  final int id;
+  final String name;
+  final String? picUrl;
+
+  /// 别名（多个以「 / 」连接，如 Jay Chou / 周董）
+  final String alias;
+  final int? albumSize;
+  final int? musicSize;
+  final int? mvSize;
+
+  static SearchArtist fromJson(Map<String, Object?> j) {
+    final List<String> alias = <String>[];
+    final Object? raw = j['alias'];
+    if (raw is List<Object?>) {
+      for (final Object? item in raw) {
+        if (item is String && item.isNotEmpty) alias.add(item);
+        if (item is Map<String, Object?>) {
+          final String? n = item['name'] as String?;
+          if (n != null && n.isNotEmpty) alias.add(n);
+        }
+      }
+    }
+    return SearchArtist(
+      id: (j['id'] as num?)?.toInt() ?? 0,
+      name: (j['name'] as String?) ?? '未知歌手',
+      picUrl: SearchAlbum._picOf(
+          j['picUrl'] as String? ?? j['img1v1Url'] as String?),
+      alias: alias.isEmpty ? '' : alias.join(' / '),
+      albumSize: (j['albumSize'] as num?)?.toInt(),
+      musicSize: (j['musicSize'] as num?)?.toInt(),
+      mvSize: (j['mvSize'] as num?)?.toInt(),
+    );
+  }
+}
+
+/// 用户搜索结果（/search type=1002 → result.userprofiles[]）
+class SearchUser {
+  const SearchUser({
+    required this.userId,
+    required this.nickname,
+    this.avatarUrl,
+    this.signature = '',
+  });
+
+  final int userId;
+  final String nickname;
+  final String? avatarUrl;
+  final String signature;
+
+  static SearchUser fromJson(Map<String, Object?> j) => SearchUser(
+        userId:
+            (j['userId'] as num?)?.toInt() ?? (j['id'] as num?)?.toInt() ?? 0,
+        nickname: (j['nickname'] as String?) ?? '未知用户',
+        avatarUrl: SearchAlbum._picOf(j['avatarUrl'] as String?),
+        signature: (j['signature'] as String?) ?? '',
+      );
+}
+
+/// MV 搜索结果（/search type=1004 → result.mvs[]）
+class SearchMv {
+  const SearchMv({
+    required this.id,
+    required this.name,
+    required this.artistName,
+    this.coverUrl,
+    this.durationMs,
+    this.playCount,
+  });
+
+  final int id;
+  final String name;
+  final String artistName;
+  final String? coverUrl;
+  final int? durationMs;
+  final int? playCount;
+
+  static SearchMv fromJson(Map<String, Object?> j) => SearchMv(
+        id: (j['id'] as num?)?.toInt() ?? 0,
+        name: (j['name'] as String?) ?? 'MV',
+        artistName: (j['artistName'] as String?) ?? '',
+        coverUrl: SearchAlbum._picOf(j['cover'] as String?),
+        durationMs: (j['duration'] as num?)?.toInt(),
+        playCount: (j['playCount'] as num?)?.toInt(),
+      );
+}
+
+/// 分类搜索聚合结果（repository.searchByType 产物；type 对应的列表非空，
+/// 其余为空 —— 综合搜索时 order 决定展示顺序、多列表并存）
+class SearchResults {
+  const SearchResults({
+    required this.type,
+    this.songs = const <Song>[],
+    this.playlists = const <PlaylistMeta>[],
+    this.albums = const <SearchAlbum>[],
+    this.artists = const <SearchArtist>[],
+    this.users = const <SearchUser>[],
+    this.mvs = const <SearchMv>[],
+    this.order = const <String>[],
+  });
+
+  final int type;
+  final List<Song> songs;
+  final List<PlaylistMeta> playlists;
+  final List<SearchAlbum> albums;
+  final List<SearchArtist> artists;
+  final List<SearchUser> users;
+  final List<SearchMv> mvs;
+
+  /// 综合搜索（1018）的区块顺序（'song' / 'playList' / 'artist' /
+  /// 'album' / 'mv' / 'user' / 'sim_query'...，仅展示已知区块）
+  final List<String> order;
+
+  bool get isEmpty =>
+      songs.isEmpty &&
+      playlists.isEmpty &&
+      albums.isEmpty &&
+      artists.isEmpty &&
+      users.isEmpty &&
+      mvs.isEmpty;
+}

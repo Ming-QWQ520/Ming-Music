@@ -154,9 +154,26 @@ void main() {
       // 非活跃行淡出/模糊升为 Zephyr（RNP）标准（fade 1.0 / blur 1.0）
       expect(legacy.coverLyrics, NpCoverLyricsMode.two);
       expect(legacy.lyricFade, 1.0);
-      expect(legacy.lyricBlur, 1.0);
+      // 第十四批需求：v1/v2 旧档迁移到 v3 —— 非活跃行改统一强度，
+      // 模糊语义改直接 px 且默认关闭（Zephyr 默认 lyricBlur=0）
+      expect(legacy.lyricBlur, 0);
       expect(legacy.lyricAlwaysCenter, isFalse);
       expect(legacy.heartEffect, isTrue);
+    });
+
+    test('v2 旧档迁移到 v3：模糊倍率作废统一升为 0，其余字段保留', () {
+      final NpPlayerSettings v2 = NpPlayerSettings.fromMap(<Object?, Object?>{
+        '_v': 2,
+        'lyricFade': 0.6,
+        'lyricBlur': 2.0, // v2 的倍率语义
+        'coverLyrics': 'one',
+      });
+      // v3 迁移只重置模糊；fade / 封面页行数等用户自定义值保留
+      expect(v2.lyricBlur, 0);
+      expect(v2.lyricFade, closeTo(0.6, 1e-9));
+      expect(v2.coverLyrics, NpCoverLyricsMode.one);
+      // 迁移后写回即为 v3
+      expect(v2.toMap()['_v'], NpPlayerSettings.version);
     });
 
     test('stripButtons 顺序按 kStripButtonIds 规范化', () {
