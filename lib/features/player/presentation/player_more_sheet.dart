@@ -26,8 +26,9 @@ import '../../discover/data/netease_providers.dart';
 import '../../library/data/download_service.dart';
 import '../../library/domain/track.dart';
 import '../../library/presentation/add_to_playlist_sheet.dart';
+import '../../../core/api/netease_models.dart' show SongUrlInfo;
 import '../../settings/domain/settings_models.dart'
-    show AudioQuality, AudioQualityX;
+    show AudioQuality, AudioQualityX, audioQualityLevelLabel, formatSampleRate;
 import '../../settings/providers/settings_providers.dart'
     show audioQualityProvider;
 import '../domain/np_settings.dart';
@@ -146,6 +147,9 @@ class _PlayerMoreSheetState extends ConsumerState<_PlayerMoreSheet> {
         ref.watch(playerProvider.select((PlayerState s) => s.currentTrack));
     final NpPlayerSettings cfg = ref.watch(npSettingsProvider);
     final AudioQuality quality = ref.watch(audioQualityProvider);
+    // 需求：音质项显示当前播放歌曲的真实频率与真实品质
+    //（/song/url/v1 响应的 level 实际下发档位 + sr 实际采样率）
+    final SongUrlInfo? urlMeta = ref.watch(currentTrackUrlMetaProvider);
     final bool liked = (track?.neteaseId ?? 0) > 0 &&
         ref.watch(authProvider
             .select((AuthState s) => s.likedIds.contains(track!.neteaseId)));
@@ -434,15 +438,25 @@ class _PlayerMoreSheetState extends ConsumerState<_PlayerMoreSheet> {
                   const _SectionLabel('播放设置'),
                   _MoreRow(
                     icon: Icons.high_quality_rounded,
-                    label: '音质：${quality.label}'
-                        '${quality != AudioQuality.standard ? '' : ''}',
-                    trailing: const Text(
-                      'VIP',
-                      style: TextStyle(
-                          color: AppConstants.brandColor,
-                          fontSize: 9.5,
-                          fontWeight: FontWeight.w800),
-                    ),
+                    label: '音质：${quality.label}',
+                    // 需求：展示当前播放歌曲的真实频率与真实品质
+                    //（请求档位因权限回落时与真实值不同，故从解析响应取：
+                    // level 实际档位 / sr 实际采样率）；无数据时保留原 VIP 徽标
+                    trailing: (urlMeta != null &&
+                            _realQualityText(urlMeta).isNotEmpty)
+                        ? Text(
+                            _realQualityText(urlMeta),
+                            style: TextStyle(
+                                fontSize: 12,
+                                color: theme.colorScheme.onSurfaceVariant),
+                          )
+                        : const Text(
+                            'VIP',
+                            style: TextStyle(
+                                color: AppConstants.brandColor,
+                                fontSize: 9.5,
+                                fontWeight: FontWeight.w800),
+                          ),
                     onTap: () => showQualitySheet(context, quality),
                   ),
                   _MoreRow(
@@ -918,6 +932,23 @@ class _SectionLabel extends StatelessWidget {
       ),
     );
   }
+}
+
+/// 音质项右侧的真实品质/频率串（需求：显示当前播放歌曲的真实频率与
+/// 真实品质）：取最近一次 /song/url/v1 响应元数据 —— level 实际下发
+/// 档位 + sr 实际采样率，如「极高 · 48kHz」；无数据返回空串（由调用处
+/// 兑底为原 VIP 徽标）。
+String _realQualityText(SongUrlInfo? meta) {
+  if (meta == null) return '';
+  final String level = audioQualityLevelLabel(meta.level);
+  final String sr = formatSampleRate(meta.sr);
+  final String br = (meta.br ?? 0) > 0 ? '${(meta.br! / 1000).round()}K' : '';
+  final List<String> parts = <String>[
+    if (level.isNotEmpty) level,
+    if (sr.isNotEmpty) sr,
+    if (br.isNotEmpty) br,
+  ];
+  return parts.join(' · ');
 }
 
 class _MoreRow extends StatelessWidget {

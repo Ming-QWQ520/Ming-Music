@@ -256,17 +256,34 @@ class _PlayerProgressBarState extends ConsumerState<PlayerProgressBar> {
                 left: _kTrackInset, right: _kTrackInset, top: 2),
             child: Row(
               children: <Widget>[
+                // 当前播放进度文字：拖动时轻微高亮（需求）—— 白色加重 +
+                // 轻微白光晕，AnimatedDefaultTextStyle 平滑过渡；
+                // 只高亮当前进度（左侧），总时长保持原样式
                 SizedBox(
                   width: 44,
-                  child: Text(
-                    Duration(milliseconds: value.round()).clock,
+                  child: AnimatedDefaultTextStyle(
+                    duration: const Duration(milliseconds: 180),
+                    curve: Curves.easeOut,
                     style: TextStyle(
                       fontSize: 12,
                       fontFeatures: const <FontFeature>[
                         FontFeature.tabularFigures()
                       ],
-                      color: Colors.white.withValues(alpha: 0.62),
+                      color: _dragging
+                          ? Colors.white
+                          : Colors.white.withValues(alpha: 0.62),
+                      fontWeight:
+                          _dragging ? FontWeight.w700 : FontWeight.w400,
+                      shadows: _dragging
+                          ? <Shadow>[
+                              Shadow(
+                                color: Colors.white.withValues(alpha: 0.45),
+                                blurRadius: 6,
+                              ),
+                            ]
+                          : const <Shadow>[],
                     ),
+                    child: Text(Duration(milliseconds: value.round()).clock),
                   ),
                 ),
                 Expanded(

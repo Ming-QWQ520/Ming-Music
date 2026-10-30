@@ -95,15 +95,53 @@ extension GlassPrefX on GlassPref {
 /// 掉帧）。阈值下调到 27（Android 8.1），用户仍可在设置中手动关闭。
 const int kGlassAutoMinSdk = 27;
 
-/// 网易云播放音质等级（对应 /song/url/v1 的 level 参数）
-enum AudioQuality { standard, higher, exhigh, lossless }
+/// 网易云播放音质等级（对应 /song/url/v1 的 level 参数）。
+///
+/// 需求（songurl.txt）：新增高清臻音 / 杜比全景声 / 臻音全景声 /
+/// 超清母带 / 沉浸环绕声 / Hi-Res 六档 —— 与官方档位全量对齐：
+/// standard / higher / exhigh / lossless / hires / jyeffect / dolby /
+/// vivid / jymaster / sky。枚举顺序沿用「低 → 高、旧档在前」，
+/// 反序列化按 name 匹配（历史存档不受新增档位影响）。
+enum AudioQuality {
+  standard,
+  higher,
+  exhigh,
+  lossless,
+  hires,
+  jyeffect,
+  dolby,
+  vivid,
+  jymaster,
+  sky,
+}
 
 extension AudioQualityX on AudioQuality {
+  /// 选择面板/更多菜单的完整展示名
   String get label => switch (this) {
         AudioQuality.standard => '标准 (128K)',
         AudioQuality.higher => '较高 (192K)',
         AudioQuality.exhigh => '极高 (320K)',
         AudioQuality.lossless => '无损 FLAC',
+        AudioQuality.hires => 'Hi-Res',
+        AudioQuality.jyeffect => '高清臻音',
+        AudioQuality.dolby => '杜比全景声',
+        AudioQuality.vivid => '臻音全景声',
+        AudioQuality.jymaster => '超清母带',
+        AudioQuality.sky => '沉浸环绕声',
+      };
+
+  /// 进度行中央音质胶囊的短名（宽度敏感）
+  String get shortLabel => switch (this) {
+        AudioQuality.standard => '标准',
+        AudioQuality.higher => '较高',
+        AudioQuality.exhigh => '极高',
+        AudioQuality.lossless => '无损',
+        AudioQuality.hires => 'Hi-Res',
+        AudioQuality.jyeffect => '臻音',
+        AudioQuality.dolby => '杜比',
+        AudioQuality.vivid => '全景声',
+        AudioQuality.jymaster => '母带',
+        AudioQuality.sky => '环绕声',
       };
 
   String get apiValue => name;
@@ -112,4 +150,31 @@ extension AudioQualityX on AudioQuality {
         (AudioQuality q) => q.name == name,
         orElse: () => AudioQuality.standard,
       );
+}
+
+/// /song/url/v1 返回的 level（实际下发档位）→ 展示名。
+/// 用于播放设置「音质」项展示当前播放歌曲的**真实品质**
+///（请求档位因权限回落时与请求值不同，如未登录请求无损实际返回极高）。
+String audioQualityLevelLabel(String? level) => switch (level) {
+      'standard' => '标准',
+      'higher' => '较高',
+      'exhigh' => '极高',
+      'lossless' => '无损',
+      'hires' => 'Hi-Res',
+      'jyeffect' => '高清臻音',
+      'dolby' => '杜比全景声',
+      'vivid' => '臻音全景声',
+      'jymaster' => '超清母带',
+      'sky' => '沉浸环绕声',
+      _ => (level == null || level.isEmpty) ? '' : level,
+    };
+
+/// 采样率 Hz → 展示串：44100 → 44.1kHz / 48000 → 48kHz / 96000 → 96kHz。
+/// 用于播放设置「音质」项展示当前播放歌曲的**真实频率**。
+String formatSampleRate(int? sr) {
+  if (sr == null || sr <= 0) return '';
+  final double khz = sr / 1000;
+  if (khz >= 100) return '${khz.round()}kHz';
+  final String text = khz.toStringAsFixed(1);
+  return '${text.endsWith('.0') ? khz.round().toString() : text}kHz';
 }

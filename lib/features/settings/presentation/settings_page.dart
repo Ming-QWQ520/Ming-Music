@@ -108,12 +108,20 @@ class SettingsPage extends ConsumerWidget {
             children: <Widget>[
               _RadioRow<AudioQuality>(
                 label: '播放音质',
-                subtitle: '无损音质需要网易 VIP，游客通常回落到标准',
+                // 需求（songurl.txt）：档位扩到官方全量 10 档
+                subtitle: 'Hi-Res/臻音/杜比等高档位需要对应权益或设备支持，'
+                    '无权限时服务端自动回落',
                 groups: const <(AudioQuality, String)>[
                   (AudioQuality.standard, '标准'),
                   (AudioQuality.higher, '较高'),
                   (AudioQuality.exhigh, '极高'),
                   (AudioQuality.lossless, '无损'),
+                  (AudioQuality.hires, 'Hi-Res'),
+                  (AudioQuality.jyeffect, '高清臻音'),
+                  (AudioQuality.dolby, '杜比全景声'),
+                  (AudioQuality.vivid, '臻音全景声'),
+                  (AudioQuality.jymaster, '超清母带'),
+                  (AudioQuality.sky, '沉浸环绕声'),
                 ],
                 value: quality,
                 onChanged: (AudioQuality v) =>

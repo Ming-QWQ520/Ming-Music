@@ -353,6 +353,16 @@ class AuthNotifier extends Notifier<AuthState> {
     state = state.copyWith(busy: true);
     await _repo.logout();
     _api.clearUserCookie();
+    // 我的页歌单缓存随登出一并清除（需求修复：未登录且有缓存只应
+    // 出现在「离线 + 曾登录」场景 —— 登出后不得再直显旧账号歌单）
+    try {
+      await ref
+          .read(sharedPreferencesProvider)
+          .remove(PrefsKeys.libraryUserPlaylistsCache);
+      await ref.read(sharedPreferencesProvider).remove(PrefsKeys.lastUserId);
+    } catch (_) {
+      // 清理失败不影响登出流程
+    }
     state = state.copyWith(
       status: AuthStatus.guest,
       clearProfile: true,

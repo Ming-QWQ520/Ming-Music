@@ -303,6 +303,8 @@ class SongUrlInfo {
     this.type,
     this.fee = 0,
     this.isTrial = false,
+    this.level,
+    this.sr,
   });
 
   final int id;
@@ -311,6 +313,14 @@ class SongUrlInfo {
   final String? type;
   final int fee;
   final bool isTrial;
+
+  /// 实际下发的音质档位（level 字段：请求档位因权限回落时与请求值不同，
+  /// 如未登录请求 lossless 实际返回 exhigh）—— 播放设置「音质」项展示
+  /// 「真实品质」的数据源
+  final String? level;
+
+  /// 实际采样率（sr 字段，Hz，如 44100/48000/96000）—— 展示「真实频率」
+  final int? sr;
 
   bool get playable => url.isNotEmpty;
 
@@ -321,6 +331,8 @@ class SongUrlInfo {
         type: j['type'] as String?,
         fee: (j['fee'] as num?)?.toInt() ?? 0,
         isTrial: j['freeTrialInfo'] != null,
+        level: j['level'] as String?,
+        sr: (j['sr'] as num?)?.toInt(),
       );
 }
 

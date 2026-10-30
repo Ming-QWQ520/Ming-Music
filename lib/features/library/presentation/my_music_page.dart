@@ -71,6 +71,14 @@ class _MyMusicPageState extends ConsumerState<MyMusicPage> {
       ) {
         final bool becameLoggedIn =
             next.loggedIn && !(prev?.loggedIn ?? false);
+        // 主动登出（登录→未登录）：清空页内列表（持久层缓存已在
+        // AuthNotifier.logout 同步清除），避免退出后仍直显旧账号歌单
+        final bool becameLoggedOut =
+            !(next.loggedIn) && (prev?.loggedIn ?? false);
+        if (becameLoggedOut) {
+          if (mounted) setState(() => _playlists = null);
+          return;
+        }
         if (becameLoggedIn || (next.loggedIn && _playlists == null)) {
           _loadPlaylists();
         }
@@ -101,7 +109,7 @@ class _MyMusicPageState extends ConsumerState<MyMusicPage> {
     }
   }
 
-  void _cachePlaylists(List<NeteaseUserPlaylist> list) {
+  void _cachePlaylists(List<NeteaseUserPlaylist> list, int uid) {
     try {
       ref
           .read(sharedPreferencesProvider)
@@ -109,6 +117,9 @@ class _MyMusicPageState extends ConsumerState<MyMusicPage> {
               jsonEncode(<Object?>[
                 for (final NeteaseUserPlaylist p in list) p.toCacheMap(),
               ]));
+      // 需求修复（离线直显）：同时记录当前用户 id —— 离线时 profile
+      // 校验失败为 null，_createdList/_collectedList 需要用它拆分创建/收藏
+      ref.read(sharedPreferencesProvider).setInt(PrefsKeys.lastUserId, uid);
     } catch (_) {
       // 缓存写入失败不影响展示
     }
@@ -116,17 +127,20 @@ class _MyMusicPageState extends ConsumerState<MyMusicPage> {
 
   Future<void> _loadPlaylists() async {
     final AuthState auth = ref.read(authProvider);
-    if (!auth.loggedIn) {
-      if (mounted) setState(() => _playlists = null);
-      return;
-    }
+    // 需求修复（缓存机制未正常生效 / 无网时创建歌单不显示）：
+    // 旧实现在未登录时把 _playlists 置空 —— 而离线冷启动时 AuthNotifier
+    // 的 _restore 网络校验必然失败（status 停在 unknown），initState 刚
+    // 读出的缓存在这里被清掉，且离线永远等不到登录态监听回调 → 歌单区
+    // 永久空白，离线播放入口失效。改为：未登录时不动页内列表，
+    // 缓存的有无交给 initState 与登出监听管理（缓存存在 = 曾登录）。
+    if (!auth.loggedIn) return;
     try {
       final List<NeteaseUserPlaylist> list = await ref
           .read(neteaseAuthRepositoryProvider)
           .userPlaylists(auth.profile!.userId);
       if (mounted) {
         setState(() => _playlists = list);
-        _cachePlaylists(list);
+        _cachePlaylists(list, auth.profile!.userId);
       }
     } catch (_) {
       // 失败时保留缓存直显（不再清空 → 重启后弱网不空白）
@@ -256,7 +270,9 @@ class _MyMusicPageState extends ConsumerState<MyMusicPage> {
             // 功能行：听歌排行榜
             const _RankRow(),
             // 歌单分组：宫格（创建+收藏连续排列，无收藏折叠栏）/ 列表（原折叠分组）
-            if (auth.loggedIn) ...<Widget>[
+            // 需求修复（离线直显）：离线/校验失败时（loggedIn=false）若
+            // 本地有缓存歌单，同样展示歌单区 —— 离线播放入口不再丢失
+            if (auth.loggedIn || _playlists != null) ...<Widget>[
               const SizedBox(height: 8),
               if (layout == LibraryPlaylistLayout.grid)
                 _PlaylistGridSection(
@@ -311,15 +327,22 @@ class _MyMusicPageState extends ConsumerState<MyMusicPage> {
     );
   }
 
+  /// 离线拆分创建/收藏歌单用的 uid：profile 校验失败时回退到
+  /// 最近一次登录记录（与歌单缓存同生命周期，登出时一并清除）
+  int get _displayUid =>
+      ref.read(authProvider).profile?.userId ??
+      ref.read(sharedPreferencesProvider).getInt(PrefsKeys.lastUserId) ??
+      0;
+
   List<NeteaseUserPlaylist> get _createdList {
-    final int myUid = ref.read(authProvider).profile?.userId ?? 0;
+    final int myUid = _displayUid;
     return (_playlists ?? const <NeteaseUserPlaylist>[])
         .where((NeteaseUserPlaylist p) => p.creatorUserId == myUid)
         .toList(growable: false);
   }
 
   List<NeteaseUserPlaylist> get _collectedList {
-    final int myUid = ref.read(authProvider).profile?.userId ?? 0;
+    final int myUid = _displayUid;
     return (_playlists ?? const <NeteaseUserPlaylist>[])
         .where((NeteaseUserPlaylist p) =>
             p.creatorUserId != myUid && p.creatorUserId != 0)

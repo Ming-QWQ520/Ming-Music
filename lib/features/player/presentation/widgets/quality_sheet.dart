@@ -47,44 +47,58 @@ class _QualitySheetState extends ConsumerState<_QualitySheet> {
                     fontWeight: FontWeight.w700,
                     color: theme.colorScheme.onSurface)),
             const SizedBox(height: 6),
-            for (final AudioQuality q in AudioQuality.values)
-              ListTile(
-                title: Text(
-                  q.label,
-                  style: TextStyle(
-                    fontSize: 15,
-                    fontWeight:
-                        q == widget.current ? FontWeight.w700 : FontWeight.w400,
-                    color: q == widget.current
-                        ? AppConstants.brandColor
-                        : theme.colorScheme.onSurface,
-                  ),
+            // 需求（songurl.txt）：音质档位扩到 10 档 —— 列表改为
+            // 可滚动，避免小屏底部溢出
+            Flexible(
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: <Widget>[
+                    for (final AudioQuality q in AudioQuality.values)
+                      ListTile(
+                        title: Text(
+                          q.label,
+                          style: TextStyle(
+                            fontSize: 15,
+                            fontWeight: q == widget.current
+                                ? FontWeight.w700
+                                : FontWeight.w400,
+                            color: q == widget.current
+                                ? AppConstants.brandColor
+                                : theme.colorScheme.onSurface,
+                          ),
+                        ),
+                        trailing: _switching == q.name
+                            ? const SizedBox(
+                                width: 18,
+                                height: 18,
+                                child:
+                                    CircularProgressIndicator(strokeWidth: 2),
+                              )
+                            : (q == widget.current
+                                ? const Icon(Icons.check_rounded,
+                                    color: AppConstants.brandColor, size: 20)
+                                : null),
+                        onTap: _switching != null
+                            ? null
+                            : () async {
+                                setState(() => _switching = q.name);
+                                final String? error = await ref
+                                    .read(playerProvider.notifier)
+                                    .switchQuality(q);
+                                if (!context.mounted) return;
+                                Navigator.of(context).pop();
+                                if (error != null) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(
+                                          content: Text('切换失败：$error')));
+                                }
+                              },
+                      ),
+                  ],
                 ),
-                trailing: _switching == q.name
-                    ? const SizedBox(
-                        width: 18,
-                        height: 18,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : (q == widget.current
-                        ? const Icon(Icons.check_rounded,
-                            color: AppConstants.brandColor, size: 20)
-                        : null),
-                onTap: _switching != null
-                    ? null
-                    : () async {
-                        setState(() => _switching = q.name);
-                        final String? error = await ref
-                            .read(playerProvider.notifier)
-                            .switchQuality(q);
-                        if (!context.mounted) return;
-                        Navigator.of(context).pop();
-                        if (error != null) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(content: Text('切换失败：$error')));
-                        }
-                      },
               ),
+            ),
             const SizedBox(height: 8),
           ],
         ),

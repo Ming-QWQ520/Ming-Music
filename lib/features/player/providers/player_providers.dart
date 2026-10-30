@@ -205,6 +205,37 @@ final Provider<int?> currentChorusStartProvider = Provider<int?>((Ref ref) {
   return ref.watch(chorusStartProvider(songId)).valueOrNull;
 });
 
+/// 曲目真实音质元数据（neteaseId → 最近一次 /song/url/v1 响应元数据：
+/// level 实际下发档位 / br 实际码率 / sr 实际采样率）。
+///
+/// 需求：播放设置「音质」项显示当前播放歌曲的真实频率与真实品质 ——
+/// 请求档位因权限回落时（如未登录请求无损实际拿到极高），响应里的
+/// level/sr 才是真实值，选择器里的档位只是请求值。
+final NotifierProvider<SongMetaNotifier, Map<int, SongUrlInfo>>
+    songMetaProvider =
+    NotifierProvider<SongMetaNotifier, Map<int, SongUrlInfo>>(
+        SongMetaNotifier.new);
+
+class SongMetaNotifier extends Notifier<Map<int, SongUrlInfo>> {
+  @override
+  Map<int, SongUrlInfo> build() => const <int, SongUrlInfo>{};
+
+  void upsertAll(Map<int, SongUrlInfo> meta) {
+    if (meta.isEmpty) return;
+    state = <int, SongUrlInfo>{...state, ...meta};
+  }
+}
+
+/// 当前播放曲目的真实音质元数据（null = 尚未解析 / 本地或自定义曲目）
+final Provider<SongUrlInfo?> currentTrackUrlMetaProvider =
+    Provider<SongUrlInfo?>((Ref ref) {
+  final int? nid = ref.watch(
+      playerProvider.select((PlayerState s) => s.currentTrack?.neteaseId));
+  if (nid == null || nid <= 0) return null;
+  return ref
+      .watch(songMetaProvider.select((Map<int, SongUrlInfo> m) => m[nid]));
+});
+
 class PlayerNotifier extends Notifier<PlayerState> {
   late MingAudioHandler _handler;
   StreamSubscription<bool>? _playingSub;
@@ -694,6 +725,8 @@ class PlayerNotifier extends Notifier<PlayerState> {
       ];
       // 拿到新直链的曲目进缓存
       urlById.forEach((int id, SongUrlInfo u) => _urlCache[id] = u);
+      // 同步真实音质元数据（需求：音质项展示真实频率/真实品质）
+      ref.read(songMetaProvider.notifier).upsertAll(urlById);
 
       int newIndex = index;
       final Track target = queue[index];
@@ -836,6 +869,10 @@ class PlayerNotifier extends Notifier<PlayerState> {
         final NeteaseRepository repo = ref.read(neteaseRepositoryProvider);
         final List<SongUrlInfo> urls =
             await repo.songUrls(pending.keys.toList(), level: level);
+        // 同步真实音质元数据（需求：音质项展示真实频率/真实品质）
+        ref.read(songMetaProvider.notifier).upsertAll(<int, SongUrlInfo>{
+          for (final SongUrlInfo u in urls) u.id: u,
+        });
         for (final SongUrlInfo u in urls) {
           final Track? t = pending[u.id];
           if (t == null) continue;
@@ -931,6 +968,9 @@ class PlayerNotifier extends Notifier<PlayerState> {
       final String level = ref.read(audioQualityProvider).apiValue;
       final List<SongUrlInfo> urls =
           await repo.songUrls(<int>[id], level: level);
+      ref.read(songMetaProvider.notifier).upsertAll(<int, SongUrlInfo>{
+        for (final SongUrlInfo u in urls) u.id: u,
+      });
       for (final SongUrlInfo u in urls) {
         _urlCache[u.id] = u;
         if (u.playable) return u;

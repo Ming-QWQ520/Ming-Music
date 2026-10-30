@@ -73,14 +73,19 @@ class NeteaseApi {
   /// [allowedCodes]：除 200 外视为成功的业务码（如二维码轮询的 800/801/802/803）。
   /// [throwOnCode]：为 false 时不因 code != 200 抛异常，交调用方自行处理
   /// （登录/评论写操作需要展示服务端 message）。
+  /// [cookieKv]：附加到 cookie 串的键值对（如杜比全景声接口要求的 os=pc）。
   Future<Map<String, Object?>> get(
     String path,
     Map<String, String> params, {
     Set<int>? allowedCodes,
     bool throwOnCode = true,
+    Map<String, String>? cookieKv,
   }) async =>
       _request(path, params,
-          method: 'GET', allowedCodes: allowedCodes, throwOnCode: throwOnCode);
+          method: 'GET',
+          allowedCodes: allowedCodes,
+          throwOnCode: throwOnCode,
+          cookieKv: cookieKv);
 
   /// 统一 POST（form-urlencoded，用于登录与评论写操作）
   Future<Map<String, Object?>> post(
@@ -90,15 +95,26 @@ class NeteaseApi {
   }) =>
       _request(path, params, method: 'POST', throwOnCode: throwOnCode);
 
+  /// cookie 串合并附加键值（如杜比全景声需要的 os=pc）
+  static String? _mergeCookie(String? cookie, Map<String, String>? kv) {
+    if (kv == null || kv.isEmpty) return cookie;
+    final String extra = kv.entries
+        .map((MapEntry<String, String> e) => '${e.key}=${e.value}')
+        .join('; ');
+    if (cookie == null || cookie.isEmpty) return extra;
+    return '$cookie; $extra';
+  }
+
   Future<Map<String, Object?>> _request(
     String path,
     Map<String, String> params, {
     required String method,
     Set<int>? allowedCodes,
     bool throwOnCode = true,
+    Map<String, String>? cookieKv,
   }) async {
     final Map<String, String> payload = Map<String, String>.of(params);
-    final String? cookie = await effectiveCookie;
+    final String? cookie = _mergeCookie(await effectiveCookie, cookieKv);
     if (cookie != null) payload['cookie'] = cookie;
     // 服务端 2 分钟缓存：时间戳防缓存（文档「调用前须知」）
     payload['timestamp'] = DateTime.now().millisecondsSinceEpoch.toString();
@@ -154,6 +170,70 @@ class NeteaseApi {
       if (!allowed && throwOnCode) {
         throw ApiException('接口返回错误 $code', code: code);
       }
+    }
+    return decoded;
+  }
+
+  /// 统一 JSON POST：请求体为 JSON 对象（区别于 post() 的
+  /// form-urlencoded），用于搜索联想服务封装端点（POST /play/suggest，
+  /// body = {keyword, cookie}，见《搜索联想接入与卡片渲染指南》链路一）。
+  ///
+  /// [attachCookie]：true 时把当前生效 cookie（登录态优先，游客兜底）
+  /// 写入 body 的 'cookie' 字段 —— 封装端点会自动剥离属性并合并重复键；
+  /// 留空则使用服务端配置的默认登录态。
+  /// 与 get/post 同样的超时/重试/code 语义。
+  Future<Map<String, Object?>> postJson(
+    String path,
+    Map<String, Object?> body, {
+    bool attachCookie = false,
+  }) async {
+    final Map<String, Object?> payload = Map<String, Object?>.of(body);
+    if (attachCookie) {
+      final String? cookie = await effectiveCookie;
+      if (cookie != null && cookie.isNotEmpty) payload['cookie'] = cookie;
+    }
+    final String url = '$baseUrl$path';
+    final String text = jsonEncode(payload);
+
+    Object? decoded;
+    for (int attempt = 0; attempt < 2; attempt++) {
+      try {
+        final HttpClientRequest request = await _client.postUrl(Uri.parse(url));
+        request.headers.set(
+            HttpHeaders.contentTypeHeader, 'application/json; charset=utf-8');
+        request.headers.set(HttpHeaders.acceptHeader, 'application/json');
+        request.add(utf8.encode(text));
+        final HttpClientResponse response =
+            await request.close().timeout(_timeout);
+        final String respText = await response
+            .transform(utf8.decoder)
+            .join()
+            .timeout(_timeout);
+        if (response.statusCode != 200) {
+          throw ApiException('HTTP ${response.statusCode}',
+              code: response.statusCode);
+        }
+        decoded = jsonDecode(respText);
+        break;
+      } on TimeoutException {
+        if (attempt == 1) rethrow;
+      } on SocketException {
+        if (attempt == 1) rethrow;
+      } on HttpException {
+        if (attempt == 1) rethrow;
+      } on FormatException {
+        // 瞬态异常（空响应/截断 JSON）与 get/post 同策略重试一次
+        if (attempt == 1) rethrow;
+      } catch (_) {
+        rethrow; // ApiException（HTTP 404 / code != 200 等）不重试
+      }
+    }
+    if (decoded is! Map<String, Object?>) {
+      throw ApiException('接口返回格式异常: $path');
+    }
+    final Object? code = decoded['code'];
+    if (code is int && code != 200) {
+      throw ApiException('接口返回错误 $code', code: code);
     }
     return decoded;
   }

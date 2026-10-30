@@ -234,50 +234,39 @@ class NeteaseRepository {
     return SearchSuggest.fromJson(result);
   }
 
-  /// 新接口实际命中的路径（进程内记忆，避免每次按键都试错三层）：
-  /// 0 = /api 前缀（官方文档路径）；1 = 无前缀（增强 API 风格）；-1 = 未定
-  static int _kwSuggestPath = -1;
+  /// 链路一可用性进程内记忆（搜索联想服务封装端点）：
+  /// true = /play/suggest 可用，后续按键直达；false = 本进程降级旧接口。
+  static bool _suggestWrapperOk = true;
 
-  /// 搜索联想词（第十七批需求，对齐官方 App 搜索框下拉）：
-  /// POST /search/suggest/keyword/get（参数是 keyword，传 s 会 HTTP 400）。
+  /// 搜索联想词（需求修复：联想词未正常显示，改用《搜索联想接入与卡片
+  /// 渲染指南》链路一）。
   ///
-  /// 当前线上增强 API 尚未部署该模块（404），故做三层兜底：
-  ///  1. /api/search/suggest/keyword/get —— 上传文档（官方 weapi 实测）路径；
-  ///  2. /search/suggest/keyword/get —— 增强型 NeteaseCloudMusicAPI 风格路径
-  ///     （服务器补齐该模块后自动生效）；
-  ///  3. 旧 /search/suggest —— 联想词降级（无直 hit 卡与高亮，功能不缺席）。
-  /// 成功路径进程内记忆，后续按键直达；全部失败抛出由调用方清空下拉。
+  /// 链路一：本项目服务端封装端点 POST /play/suggest（JSON body：
+  /// {keyword, cookie}），内部已处理加密通道与移动端档案，实际调用官方
+  /// /api/search/suggest/keyword/get —— 响应为官方联想接口透传 JSON
+  /// （code + data.suggests），entity_card 直 hit 卡/高亮分段/标签/相关
+  /// 搜索全量可用。
+  ///
+  /// 旧实现直连 /api/search/suggest/keyword/get 与增强路径，线上服务
+  /// 未部署该模块且请求会长时间挂起（实测 >60s 无响应），联想词永远
+  /// 转不出来 —— 已移除这两层；降级层改为旧 /search/suggest
+  /// （type=mobile，联想词可用，无直 hit 卡与高亮，功能不缺席）。
   Future<KeywordSuggest> searchKeywordSuggest(String keyword) async {
     final String kw = keyword.trim();
     if (kw.isEmpty) return const KeywordSuggest();
-    final Map<String, String> body = <String, String>{
-      'keyword': kw,
-      'limit': '11',
-    };
-    const List<String> paths = <String>[
-      '/api/search/suggest/keyword/get',
-      '/search/suggest/keyword/get',
-    ];
-    // 记忆路径直达
-    if (_kwSuggestPath >= 0 && _kwSuggestPath < paths.length) {
+    // 链路一：服务封装端点（失败形态：未部署 404 / code 502 → 降级）
+    if (_suggestWrapperOk) {
       try {
-        return _parseKeywordSuggest(
-            await _api.post(paths[_kwSuggestPath], body));
+        return _parseKeywordSuggest(await _api.postJson(
+          '/play/suggest',
+          <String, Object?>{'keyword': kw},
+          attachCookie: true,
+        ));
       } catch (_) {
-        _kwSuggestPath = -1; // 记忆失效，重新试错
+        _suggestWrapperOk = false; // 本进程降级，后续按键不再试错
       }
     }
-    for (int i = 0; i < paths.length; i++) {
-      try {
-        final KeywordSuggest s =
-            _parseKeywordSuggest(await _api.post(paths[i], body));
-        _kwSuggestPath = i;
-        return s;
-      } catch (_) {
-        // 404/网络抖动 → 下一层
-      }
-    }
-    // 第三层：旧接口兜底（联想词可用，无直 hit 卡/高亮/相关搜索）
+    // 降级：旧联想接口（明文 GET，匿名可用）
     final SearchSuggest legacy = await searchSuggest(kw);
     return KeywordSuggest(
       words: <SuggestWord>[
@@ -503,19 +492,22 @@ class NeteaseRepository {
 
   /// 批量解析播放地址（/song/url/v1 支持逗号分隔多 id）。
   /// 大歌单/全专辑入队时按 100 个一批分块请求，避免 URL 过长被网关拒。
+  /// 需求（songurl.txt）：杜比全景声需要 cookie 传入 os=pc 才能返回
+  /// 正常码率的 url，其余档位不加（与文档约定一致）。
   Future<List<SongUrlInfo>> songUrls(List<int> ids,
       {String level = 'standard'}) async {
     if (ids.isEmpty) return const <SongUrlInfo>[];
     const int chunkSize = 100;
     final List<SongUrlInfo> out = <SongUrlInfo>[];
+    final Map<String, String>? cookieKv =
+        level == 'dolby' ? <String, String>{'os': 'pc'} : null;
     for (int i = 0; i < ids.length; i += chunkSize) {
       final List<int> chunk =
           ids.sublist(i, (i + chunkSize).clamp(0, ids.length));
-      final Map<String, Object?> res =
-          await _api.get('/song/url/v1', <String, String>{
+      final Map<String, Object?> res = await _api.get('/song/url/v1', <String, String>{
         'id': chunk.join(','),
         'level': level,
-      });
+      }, cookieKv: cookieKv);
       final Object? data = res['data'];
       if (data is! List<Object?>) continue;
       out.addAll(data

@@ -37,7 +37,8 @@ import '../../comments/providers/comments_providers.dart'
     show songCommentCountProvider;
 import '../../library/data/download_service.dart';
 import '../../library/domain/track.dart';
-import '../../settings/domain/settings_models.dart' show AudioQuality;
+import '../../settings/domain/settings_models.dart'
+    show AudioQuality, AudioQualityX;
 import '../../settings/providers/settings_providers.dart'
     show audioQualityProvider;
 import '../domain/np_settings.dart';
@@ -1165,7 +1166,8 @@ class _CoverLyricsPreview extends ConsumerWidget {
   ///  - 原文（主行）有逐字歌词（yrc）时主行走逐字播放动画（[_KaraokeText]），
   ///    无逐字（LRC / 元数据行 / 空行）回退进度同步滚动（[_SyncScrollText]）。
   ({YrcLine? karaoke, String main, String sub, int mainTime, int mainEnd})
-      _resolve(ParsedLyrics lyrics, Duration position) {
+      _resolve(ParsedLyrics lyrics, Duration position,
+          {int? durationMs}) {
     if (lyrics.hasYrc) {
       final int idx = activeYrcIndex(lyrics.yrcLines, position);
       if (idx < 0) {
@@ -1190,10 +1192,16 @@ class _CoverLyricsPreview extends ConsumerWidget {
         }
       }
       // 行尾：下一行起始（无下一行 → +8s 兜底）；逐字行由
-      // [_KaraokeText] 按词时间映射，不消费 mainEnd
-      final int end = idx + 1 < lyrics.yrcLines.length
+      // [_KaraokeText] 按词时间映射，不消费 mainEnd。
+      // 需求修复（歌词溢出滚动时末尾文字被遮挡）：行尾时间不超出
+      // 音频时长 +800ms —— 歌词末行时间戳常超出实际音频，旧实现
+      // 滚动分数永远到不了 1.0，最后一个字母/文字永久残留在可视区外。
+      final int endRaw = idx + 1 < lyrics.yrcLines.length
           ? lyrics.yrcLines[idx + 1].start.inMilliseconds
           : cur.start.inMilliseconds + 8000;
+      final int end = (durationMs != null && durationMs > 0)
+          ? math.min(endRaw, durationMs + 800)
+          : endRaw;
       return (
         karaoke: cur.isMetadata || cur.words.isEmpty ? null : cur,
         main: cur.text,
@@ -1221,9 +1229,13 @@ class _CoverLyricsPreview extends ConsumerWidget {
         }
       }
     }
-    final int end = idx + 1 < lyrics.lrcLines.length
+    final int endRaw = idx + 1 < lyrics.lrcLines.length
         ? lyrics.lrcLines[idx + 1].time.inMilliseconds
         : cur.time.inMilliseconds + 8000;
+    // 同上：末行行尾截断到音频时长 +800ms，保证滚动能走满
+    final int end = (durationMs != null && durationMs > 0)
+        ? math.min(endRaw, durationMs + 800)
+        : endRaw;
     return (
       karaoke: null,
       main: cur.text,
@@ -1241,6 +1253,9 @@ class _CoverLyricsPreview extends ConsumerWidget {
 
     final bool two = mode == NpCoverLyricsMode.two;
     final double height = two ? 78 : 40;
+    // 需求修复（歌词溢出滚动时末尾文字被遮挡）：行尾映射需要音频时长
+    // 兜底（末行 +8s 兜底常超出实际音频 → 滚动分数到不了 1.0）
+    final int? durationMs = ref.watch(durationProvider).value?.inMilliseconds;
 
     if (lyrics.isEmpty) {
       return SizedBox(
@@ -1266,7 +1281,7 @@ class _CoverLyricsPreview extends ConsumerWidget {
       String sub,
       int mainTime,
       int mainEnd
-    }) line = _resolve(lyrics, position);
+    }) line = _resolve(lyrics, position, durationMs: durationMs);
     final String main = line.main.isEmpty ? '···' : line.main;
     final String sub = two ? line.sub : '';
     final bool useKaraoke = line.karaoke != null && line.main.isNotEmpty;
@@ -1337,6 +1352,11 @@ class _CoverLyricsPreview extends ConsumerWidget {
     );
   }
 }
+
+/// 封面页歌词横向滚动的末尾露出余量（px）：满滚动时多向左偏移这几
+/// 像素，使最后一个字母/文字的墨迹（含抗锯齿边缘与字形右伸）完全
+/// 落在可视区内 —— 需求修复「歌词溢出自动滚动时末尾被遮挡」。
+const double _kLyricsTailRevealPad = 4.0;
 
 /// 封面页歌词预览的滚动切换过渡（第十三批需求：自动滚动效果）——
 /// 新行从下方滑入淡入，旧行向上滑出淡出；[currentKey] 用于区分
@@ -1500,8 +1520,27 @@ class _KaraokeTextState extends ConsumerState<_KaraokeText>
     double scrollX = 0;
     if (overflow > 0 && textWidth > 0) {
       final double sungAhead = _sungWidth(pos + const Duration(seconds: 1));
-      final double frac = (sungAhead / textWidth).clamp(0.0, 1.0);
-      scrollX = overflow * frac;
+      // 需求修复（歌词溢出滚动时最后一个字母/文字被遮挡）：
+      // ① 分母改用「可唱宽度」（最后一个字的墨迹右缘）—— yrc 词文本
+      //    常带尾随空格，旧实现分母为整行 advance 宽度，滚动分数恒
+      //    小于 1，行尾永远差几像素，末字被永久裁切；
+      // ② 满滚动多留 4px 露出余量（_kLyricsTailRevealPad），
+      //    抗字形右伸出边；
+      // ③ 进度到达音频末尾时视为整行唱完（末词时间戳可能超出音频）。
+      double singable = 0;
+      final List<Rect>? boxes = _boxes;
+      if (boxes != null) {
+        for (final Rect b in boxes) {
+          if (b.right > singable) singable = b.right;
+        }
+      }
+      if (singable <= 0) singable = textWidth;
+      double frac = (sungAhead / singable).clamp(0.0, 1.0);
+      final int? durMs = ref.watch(durationProvider).value?.inMilliseconds;
+      if (durMs != null && durMs > 0 && pos.inMilliseconds >= durMs - 60) {
+        frac = 1.0;
+      }
+      scrollX = (overflow + _kLyricsTailRevealPad) * frac;
     }
 
     return ClipRect(
@@ -1649,7 +1688,9 @@ class _SyncScrollTextState extends ConsumerState<_SyncScrollText>
           ? ((ahead.inMilliseconds - widget.lineStart.inMilliseconds) / span)
               .clamp(0.0, 1.0)
           : 0.0;
-      scrollX = overflow * frac;
+      // 需求修复：满滚动多留 4px 露出余量，末字不再贴边被裁
+      //（行尾时间已在 _resolve 截断到音频时长内，分数可走满）
+      scrollX = (overflow + _kLyricsTailRevealPad) * frac;
     }
 
     return ClipRect(
@@ -1723,12 +1764,9 @@ class _QualityButton extends ConsumerWidget {
               Border.all(color: Colors.white.withValues(alpha: 0.25), width: 1),
         ),
         child: Text(
-          switch (quality) {
-            AudioQuality.standard => '标准',
-            AudioQuality.higher => '较高',
-            AudioQuality.exhigh => '极高',
-            AudioQuality.lossless => '无损',
-          },
+          // 需求（songurl.txt）：档位扩到 10 档，短名统一由
+          // AudioQualityX.shortLabel 提供（Hi-Res/臻音/杜比/全景声/母带/环绕声）
+          quality.shortLabel,
           style: TextStyle(
             color: Colors.white.withValues(alpha: 0.55),
             fontSize: 11.5,

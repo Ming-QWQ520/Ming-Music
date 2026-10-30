@@ -58,6 +58,11 @@ class PrefsKeys {
   /// 不再必须手动刷新；json = NeteaseUserPlaylist.toMap 数组）
   static const String libraryUserPlaylistsCache = 'library.userPlaylistsCache';
 
+  /// 最近一次登录的用户 id（离线缓存直显场景：profile 校验失败时
+  /// 无法从 authProvider 取 uid，用它把缓存歌单拆分为创建/收藏两组；
+  /// 登出时随歌单缓存一并清除）
+  static const String lastUserId = 'library.lastUserId';
+
   /// 应用内更新：跳过此版本（不再提示的版本号 tag，如 v1.1.1）
   static const String updaterSkippedVersion = 'updater.skippedVersion';
 }
