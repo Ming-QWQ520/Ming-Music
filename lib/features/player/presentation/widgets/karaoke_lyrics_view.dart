@@ -286,6 +286,14 @@ class _KaraokeLyricsViewState extends ConsumerState<KaraokeLyricsView> {
               gapV: _gapV(cfg),
               edgeT: index == active ? 0 : edgeTOf(index),
               onSeek: _seek,
+              // 需求（封面页歌词是逐字但歌词页是逐行）：无 yrc 的歌
+              // 歌词页活动行也做卡拉OK擦除 —— 按字数均匀映射行时长
+              //（封面页主行同步滚动的同款节奏），与封面页观感一致
+              width: innerWidth,
+              lineStart: lines[index].time,
+              lineEnd: index + 1 < lines.length
+                  ? lines[index + 1].time
+                  : lines[index].time + const Duration(seconds: 8),
             ),
           );
         },
@@ -441,10 +449,11 @@ Widget _applyInactiveEffect(
       ),
     );
   }
-  // 第十六批修复：非活跃行基线压暗恒定（0.45），不随淡出滑杆变化 ——
+  // 第十六批修复：非活跃行基线压暗恒定，不随淡出滑杆变化 ——
   // 滑杆为 0 时非活跃行不再亮回全白（用户报「同色同亮」的根因）；
   // 越贴边越透的边缘衰减保留（只更暗，不变亮）
-  const double baseAlpha = 0.45;
+  // 需求：默认非活跃行淡出改为 40%（0.45 → 0.40）
+  const double baseAlpha = 0.40;
   final double edgeAlpha = 1 - edgeT.clamp(0.0, 1.0) * 0.25 * fadeV;
   final double alpha = (baseAlpha * edgeAlpha).clamp(0.0, 1.0);
   if (alpha < 1.0) {
@@ -764,8 +773,13 @@ class _WipePainter extends CustomPainter {
 // ---------------------------------------------------------------- 逐行行
 
 /// 逐行行（LRC 回退）：当前行高亮 + 已唱行弱高亮（需求修复）+ 翻译/音译副行；
-/// 双击 seek
-class _LrcRow extends StatelessWidget {
+/// 双击 seek。
+///
+/// 需求（封面页歌词是逐字但歌词页是逐行）：无 yrc 的歌，歌词页活动行
+/// 也做卡拉OK擦除 —— LRC 无字级时间戳，按字符数均匀映射行演唱窗口
+///（与封面页 _SyncScrollText 同款「实际演唱时长近似」），活动行走
+/// [_WipePainter] 词级擦除；非活动行仍为静态高亮。
+class _LrcRow extends ConsumerStatefulWidget {
   const _LrcRow({
     required this.line,
     required this.subLine,
@@ -779,6 +793,9 @@ class _LrcRow extends StatelessWidget {
     required this.gapV,
     required this.edgeT,
     required this.onSeek,
+    required this.width,
+    required this.lineStart,
+    required this.lineEnd,
   });
 
   final LyricLine line;
@@ -802,39 +819,180 @@ class _LrcRow extends StatelessWidget {
   final double gapV;
   final ValueChanged<Duration> onSeek;
 
+  /// 排版宽度（擦除画布与逐字行一致）
+  final double width;
+
+  /// 行演唱窗口（伪逐字均匀映射用）
+  final Duration lineStart;
+  final Duration lineEnd;
+
+  @override
+  ConsumerState<_LrcRow> createState() => _LrcRowState();
+}
+
+class _LrcRowState extends ConsumerState<_LrcRow>
+    with SingleTickerProviderStateMixin {
+  Ticker? _ticker;
+  final _WipeTick _tick = _WipeTick();
+  Duration _lastPos = Duration.zero;
+  bool _lastPlaying = false;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.active) _startTicker();
+  }
+
+  @override
+  void didUpdateWidget(_LrcRow oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.active && _ticker == null) {
+      _startTicker();
+    } else if (!widget.active && _ticker != null) {
+      _stopTicker();
+    }
+  }
+
+  void _startTicker() {
+    _ticker = createTicker((Duration elapsed) {
+      final AudioPlayer player = ref.read(audioHandlerProvider).player;
+      final Duration pos = player.position;
+      final bool playing = player.playing;
+      if (playing != _lastPlaying || pos != _lastPos) {
+        _lastPos = pos;
+        _lastPlaying = playing;
+        _tick.notify();
+      }
+    });
+    _ticker!.start();
+  }
+
+  void _stopTicker() {
+    _ticker?.dispose();
+    _ticker = null;
+    _tick.reset();
+  }
+
+  @override
+  void dispose() {
+    _ticker?.dispose();
+    _tick.dispose();
+    super.dispose();
+  }
+
+  Duration _positionOf() => ref.read(audioHandlerProvider).player.position;
+
+  /// 伪逐字词表：按 UTF-16 码元均匀切分行文本（代理对合并避免拆坏 emoji），
+  /// 时间均匀分布在行演唱窗口内（含 0.8s 呼吸，与封面页同款近似）。
+  List<YrcWord> _uniformWords() {
+    final String text = widget.line.text;
+    final int total =
+        widget.lineEnd.inMilliseconds - widget.lineStart.inMilliseconds;
+    // 实际演唱时长近似（间奏行不拖慢擦除节奏）
+    final int singSpan = (text.length / 5 * 1000).round() + 800;
+    final int span = total > 0 ? math.min(total, singSpan) : 0;
+    if (span <= 0 || text.isEmpty) {
+      return <YrcWord>[
+        YrcWord(text: text, start: widget.lineStart, end: widget.lineEnd),
+      ];
+    }
+    final int chars = text.length;
+    final List<YrcWord> words = <YrcWord>[];
+    int i = 0;
+    while (i < chars) {
+      int unit = 1;
+      // 代理对（surrogate pair）合并为一个「字」
+      if (i + 1 < chars &&
+          text.codeUnitAt(i) >= 0xD800 &&
+          text.codeUnitAt(i) <= 0xDBFF &&
+          text.codeUnitAt(i + 1) >= 0xDC00 &&
+          text.codeUnitAt(i + 1) <= 0xDFFF) {
+        unit = 2;
+      }
+      final int msStart =
+          widget.lineStart.inMilliseconds + (i * span ~/ chars);
+      final int msEnd =
+          widget.lineStart.inMilliseconds + ((i + unit) * span ~/ chars);
+      words.add(YrcWord(
+        text: text.substring(i, i + unit),
+        start: Duration(milliseconds: msStart),
+        end: Duration(milliseconds: math.max(msEnd, msStart + 1)),
+      ));
+      i += unit;
+    }
+    return words;
+  }
+
   @override
   Widget build(BuildContext context) {
+    final NpPlayerSettings cfg = ref.watch(npSettingsProvider);
     final TextAlign textAlign =
-        align == NpLyricAlign.center ? TextAlign.center : TextAlign.left;
-    final CrossAxisAlignment cross = align == NpLyricAlign.center
+        widget.align == NpLyricAlign.center ? TextAlign.center : TextAlign.left;
+    final CrossAxisAlignment cross = widget.align == NpLyricAlign.center
         ? CrossAxisAlignment.center
         : CrossAxisAlignment.start;
-    final String sub = showSubLine ? subLine : '';
+    final String sub = widget.showSubLine ? widget.subLine : '';
     final bool showSub = sub.isNotEmpty;
 
-    // 第十三批需求：非活跃行颜色不再内嵌统一淡出（旧公式把相邻行也
-    // 压得很暗），透明度交给 _applyInactiveEffect 统一处理
-    //（第十四批起为统一强度，不再按行距辐射）
-    final Color mainColor = active
+    // 需求（修复「高亮已播放歌词无实际效果」）：透明度交给
+    // _applyInactiveEffect 统一处理
+    final Color mainColor = widget.active
         ? Colors.white
-        : played
+        : widget.played
             ? Colors.white.withValues(alpha: 0.85)
             : Colors.white;
+
+    final Widget mainText;
+    if (widget.active && widget.line.text.isNotEmpty) {
+      // 活动行：伪逐字擦除（已唱 = yrcPlayed / 未唱 = yrcUnplayed，
+      // 与逐字行同一套设置色）
+      final TextStyle style = TextStyle(
+        color: mainColor,
+        fontSize: widget.fontSize,
+        fontWeight: FontWeight.w700,
+        height: 1.35,
+      );
+      mainText = CustomPaint(
+        size: Size(
+            widget.width,
+            _measureTextHeight(
+                widget.line.text, style, widget.width, textAlign)),
+        painter: _WipePainter(
+          text: widget.line.text,
+          style: style,
+          words: _uniformWords(),
+          playedColor: cfg.yrcPlayed,
+          unplayedColor: cfg.yrcUnplayed,
+          textAlign: textAlign,
+          positionOf: _positionOf,
+          repaint: _tick,
+        ),
+      );
+    } else {
+      mainText = Text(
+        widget.line.text,
+        textAlign: textAlign,
+        softWrap: true,
+        style: TextStyle(
+          color: mainColor,
+          fontSize: widget.fontSize,
+          fontWeight: widget.active || widget.played
+              ? FontWeight.w700
+              : FontWeight.w500,
+          height: 1.35,
+        ),
+      );
+    }
 
     Widget rowContent = Column(
       mainAxisAlignment: MainAxisAlignment.center,
       crossAxisAlignment: cross,
       children: <Widget>[
-        Text(
-          line.text,
-          textAlign: textAlign,
-          softWrap: true,
-          style: TextStyle(
-            color: mainColor,
-            fontSize: fontSize,
-            fontWeight: active || played ? FontWeight.w700 : FontWeight.w500,
-            height: 1.35,
-          ),
+        Align(
+          alignment: widget.align == NpLyricAlign.center
+              ? Alignment.center
+              : Alignment.centerLeft,
+          child: mainText,
         ),
         if (showSub)
           Text(
@@ -844,7 +1002,7 @@ class _LrcRow extends StatelessWidget {
             overflow: TextOverflow.ellipsis,
             style: TextStyle(
               // 副行透明度同样交给 _applyInactiveEffect 统一处理
-              color: active || played
+              color: widget.active || widget.played
                   ? Colors.white.withValues(alpha: 0.68)
                   : Colors.white.withValues(alpha: 0.62),
               fontSize: 12.5,
@@ -855,22 +1013,22 @@ class _LrcRow extends StatelessWidget {
     );
 
     // 第十五批需求：非活跃行淡出 = 边界向当前行扩散的轻模糊感
-    if (!active) {
+    if (!widget.active) {
       rowContent = _applyInactiveEffect(
         rowContent,
-        fade: fade,
-        blur: blur,
+        fade: widget.fade,
+        blur: widget.blur,
         active: false,
-        edgeT: edgeT,
+        edgeT: widget.edgeT,
       );
     }
 
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
-      onDoubleTap: () => onSeek(line.time),
+      onDoubleTap: () => widget.onSeek(widget.line.time),
       child: Padding(
-        padding:
-            EdgeInsets.symmetric(horizontal: _kRowHPadding, vertical: gapV),
+        padding: EdgeInsets.symmetric(
+            horizontal: _kRowHPadding, vertical: widget.gapV),
         child: rowContent,
       ),
     );

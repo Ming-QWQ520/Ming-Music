@@ -384,7 +384,10 @@ class _ProfileHeader extends ConsumerWidget {
     final ThemeData theme = Theme.of(context);
     final AuthState auth = ref.watch(authProvider);
 
-    if (statusCheckFailed) {
+    // 需求：无网进入不丢弃登录态 —— authProvider 会从本地资料缓存恢复
+    // loggedIn（statusCheckFailed=true），头部按正常已登录样式渲染；
+    // 仅在恢复不了登录态（无缓存且校验失败）时才显示这张离线提示卡。
+    if (statusCheckFailed && !loggedIn) {
       return Padding(
         padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
         child: Material(
@@ -409,11 +412,11 @@ class _ProfileHeader extends ConsumerWidget {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: <Widget>[
-                        Text('登录状态校验失败',
+                        Text('当前无网络',
                             style: TextStyle(
                                 fontSize: 16, fontWeight: FontWeight.w700)),
                         SizedBox(height: 4),
-                        Text('网络异常或服务波动，登录信息已保留，点击重试',
+                        Text('网络恢复后自动同步，点击立即重试',
                             style: TextStyle(fontSize: 12.5)),
                       ],
                     ),
@@ -476,9 +479,11 @@ class _ProfileHeader extends ConsumerWidget {
               ),
               const SizedBox(width: 6),
               Text(
-                statusCheckFailed
-                    ? '校验中…'
-                    : (loggedIn ? '已登录网易云音乐' : '点击登录网易云音乐'),
+                statusCheckFailed && loggedIn
+                    ? '当前无网络，点击重试'
+                    : (statusCheckFailed
+                        ? '校验中…'
+                        : (loggedIn ? '已登录网易云音乐' : '点击登录网易云音乐')),
                 style: TextStyle(
                     fontSize: 12, color: theme.colorScheme.onSurfaceVariant),
               ),
@@ -636,7 +641,7 @@ class _CloudDriveTile extends ConsumerWidget {
       // 第十五批需求：直接消费全局云盘快照（登录后自动预热）
       final AsyncValue<CloudDriveSnapshot> snap = ref.watch(cloudDriveProvider);
       subtitle = snap.when(
-        data: (CloudDriveSnapshot d) => '${d.$2.count} 首歌曲已同步',
+        data: (CloudDriveSnapshot d) => '总共 ${d.$2.count} 首',
         loading: () => '正在同步云盘…',
         error: (Object e, StackTrace st) => '同步失败，进云盘页重试',
       );
@@ -824,6 +829,22 @@ class _PlaylistGridSection extends StatelessWidget {
                     style: TextStyle(
                         fontSize: 12,
                         color: theme.colorScheme.onSurfaceVariant)),
+                const Spacer(),
+                // 需求：新建歌单移至「创建的歌单」标题行最右侧，
+                // 只显示一个 + 号（与宫格内容同一层级，不再占首格磁贴）
+                if (onCreate != null)
+                  SizedBox(
+                    width: 34,
+                    height: 34,
+                    child: IconButton(
+                      onPressed: onCreate,
+                      splashRadius: 20,
+                      padding: EdgeInsets.zero,
+                      icon: Icon(Icons.add_rounded,
+                          size: 24,
+                          color: theme.colorScheme.onSurfaceVariant),
+                    ),
+                  ),
               ],
             ),
           ),
@@ -840,61 +861,11 @@ class _PlaylistGridSection extends StatelessWidget {
               // 重叠 —— 放宽到 0.68 使磁贴高度完整容纳内容
               childAspectRatio: 0.68,
             ),
-            // 需求：「新建歌单」磁贴与歌单同层次，置于创建歌单组首位
-            itemCount: playlists.length + (onCreate != null ? 1 : 0),
+            // 需求：新建歌单 + 号已移至标题行最右侧，宫格内只排歌单本体
+            itemCount: playlists.length,
             itemBuilder: (BuildContext context, int index) {
-              if (onCreate != null && index == 0) {
-                return _CreatePlaylistTile(onTap: onCreate!);
-              }
-              final int i = onCreate != null ? index - 1 : index;
-              return _PlaylistGridCard(playlist: playlists[i]);
+              return _PlaylistGridCard(playlist: playlists[index]);
             },
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-/// 新建歌单磁贴（第十六批：与歌单磁贴同层次同尺寸，虚线边框 + 加号）
-class _CreatePlaylistTile extends StatelessWidget {
-  const _CreatePlaylistTile({required this.onTap});
-
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final ThemeData theme = Theme.of(context);
-    return GestureDetector(
-      onTap: onTap,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
-          AspectRatio(
-            aspectRatio: 1,
-            child: Container(
-              decoration: BoxDecoration(
-                color: theme.colorScheme.surfaceContainerHighest
-                    .withValues(alpha: 0.35),
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(
-                  color: theme.colorScheme.outlineVariant.withValues(alpha: 0.6),
-                  width: 1.2,
-                ),
-              ),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: <Widget>[
-                  Icon(Icons.add_rounded,
-                      size: 30, color: theme.colorScheme.onSurfaceVariant),
-                  const SizedBox(height: 2),
-                  Text('新建歌单',
-                      style: TextStyle(
-                          fontSize: 11.5,
-                          color: theme.colorScheme.onSurfaceVariant)),
-                ],
-              ),
-            ),
           ),
         ],
       ),
@@ -1025,13 +996,27 @@ class _PlaylistSection extends StatelessWidget {
                   ),
                 ),
               ),
-              // 第十六批需求：标题行尾部恢复「>」箭头（新建歌单已改为
-              // 与歌单同层次的行磁贴，不再独立于标题行右侧）
-              Icon(
-                Icons.keyboard_arrow_right_rounded,
-                size: 18,
-                color: theme.colorScheme.onSurfaceVariant,
-              ),
+              // 需求：新建歌单移至「创建的歌单」点击展开项右侧 —— 只显示
+              // 一个 + 号，与展开项同层级；收藏的歌单（无 onCreate）保留
+              // 「>」箭头
+              if (onCreate != null)
+                SizedBox(
+                  width: 34,
+                  height: 34,
+                  child: IconButton(
+                    onPressed: onCreate,
+                    splashRadius: 20,
+                    padding: EdgeInsets.zero,
+                    icon: Icon(Icons.add_rounded,
+                        size: 24, color: theme.colorScheme.onSurfaceVariant),
+                  ),
+                )
+              else
+                Icon(
+                  Icons.keyboard_arrow_right_rounded,
+                  size: 18,
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
             ],
           ),
           AnimatedCrossFade(
@@ -1053,9 +1038,6 @@ class _PlaylistSection extends StatelessWidget {
                 ),
                 child: Column(
                   children: <Widget>[
-                    // 第十六批需求：新建歌单行与歌单同层次（组内首位）
-                    if (onCreate != null)
-                      _CreatePlaylistRowTile(onTap: onCreate!),
                     for (int i = 0; i < playlists.length; i++)
                       _PlaylistRowTile(
                         playlist: playlists[i],
@@ -1072,46 +1054,6 @@ class _PlaylistSection extends StatelessWidget {
           ),
         ],
       ),
-    );
-  }
-}
-
-/// 新建歌单行磁贴（第十六批：与歌单行同层次，创建歌单组内首位）
-class _CreatePlaylistRowTile extends StatelessWidget {
-  const _CreatePlaylistRowTile({required this.onTap});
-
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final ThemeData theme = Theme.of(context);
-    return ListTile(
-      dense: true,
-      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 3),
-      leading: Container(
-        width: 46,
-        height: 46,
-        decoration: BoxDecoration(
-          color:
-              theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.35),
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(
-            color: theme.colorScheme.outlineVariant.withValues(alpha: 0.6),
-            width: 1.2,
-          ),
-        ),
-        child: Icon(Icons.add_rounded,
-            size: 24, color: theme.colorScheme.onSurfaceVariant),
-      ),
-      title: Text('新建歌单',
-          style: TextStyle(
-              fontSize: 14.5,
-              fontWeight: FontWeight.w600,
-              color: theme.colorScheme.onSurface)),
-      subtitle: Text('创建一个新歌单',
-          style:
-              TextStyle(fontSize: 11, color: theme.colorScheme.onSurfaceVariant)),
-      onTap: onTap,
     );
   }
 }

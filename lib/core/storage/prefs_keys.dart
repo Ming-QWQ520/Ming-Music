@@ -65,4 +65,8 @@ class PrefsKeys {
 
   /// 应用内更新：跳过此版本（不再提示的版本号 tag，如 v1.1.1）
   static const String updaterSkippedVersion = 'updater.skippedVersion';
+
+  /// 用户资料缓存（需求：无网进入不丢弃登录态 —— /login/status 网络校验
+  /// 失败时从这里恢复已登录 UI，页面仅显示「当前无网络」提示；随登出清除）
+  static const String userProfileCache = 'auth.userProfileCache';
 }

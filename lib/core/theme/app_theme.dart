@@ -100,6 +100,14 @@ class AppTheme {
           borderRadius: BorderRadius.circular(14),
         ),
       ),
+      // 需求：全部弹出框（不限类型）透明度统一 50% —— AlertDialog
+      // 本体背景取 surface 的 50% 透明；底部 Sheet 由 GlassSheet 统一
+      dialogTheme: DialogThemeData(
+        backgroundColor: scheme.surface.withValues(alpha: 0.5),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(20),
+        ),
+      ),
       dividerTheme: DividerThemeData(
         color: scheme.onSurface.withValues(alpha: 0.08),
         thickness: 1,

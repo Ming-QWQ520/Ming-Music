@@ -22,6 +22,7 @@ import com.ryanheise.audioservice.AudioServiceActivity
 import io.flutter.embedding.android.RenderMode
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.embedding.engine.plugins.FlutterPlugin
+import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodChannel
 import java.io.File
 import java.text.SimpleDateFormat
@@ -39,6 +40,9 @@ import java.util.Locale
 class MainActivity : AudioServiceActivity() {
     companion object {
         private const val CHANNEL = "com.ming.music/media"
+
+        /** 网络恢复事件通道（无网播放→联网自动接续，见 Dart 侧 PlatformActions） */
+        private const val NET_CHANNEL = "com.ming.music/net"
         private const val TAG = "MediaChannel"
 
         /** just_audio 插件注册的方法通道名（输出路由反射的入口线索，仅日志用） */
@@ -55,6 +59,13 @@ class MainActivity : AudioServiceActivity() {
 
     /** 首帧看门狗句柄（onDestroy 取消，避免泄漏） */
     private var watchdogHandler: Handler? = null
+
+    // ---- 网络恢复事件（需求：无网播放后联网自动接续播放） ----
+    private var netSink: EventChannel.EventSink? = null
+    private var netCallback: android.net.ConnectivityManager.NetworkCallback? = null
+
+    /** 上一次联网状态（只在离线→在线转变时发事件，避免 wifi⇄蜂窝抖动误报） */
+    private var wasOnline = true
 
     /**
      * 首帧未上屏时用户可一键切换 TextureView 兼容渲染。
@@ -213,6 +224,20 @@ class MainActivity : AudioServiceActivity() {
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        // 网络恢复事件流：Dart 侧订阅后自动接续无网期间失败的播放
+        EventChannel(flutterEngine.dartExecutor.binaryMessenger, NET_CHANNEL)
+            .setStreamHandler(object : EventChannel.StreamHandler {
+                override fun onListen(args: Any?, events: EventChannel.EventSink?) {
+                    netSink = events
+                    wasOnline = isNetworkAvailable()
+                    registerNetworkWatch()
+                }
+
+                override fun onCancel(args: Any?) {
+                    netSink = null
+                    unregisterNetworkWatch()
+                }
+            })
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL)
             .setMethodCallHandler { call, result ->
                 when (call.method) {
@@ -489,6 +514,59 @@ class MainActivity : AudioServiceActivity() {
         true
     }
 
+    /** 注册全局网络回调：只在离线→在线转变时向 Dart 发一次事件 */
+    private fun registerNetworkWatch() {
+        if (netCallback != null) return
+        val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as android.net.ConnectivityManager
+        val cb = object : android.net.ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: android.net.Network) {
+                // 回调在工作线程：EventSink 需在主线程触发
+                Handler(Looper.getMainLooper()).post {
+                    val online = isNetworkAvailable()
+                    if (online && !wasOnline) {
+                        try {
+                            netSink?.success(true)
+                        } catch (e: Exception) {
+                            Log.w(TAG, "netSink send failed: $e")
+                        }
+                    }
+                    wasOnline = online
+                }
+            }
+
+            override fun onLost(network: android.net.Network) {
+                Handler(Looper.getMainLooper()).post {
+                    wasOnline = isNetworkAvailable()
+                }
+            }
+        }
+        netCallback = cb
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                cm.registerDefaultNetworkCallback(cb)
+            } else {
+                val req = android.net.NetworkRequest.Builder()
+                    .addCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                    .build()
+                cm.registerNetworkCallback(req, cb)
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "registerNetworkWatch failed: $e")
+            netCallback = null
+        }
+    }
+
+    private fun unregisterNetworkWatch() {
+        val cb = netCallback ?: return
+        netCallback = null
+        try {
+            val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as android.net.ConnectivityManager
+            cm.unregisterNetworkCallback(cb)
+        } catch (e: Exception) {
+            Log.w(TAG, "unregisterNetworkWatch failed: $e")
+        }
+    }
+
     /** 普通状态通知（无网跳过未缓存歌曲提示）：独立通道，不与媒体通知冲突 */
     private fun postStatusNotice(title: String, text: String): Boolean = try {
         val nm = getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
@@ -514,6 +592,9 @@ class MainActivity : AudioServiceActivity() {
             .setSmallIcon(iconRes)
             .setAutoCancel(true)
             .setStyle(android.app.Notification.BigTextStyle().bigText(text))
+            // 自定义样式：品牌强调色（标题/应用名着色，ROM 支持时大图标背景同色）
+            .setColor(0xFF2C7BF6.toInt())
+            .setColorized(true)
         nm.notify(1127, builder.build())
         true
     } catch (e: Exception) {

@@ -265,9 +265,12 @@ class _GithubProjectPageState extends State<GithubProjectPage> {
             ),
             child: ClipRRect(
               borderRadius: BorderRadius.circular(22),
-              child: '${owner['avatar_url']}'.startsWith('http')
-                  ? _GhImage(url: '${owner['avatar_url']}')
-                  : _logoFallback(theme),
+              // 需求：顶部 logo 改为项目 App Icon（不再用 GitHub 头像）
+              child: Image.asset(
+                'assets/icon/app_icon.png',
+                fit: BoxFit.cover,
+                errorBuilder: (_, __, ___) => _logoFallback(theme),
+              ),
             ),
           ),
         ),
@@ -308,42 +311,30 @@ class _GithubProjectPageState extends State<GithubProjectPage> {
         ],
         const SizedBox(height: 20),
 
-        // ---- 统计宫格（全部来自 API）----
+        // ---- 统计宫格（需求：仅保留 Stars / Issues）----
         Row(
           children: <Widget>[
-            _StatCard(
-                icon: Icons.star_rounded,
-                label: 'Stars',
-                value: _fmtCount(repo['stargazers_count'] as num?)),
+            Expanded(
+              child: _StatCard(
+                  icon: Icons.star_rounded,
+                  label: 'Stars',
+                  value: _fmtCount(repo['stargazers_count'] as num?)),
+            ),
             const SizedBox(width: 10),
-            _StatCard(
-                icon: Icons.call_split_rounded,
-                label: 'Forks',
-                value: _fmtCount(repo['forks_count'] as num?)),
-            const SizedBox(width: 10),
-            _StatCard(
-                icon: Icons.bug_report_rounded,
-                label: 'Issues',
-                value: _fmtCount(repo['open_issues_count'] as num?)),
-            const SizedBox(width: 10),
-            _StatCard(
-                icon: Icons.visibility_rounded,
-                label: 'Watch',
-                value: _fmtCount(repo['subscribers_count'] as num?)),
+            Expanded(
+              child: _StatCard(
+                  icon: Icons.bug_report_rounded,
+                  label: 'Issues',
+                  value: _fmtCount(repo['open_issues_count'] as num?)),
+            ),
           ],
         ),
         const SizedBox(height: 16),
 
-        // ---- 信息分组行（kgka _InfoSection/_InfoRow 同构）----
+        // ---- 信息分组行（需求：去除主语言/默认分支/创建时间/最近推送）----
         _InfoSection(children: <Widget>[
           _InfoRow(label: '作者', value: '${owner['login'] ?? '未知'}'),
-          _InfoRow(label: '主语言', value: '${repo['language'] ?? '未知'}'),
           _InfoRow(label: '开源协议', value: '${license?['spdx_id'] ?? '未声明'}'),
-          _InfoRow(label: '默认分支', value: '${repo['default_branch'] ?? 'main'}'),
-          _InfoRow(
-              label: '创建时间', value: _fmtDate(repo['created_at'] as String?)),
-          _InfoRow(
-              label: '最近推送', value: _fmtDate(repo['pushed_at'] as String?)),
           if (_release != null && '$_release' != 'null')
             _InfoRow(
               label: '最新发布',

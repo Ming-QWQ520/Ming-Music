@@ -60,3 +60,7 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+
+  # 项目资产：App Icon（项目详情页顶部 logo 使用）
+  assets:
+    - assets/icon/app_icon.png

@@ -778,6 +778,10 @@ class _TopBar extends ConsumerWidget {
             : ((track?.artist.isNotEmpty ?? false)
                 ? track!.artist
                 : 'MingMusic'));
+    // 需求：MV 入口移至播放页右上角，与收起按键平行；
+    // 无 MV（mvId=0）或设置关闭时用等宽占位保持标题绝对居中
+    final NpPlayerSettings npCfg = ref.watch(npSettingsProvider);
+    final bool hasMv = npCfg.showMvBadge && (track?.mvId ?? 0) > 0;
 
     return SizedBox(
       height: 52,
@@ -806,8 +810,19 @@ class _TopBar extends ConsumerWidget {
               ),
             ),
           ),
-          // 右侧占位：与左侧收起键等宽，保证歌手名绝对居中
-          const SizedBox(width: 56),
+          // 右侧：MV 图标（与左侧收起键同宽占位，保证标题绝对居中）
+          SizedBox(
+            width: 56,
+            child: hasMv && track?.mvId != null
+                ? IconButton(
+                    tooltip: '播放 MV',
+                    icon: Icon(Icons.movie_outlined,
+                        size: 22, color: Colors.white.withValues(alpha: 0.85)),
+                    onPressed: () => context.push(
+                        '/mv/${track!.mvId}?title=${Uri.encodeComponent(track.title)}'),
+                  )
+                : const SizedBox.shrink(),
+          ),
         ],
       ),
     );
@@ -873,7 +888,6 @@ class _InfoSectionState extends ConsumerState<_InfoSection> {
     final Track? track =
         ref.watch(playerProvider.select((PlayerState s) => s.currentTrack));
     final bool vip = track?.isVipOnly ?? false;
-    final NpPlayerSettings cfg = ref.watch(npSettingsProvider);
     final TextTheme theme = Theme.of(context).textTheme;
     final Color tint = Colors.white.withValues(alpha: 0.78);
     final int? songId = track?.neteaseId;
@@ -942,7 +956,7 @@ class _InfoSectionState extends ConsumerState<_InfoSection> {
                   ],
                 ),
                 const SizedBox(height: 5),
-                // 歌手 + MV 胶囊（需求：仅 MV 文本、缩小、可开关）
+                // 歌手行（需求：MV 入口已移至顶栏右上角，与收起键平行）
                 Row(
                   children: <Widget>[
                     Expanded(
@@ -956,10 +970,6 @@ class _InfoSectionState extends ConsumerState<_InfoSection> {
                         ),
                       ),
                     ),
-                    if (cfg.showMvBadge && (track?.mvId ?? 0) > 0) ...<Widget>[
-                      const SizedBox(width: 8),
-                      _MvPill(mvId: track!.mvId!, title: track.title),
-                    ],
                     const SizedBox(width: 4),
                   ],
                 ),
@@ -1104,40 +1114,8 @@ class _PlayerIconButtonState extends State<_PlayerIconButton> {
 
 // ---------------------------------------------------------------- MV 入口
 
-/// MV 胶囊（需求：只显示 MV 不显示播放键，适当缩小；设置可开关，默认开启）
-/// 歌曲详情 mv 字段非零时展示，闭环：/mv/url + /mv/detail 播放页
-class _MvPill extends StatelessWidget {
-  const _MvPill({required this.mvId, required this.title});
-
-  final int mvId;
-  final String title;
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: () =>
-          context.push('/mv/$mvId?title=${Uri.encodeComponent(title)}'),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
-        decoration: BoxDecoration(
-          border:
-              Border.all(color: Colors.white.withValues(alpha: 0.4), width: 1),
-          borderRadius: BorderRadius.circular(5),
-        ),
-        child: Text(
-          'MV',
-          style: TextStyle(
-            color: Colors.white.withValues(alpha: 0.85),
-            fontSize: 9.5,
-            height: 1.2,
-            fontWeight: FontWeight.w800,
-            letterSpacing: 0.5,
-          ),
-        ),
-      ),
-    );
-  }
-}
+/// MV 入口已移至顶栏右上角（需求：与收起按键平行），原胶囊组件移除；
+/// 入口逻辑见 _TopBar 内的 Icons.movie_outlined IconButton。
 
 // ---------------------------------------------------------------- 封面页歌词预览
 
@@ -1356,7 +1334,8 @@ class _CoverLyricsPreview extends ConsumerWidget {
 /// 封面页歌词横向滚动的末尾露出余量（px）：满滚动时多向左偏移这几
 /// 像素，使最后一个字母/文字的墨迹（含抗锯齿边缘与字形右伸）完全
 /// 落在可视区内 —— 需求修复「歌词溢出自动滚动时末尾被遮挡」。
-const double _kLyricsTailRevealPad = 4.0;
+/// 8px：w900 粗体字形右伸可达 5-6px，4px 余量在部分字形下仍贴边。
+const double _kLyricsTailRevealPad = 8.0;
 
 /// 封面页歌词预览的滚动切换过渡（第十三批需求：自动滚动效果）——
 /// 新行从下方滑入淡入，旧行向上滑出淡出；[currentKey] 用于区分
@@ -1501,8 +1480,11 @@ class _KaraokeTextState extends ConsumerState<_KaraokeText>
     if (playing && !_ticker.isActive) _ticker.start();
     if (!playing && _ticker.isActive) _ticker.stop();
 
-    const TextStyle style = TextStyle(
-      color: Colors.white,
+    // 需求：逐字歌词颜色设置同步至封面页 —— 已唱/未唱色不再硬编码白系，
+    // 直接取播放页自定义的 yrcPlayed/yrcUnplayed（与歌词页逐字一致）
+    final NpPlayerSettings npCfg = ref.watch(npSettingsProvider);
+    final TextStyle style = TextStyle(
+      color: npCfg.yrcPlayed,
       fontSize: 22,
       height: 1.22,
       fontWeight: FontWeight.w900,
@@ -1557,13 +1539,12 @@ class _KaraokeTextState extends ConsumerState<_KaraokeText>
             alignment: Alignment.centerLeft,
             clipBehavior: Clip.none,
             children: <Widget>[
-              // 未唱层：整行白 40%
+              // 未唱层：未唱色取设置（默认白 40%）
               Text(
                 widget.line.text,
                 maxLines: 1,
                 softWrap: false,
-                style:
-                    style.copyWith(color: Colors.white.withValues(alpha: 0.4)),
+                style: style.copyWith(color: npCfg.yrcUnplayed),
               ),
               // 已唱层：白色，按已唱像素宽度揭示
               ClipRect(
@@ -1664,8 +1645,10 @@ class _SyncScrollTextState extends ConsumerState<_SyncScrollText>
     if (playing && !_ticker.isActive) _ticker.start();
     if (!playing && _ticker.isActive) _ticker.stop();
 
-    const TextStyle style = TextStyle(
-      color: Colors.white,
+    // 需求：逐字歌词颜色设置同步至封面页（逐行回退行同色系）
+    final NpPlayerSettings npCfg = ref.watch(npSettingsProvider);
+    final TextStyle style = TextStyle(
+      color: npCfg.yrcPlayed,
       fontSize: 22,
       height: 1.22,
       fontWeight: FontWeight.w900,
@@ -1680,15 +1663,22 @@ class _SyncScrollTextState extends ConsumerState<_SyncScrollText>
     final double overflow = math.max(0.0, textWidth - widget.width);
     double scrollX = 0;
     if (overflow > 0) {
+      // 需求修复（末尾文字仍被遮挡的根本原因）：行间奏 —— 旧实现按
+      // 「本行开始 → 下一行开始」整段时长映射滚动，下一行若在几秒甚至
+      // 十几秒后才起，行早已唱完而滚动分数还在缓慢爬升，末尾文字长
+      // 时间留在可视区外。现引入「实际演唱时长近似」：按字数估
+      // （≈5 字/秒 + 0.8s 呼吸），与整行时长取小 —— 唱完前后即满滚。
+      final int spanRaw =
+          widget.lineEnd.inMilliseconds - widget.lineStart.inMilliseconds;
+      final int singSpan = (widget.text.length / 5 * 1000).round() + 800;
+      final int span = spanRaw > 0 ? math.min(spanRaw, singSpan) : 0;
       // 滚动进度评估点 = 当前进度 +1s（需求：提前 1s 滚动）
       final Duration ahead = pos + const Duration(seconds: 1);
-      final int span =
-          widget.lineEnd.inMilliseconds - widget.lineStart.inMilliseconds;
       final double frac = span > 0
           ? ((ahead.inMilliseconds - widget.lineStart.inMilliseconds) / span)
               .clamp(0.0, 1.0)
           : 0.0;
-      // 需求修复：满滚动多留 4px 露出余量，末字不再贴边被裁
+      // 需求修复：满滚动多留 8px 露出余量，末字不再贴边被裁
       //（行尾时间已在 _resolve 截断到音频时长内，分数可走满）
       scrollX = (overflow + _kLyricsTailRevealPad) * frac;
     }

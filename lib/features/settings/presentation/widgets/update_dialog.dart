@@ -99,7 +99,8 @@ class _UpdateDialogState extends State<_UpdateDialog> {
         ? '本次更新未提供发布说明。'
         : widget.release.body;
     return AlertDialog(
-      backgroundColor: theme.colorScheme.surface,
+      // 需求：全部弹出框透明度统一 50%
+      backgroundColor: theme.colorScheme.surface.withValues(alpha: 0.5),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
       titlePadding: const EdgeInsets.fromLTRB(20, 18, 20, 0),
       contentPadding: const EdgeInsets.fromLTRB(20, 10, 20, 0),

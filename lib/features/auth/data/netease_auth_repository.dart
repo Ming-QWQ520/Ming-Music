@@ -72,6 +72,16 @@ class NeteaseProfile {
 
   bool get isVip => vipType > 0;
 
+  /// 本地资料缓存用（离线恢复登录态）
+  Map<String, Object?> toMap() => <String, Object?>{
+        'userId': userId,
+        'nickname': nickname,
+        'avatarUrl': avatarUrl,
+        'signature': signature,
+        'backgroundUrl': backgroundUrl,
+        'vipType': vipType,
+      };
+
   static NeteaseProfile? fromMap(Object? raw, {Object? account}) {
     if (raw is! Map<String, Object?>) return null;
     // userId 兜底 account.id（对齐 Zephyr：p.userId || res.account?.id）

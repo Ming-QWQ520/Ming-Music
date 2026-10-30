@@ -1,5 +1,8 @@
 /// 设置页（kgka_Music_hl 风格分组重构）：
 ///
+/// 需求（重构）：选择类设置项（音质/Mini 样式/主题/玻璃/背景类型）
+/// 不再直接平铺可选 chips，行内显示当前值，点击弹底部选择弹窗。
+///
 /// 分组（需求：重构设置项，进行合理分类；第十二批 UI 排序优化 ——
 /// 播放组提前到外观之前，Mini 样式并入播放组，Mini 颜色/透明度设置
 /// 随「底板无色玻璃」需求一并移除）：
@@ -27,6 +30,7 @@ import '../../player/providers/player_providers.dart' show songCacheProvider;
 import '../../player/services/song_cache.dart';
 import '../domain/settings_models.dart';
 import '../providers/settings_providers.dart';
+import '../../../core/widgets/sheet_host.dart';
 import 'project_detail_page.dart';
 
 class SettingsPage extends ConsumerWidget {
@@ -627,6 +631,8 @@ class _GroupCard extends StatelessWidget {
   }
 }
 
+/// 需求（重构）：设置页选择类项不再直接平铺所有可选 chips ——
+/// 行内只显示「标签 + 当前值 + >」，点击弹出底部选择弹窗（统一玻璃底）。
 class _RadioRow<T extends Object> extends StatelessWidget {
   const _RadioRow({
     required this.label,
@@ -642,69 +648,104 @@ class _RadioRow<T extends Object> extends StatelessWidget {
   final T value;
   final ValueChanged<T> onChanged;
 
+  String get _currentText {
+    for (final (T, String) g in groups) {
+      if (g.$1 == value) return g.$2;
+    }
+    return groups.isEmpty ? '' : groups.first.$2;
+  }
+
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
-          Text(label, style: const TextStyle(fontSize: 15)),
-          if (subtitle != null) ...<Widget>[
-            const SizedBox(height: 2),
-            Text(
+    final ThemeData theme = Theme.of(context);
+    return ListTile(
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
+      title: Text(label, style: const TextStyle(fontSize: 15)),
+      subtitle: subtitle == null
+          ? null
+          : Text(
               subtitle!,
               style: TextStyle(
                 fontSize: 12,
-                color: Theme.of(context).colorScheme.onSurfaceVariant,
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          Text(
+            _currentText,
+            style: TextStyle(
+                fontSize: 13, color: theme.colorScheme.onSurfaceVariant),
+          ),
+          Icon(Icons.chevron_right_rounded,
+              size: 20, color: theme.colorScheme.onSurfaceVariant),
+        ],
+      ),
+      onTap: () => _pick(context),
+    );
+  }
+
+  void _pick(BuildContext context) {
+    showMingSheet<void>(
+      context,
+      barrierLabel: '选择$label',
+      builder: (BuildContext ctx) => GlassSheet(
+        borderRadius: 24,
+        maxHeight: MediaQuery.sizeOf(ctx).height * 0.6,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 14, 20, 6),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  '选择$label',
+                  style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w700),
+                ),
+              ),
+            ),
+            Flexible(
+              child: ListView(
+                shrinkWrap: true,
+                padding: const EdgeInsets.fromLTRB(12, 0, 12, 16),
+                children: <Widget>[
+                  for (final (T, String) g in groups)
+                    ListTile(
+                      dense: true,
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12)),
+                      title: Text(
+                        g.$2,
+                        style: TextStyle(
+                          color: g.$1 == value
+                              ? AppConstants.brandColor
+                              : Colors.white.withValues(alpha: 0.88),
+                          fontWeight: g.$1 == value
+                              ? FontWeight.w700
+                              : FontWeight.w400,
+                          fontSize: 14.5,
+                        ),
+                      ),
+                      trailing: g.$1 == value
+                          ? const Icon(Icons.check_rounded,
+                              color: AppConstants.brandColor, size: 20)
+                          : null,
+                      onTap: () {
+                        onChanged(g.$1);
+                        Navigator.of(ctx).pop();
+                      },
+                    ),
+                ],
               ),
             ),
           ],
-          const SizedBox(height: 8),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: <Widget>[
-              for (final (T, String) g in groups)
-                _ChoiceChip<T>(
-                  label: g.$2,
-                  selected: g.$1 == value,
-                  onTap: () => onChanged(g.$1),
-                ),
-            ],
-          ),
-        ],
+        ),
       ),
-    );
-  }
-}
-
-class _ChoiceChip<T extends Object> extends StatelessWidget {
-  const _ChoiceChip({
-    required this.label,
-    required this.selected,
-    required this.onTap,
-  });
-
-  final String label;
-  final bool selected;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return ChoiceChip(
-      label: Text(label),
-      selected: selected,
-      onSelected: (bool _) => onTap(),
-      labelStyle: TextStyle(
-        fontSize: 13,
-        color: selected
-            ? Colors.white
-            : Theme.of(context).colorScheme.onSurfaceVariant,
-      ),
-      selectedColor: AppConstants.brandColor,
-      showCheckmark: false,
-      visualDensity: VisualDensity.compact,
     );
   }
 }

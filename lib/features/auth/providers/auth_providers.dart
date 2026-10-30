@@ -8,11 +8,13 @@
 library;
 
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/api/netease_api.dart';
+import '../../../core/utils/platform_actions.dart';
 import '../../discover/data/netease_providers.dart' show neteaseApiProvider;
 import '../../settings/providers/settings_providers.dart'
     show PrefsKeys, sharedPreferencesProvider;
@@ -154,14 +156,25 @@ class AuthNotifier extends Notifier<AuthState> {
         profile: profile,
         clearStatusCheckFailed: true,
       );
+      _cacheProfile(profile);
       unawaited(_loadExtras(profile.userId));
     } else if (checkFailed) {
-      // 对齐 Zephyr：网络校验失败绝不清除 cookie，仅标记待重试
-      // （服务端偶发抖动/超时，重启几次就掉登录的根因）
-      state = state.copyWith(
-        status: AuthStatus.unknown,
-        statusCheckFailed: true,
-      );
+      // 网络校验失败绝不清除 cookie（服务端偶发抖动/超时的根因）。
+      // 需求：无网进入不丢弃登录态，只显示「当前无网络」——
+      // 从本地资料缓存恢复已登录 UI，页面照常直显缓存的歌单/数据。
+      final NeteaseProfile? cached = _cachedProfile();
+      if (cached != null) {
+        state = state.copyWith(
+          status: AuthStatus.loggedIn,
+          profile: cached,
+          statusCheckFailed: true,
+        );
+      } else {
+        state = state.copyWith(
+          status: AuthStatus.unknown,
+          statusCheckFailed: true,
+        );
+      }
     } else {
       // 服务端明确返回未登录 → cookie 确已失效
       _api.clearUserCookie();
@@ -169,7 +182,7 @@ class AuthNotifier extends Notifier<AuthState> {
     }
   }
 
-  /// 手动重试登录态校验（我的页「校验失败」卡片点击）
+  /// 手动重试登录态校验（我的页「当前无网络」卡片点击）
   Future<void> recheckLogin() async {
     if (state.busy) return;
     state = state.copyWith(statusCheckFailed: false);
@@ -208,7 +221,44 @@ class AuthNotifier extends Notifier<AuthState> {
       likedIds: const <int>{},
       clearStatusCheckFailed: true,
     );
+    _cacheProfile(profile);
+    // 需求：每次登录成功后弹出系统通知「欢迎回来-用户名称」
+    // （独立轻量通道，与媒体通知互不干扰；Android 13+ 权限在启动时申请）
+    unawaited(PlatformActions.postStatusNotice(
+      title: 'MingMusic',
+      text: '欢迎回来-${profile.nickname}',
+    ));
     unawaited(_loadExtras(profile.userId));
+  }
+
+  /// 便捷：读取本地资料缓存（离线恢复登录态）
+  NeteaseProfile? _cachedProfile() {
+    final String? raw =
+        ref.read(sharedPreferencesProvider).getString(PrefsKeys.userProfileCache);
+    if (raw == null || raw.isEmpty) return null;
+    try {
+      final Object? decoded = jsonDecode(raw);
+      if (decoded is Map<String, Object?>) return NeteaseProfile.fromMap(decoded);
+      if (decoded is Map) {
+        return NeteaseProfile.fromMap(
+          decoded.map<String, Object?>((k, v) => MapEntry(k.toString(), v)),
+        );
+      }
+      return null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// 便捷：写入本地资料缓存（登录成功/校验成功时更新）
+  void _cacheProfile(NeteaseProfile profile) {
+    try {
+      ref
+          .read(sharedPreferencesProvider)
+          .setString(PrefsKeys.userProfileCache, jsonEncode(profile.toMap()));
+    } catch (_) {
+      // 缓存失败不影响登录流程
+    }
   }
 
   /// 加载等级 / VIP / 听歌时长 / 喜欢列表（失败静默，非关键数据）
@@ -360,6 +410,9 @@ class AuthNotifier extends Notifier<AuthState> {
           .read(sharedPreferencesProvider)
           .remove(PrefsKeys.libraryUserPlaylistsCache);
       await ref.read(sharedPreferencesProvider).remove(PrefsKeys.lastUserId);
+      await ref
+          .read(sharedPreferencesProvider)
+          .remove(PrefsKeys.userProfileCache);
     } catch (_) {
       // 清理失败不影响登出流程
     }

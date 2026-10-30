@@ -13,6 +13,18 @@ class PlatformActions {
 
   static const MethodChannel _channel = MethodChannel('com.ming.music/media');
 
+  /// 网络恢复事件通道（原生 ConnectivityManager：只在离线→在线转变时
+  /// 发一次事件）。需求：无网播放失败/暂停后，联网自动接续播放。
+  static const EventChannel _netEventChannel =
+      EventChannel('com.ming.music/net');
+
+  /// 单例广播流（重复订阅安全：EventChannel 每次 listen 重新注册原生回调）
+  static Stream<dynamic>? _netStream;
+
+  /// 网络恢复流（离线 → 在线 时 yield 一个事件）
+  static Stream<dynamic> networkRestoredStream() =>
+      _netStream ??= _netEventChannel.receiveBroadcastStream();
+
   /// 系统分享面板
   static Future<bool> shareText(String text) async {
     try {

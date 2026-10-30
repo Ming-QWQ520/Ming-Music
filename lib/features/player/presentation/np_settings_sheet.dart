@@ -1,8 +1,10 @@
-/// 播放页自定义面板（参考 Zephyr-Music SettingsPanel；
-/// 需求：UI 排列优化 —— 每页按「主属性 → 派生属性 → 开关」从上到下排列，
-/// 同类属性聚合为一组，说明文案统一 _HintText 风格）：
-///  - 显示：显示模式（布局）→ Mini 播放条（样式）；
-///  - 封面：样式 → 封面歌词 → 大小 → 投影 → MV 标识（徽标归尾）；
+/// 播放页自定义面板（参考 Zephyr-Music SettingsPanel）：
+///
+/// 需求（重构）：选择类设置项不再直接平铺所有可选按钮 —— 行内只显示
+/// 「标签 + 当前值 + >」，点击弹底部选择弹窗（_PickerRow）；
+/// 所有小注释字（hint）已按需求移除。
+///  - 显示：布局 → Mini 播放条样式；
+///  - 封面：样式 → 封面歌词 → 大小 → 投影 → MV 标识；
 ///  - 背景：类型 → 自定义图 → 效果（模糊 → 变暗）；
 ///  - 歌词：排版（字号/行距/对齐/翻译/居中）→ 效果（淡出/模糊/高亮）
 ///    → 逐字颜色。
@@ -109,7 +111,7 @@ class _DisplayPane extends ConsumerWidget {
     return _SettingsList(
       children: <Widget>[
         const _GroupTitle('显示模式'),
-        _SegmentedRow<NpDisplayMode>(
+        _PickerRow<NpDisplayMode>(
           label: '布局',
           groups: const <(NpDisplayMode, String)>[
             (NpDisplayMode.both, '自适应'),
@@ -120,11 +122,9 @@ class _DisplayPane extends ConsumerWidget {
           onChanged: (NpDisplayMode v) =>
               ref.read(npSettingsProvider.notifier).setDisplayMode(v),
         ),
-        const _HintText('自适应：平板双列分栏，手机支持封面/歌词切换'),
         const _GroupTitle('Mini 播放条'),
-        _SegmentedRow<MiniPlayerStyle>(
+        _PickerRow<MiniPlayerStyle>(
           label: '样式',
-          hint: '两种样式均带液态玻璃；紧凑极简嵌入底部导航栏中间',
           groups: const <(MiniPlayerStyle, String)>[
             (MiniPlayerStyle.classic, '经典条'),
             (MiniPlayerStyle.compact, '紧凑极简'),
@@ -133,9 +133,6 @@ class _DisplayPane extends ConsumerWidget {
           onChanged: (MiniPlayerStyle v) =>
               ref.read(npSettingsProvider.notifier).setMiniStyle(v),
         ),
-        // 第十二批需求：底板无色玻璃，颜色/透明度设置项已移除
-        const _HintText('经典条：无色液态玻璃长条悬浮导航栏上方（与底部导航栏同配方），'
-            '底板颜色/透明度不再需要设置'),
       ],
     );
   }
@@ -153,7 +150,7 @@ class _CoverPane extends ConsumerWidget {
       children: <Widget>[
         const _GroupTitle('封面样式'),
         // 需求：封面只保留正方形/方形圆角，默认方形圆角
-        _SegmentedRow<NpCoverStyle>(
+        _PickerRow<NpCoverStyle>(
           label: '样式',
           groups: const <(NpCoverStyle, String)>[
             (NpCoverStyle.square, '正方形'),
@@ -163,9 +160,8 @@ class _CoverPane extends ConsumerWidget {
           onChanged: (NpCoverStyle v) =>
               ref.read(npSettingsProvider.notifier).setCoverStyle(v),
         ),
-        _SegmentedRow<NpCoverLyricsMode>(
+        _PickerRow<NpCoverLyricsMode>(
           label: '封面歌词',
-          hint: '借鉴 kgka_Music_hl：封面下方显示当前行歌词预览',
           groups: const <(NpCoverLyricsMode, String)>[
             (NpCoverLyricsMode.none, '关闭'),
             (NpCoverLyricsMode.one, '一行'),
@@ -192,7 +188,6 @@ class _CoverPane extends ConsumerWidget {
         // 需求：UI 排列优化 —— MV 标识是歌名旁徽标，归入本页末尾而非夹在封面属性中
         _SwitchRow(
           label: 'MV 标识',
-          hint: '歌名旁显示 MV 胶囊入口（点击播放 MV）',
           value: cfg.showMvBadge,
           onChanged: (bool v) =>
               ref.read(npSettingsProvider.notifier).setShowMvBadge(v),
@@ -214,7 +209,7 @@ class _BackgroundPane extends ConsumerWidget {
     return _SettingsList(
       children: <Widget>[
         const _GroupTitle('背景类型'),
-        _SegmentedRow<BackgroundType>(
+        _PickerRow<BackgroundType>(
           label: '类型',
           groups: const <(BackgroundType, String)>[
             (BackgroundType.blurCover, '封面模糊'),
@@ -253,7 +248,6 @@ class _BackgroundPane extends ConsumerWidget {
         const _GroupTitle('背景效果'),
         _SliderRow(
           label: '模糊强度',
-          hint: '仅封面模糊背景生效（需求默认 25px）',
           value: (cfg.bgBlur - 4) / 36,
           display: '${cfg.bgBlur.round()}px',
           onChanged: (double v) =>
@@ -261,7 +255,6 @@ class _BackgroundPane extends ConsumerWidget {
         ),
         _SliderRow(
           label: '变暗程度',
-          hint: '封面模糊 / 流体 / 自定义图背景统一生效',
           value: cfg.bgDim / 100,
           display: '${cfg.bgDim.round()}%',
           onChanged: (double v) =>
@@ -298,7 +291,7 @@ class _LyricsPane extends ConsumerWidget {
           onChanged: (double v) =>
               ref.read(npSettingsProvider.notifier).setLyricLineGap(8 + v * 40),
         ),
-        _SegmentedRow<NpLyricAlign>(
+        _PickerRow<NpLyricAlign>(
           label: '对齐',
           groups: const <(NpLyricAlign, String)>[
             (NpLyricAlign.left, '左对齐'),
@@ -316,7 +309,6 @@ class _LyricsPane extends ConsumerWidget {
         ),
         _SwitchRow(
           label: '时刻保持居中',
-          hint: '当前行始终位于可视区中部，歌曲开头/结尾不贴边；拖动浏览不受影响，松手后恢复跟随',
           value: cfg.lyricAlwaysCenter,
           onChanged: (bool v) =>
               ref.read(npSettingsProvider.notifier).setLyricAlwaysCenter(v),
@@ -324,19 +316,13 @@ class _LyricsPane extends ConsumerWidget {
         const _GroupTitle('效果'),
         _SliderRow(
           label: '非活跃行淡出',
-          // 第十六批需求：淡出 = 套在非活跃行上的模糊效果（上下边界
-          // 向当前行扩散），不再联动亮度 —— 非活跃行始终压暗
-          hint: '上下边界向当前行扩散的模糊感；非活跃行始终压暗，不会变亮歌词',
           value: cfg.lyricFade,
           display: '${(cfg.lyricFade * 100).round()}%',
           onChanged: (double v) =>
               ref.read(npSettingsProvider.notifier).setLyricFade(v),
         ),
         _SliderRow(
-          // 第十四批需求：模糊改直接 px 语义（0 = 关闭，对齐 Zephyr 默认；
-          // 所有非活跃行统一强度，不再按行距递增）
           label: '非活跃行模糊',
-          hint: '0 = 关闭（Zephyr 默认）；所有非活跃行统一强度',
           value: cfg.lyricBlur / 3,
           display: '${cfg.lyricBlur.toStringAsFixed(1)}px',
           onChanged: (double v) =>
@@ -344,7 +330,6 @@ class _LyricsPane extends ConsumerWidget {
         ),
         _SwitchRow(
           label: '高亮已播放歌词',
-          hint: '关：只高亮当前播放行/字；开：已唱部分保持高亮（经典卡拉OK）',
           value: cfg.highlightPlayed,
           onChanged: (bool v) =>
               ref.read(npSettingsProvider.notifier).setHighlightPlayed(v),
@@ -408,120 +393,123 @@ class _GroupTitle extends StatelessWidget {
   }
 }
 
-class _HintText extends StatelessWidget {
-  const _HintText(this.text);
-
-  final String text;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(top: 6, bottom: 4),
-      child: Text(
-        text,
-        style: TextStyle(
-          color: Colors.white.withValues(alpha: 0.30),
-          fontSize: 11.5,
-        ),
-      ),
-    );
-  }
-}
-
-class _SegmentedRow<T> extends StatelessWidget {
-  const _SegmentedRow({
+/// 需求（重构）：选择类设置项不再直接平铺所有可选按钮 ——
+/// 行内只显示「标签 + 当前值 + >」，点击弹出底部选择弹窗（统一玻璃底）。
+class _PickerRow<T> extends StatelessWidget {
+  const _PickerRow({
     required this.label,
     required this.groups,
     required this.value,
     required this.onChanged,
-    this.hint,
   });
 
   final String label;
   final List<(T, String)> groups;
   final T value;
   final ValueChanged<T> onChanged;
-  final String? hint;
+
+  String get _currentText {
+    for (final (T, String) g in groups) {
+      if (g.$1 == value) return g.$2;
+    }
+    return groups.isEmpty ? '' : groups.first.$2;
+  }
 
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
-      child: Row(
-        children: <Widget>[
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Material(
+        color: Colors.white.withValues(alpha: 0.05),
+        borderRadius: BorderRadius.circular(12),
+        child: InkWell(
+          onTap: () => _pick(context),
+          borderRadius: BorderRadius.circular(12),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            child: Row(
               children: <Widget>[
-                Text(
-                  label,
-                  style: TextStyle(
-                      color: Colors.white.withValues(alpha: 0.86),
-                      fontSize: 14),
-                ),
-                if (hint != null)
-                  Text(
-                    hint!,
+                Expanded(
+                  child: Text(
+                    label,
                     style: TextStyle(
-                        color: Colors.white.withValues(alpha: 0.30),
-                        fontSize: 11.5),
+                        color: Colors.white.withValues(alpha: 0.86),
+                        fontSize: 14),
                   ),
+                ),
+                Text(
+                  _currentText,
+                  style: TextStyle(
+                      color: Colors.white.withValues(alpha: 0.55),
+                      fontSize: 13),
+                ),
+                Icon(Icons.chevron_right_rounded,
+                    size: 20, color: Colors.white.withValues(alpha: 0.35)),
               ],
             ),
           ),
-          const SizedBox(width: 10),
-          Flexible(
-            child: Wrap(
-              alignment: WrapAlignment.end,
-              spacing: 8,
-              runSpacing: 8,
-              children: <Widget>[
-                for (final (T, String) g in groups)
-                  _SegmentButton(
-                    label: g.$2,
-                    active: value == g.$1,
-                    onTap: () => onChanged(g.$1),
-                  ),
-              ],
-            ),
-          ),
-        ],
+        ),
       ),
     );
   }
-}
 
-class _SegmentButton extends StatelessWidget {
-  const _SegmentButton({
-    required this.label,
-    required this.active,
-    required this.onTap,
-  });
-
-  final String label;
-  final bool active;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: active
-          ? AppConstants.brandColor
-          : Colors.white.withValues(alpha: 0.08),
-      borderRadius: BorderRadius.circular(14),
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(14),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 6.5),
-          child: Text(
-            label,
-            style: TextStyle(
-              fontSize: 12.5,
-              fontWeight: active ? FontWeight.w700 : FontWeight.w400,
-              color: active ? Colors.white : Colors.white70,
+  void _pick(BuildContext context) {
+    showMingSheet<void>(
+      context,
+      barrierLabel: '选择$label',
+      builder: (BuildContext ctx) => GlassSheet(
+        borderRadius: 24,
+        maxHeight: MediaQuery.sizeOf(ctx).height * 0.55,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 14, 20, 6),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  '选择$label',
+                  style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w700),
+                ),
+              ),
             ),
-          ),
+            Flexible(
+              child: ListView(
+                shrinkWrap: true,
+                padding: const EdgeInsets.fromLTRB(12, 0, 12, 16),
+                children: <Widget>[
+                  for (final (T, String) g in groups)
+                    ListTile(
+                      dense: true,
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12)),
+                      title: Text(
+                        g.$2,
+                        style: TextStyle(
+                          color: g.$1 == value
+                              ? AppConstants.brandColor
+                              : Colors.white.withValues(alpha: 0.88),
+                          fontWeight:
+                              g.$1 == value ? FontWeight.w700 : FontWeight.w400,
+                          fontSize: 14.5,
+                        ),
+                      ),
+                      trailing: g.$1 == value
+                          ? const Icon(Icons.check_rounded,
+                              color: AppConstants.brandColor, size: 20)
+                          : null,
+                      onTap: () {
+                        onChanged(g.$1);
+                        Navigator.of(ctx).pop();
+                      },
+                    ),
+                ],
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -533,13 +521,11 @@ class _SwitchRow extends StatelessWidget {
     required this.label,
     required this.value,
     required this.onChanged,
-    this.hint,
   });
 
   final String label;
   final bool value;
   final ValueChanged<bool> onChanged;
-  final String? hint;
 
   @override
   Widget build(BuildContext context) {
@@ -549,23 +535,10 @@ class _SwitchRow extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.center,
         children: <Widget>[
           Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                Text(
-                  label,
-                  style: TextStyle(
-                      color: Colors.white.withValues(alpha: 0.86),
-                      fontSize: 14),
-                ),
-                if (hint != null)
-                  Text(
-                    hint!,
-                    style: TextStyle(
-                        color: Colors.white.withValues(alpha: 0.30),
-                        fontSize: 11.5),
-                  ),
-              ],
+            child: Text(
+              label,
+              style: TextStyle(
+                  color: Colors.white.withValues(alpha: 0.86), fontSize: 14),
             ),
           ),
           Switch.adaptive(
@@ -585,7 +558,6 @@ class _SliderRow extends StatelessWidget {
     required this.value,
     required this.display,
     required this.onChanged,
-    this.hint,
   });
 
   final String label;
@@ -593,63 +565,40 @@ class _SliderRow extends StatelessWidget {
   final String display;
   final ValueChanged<double> onChanged;
 
-  /// 可选说明（需求：UI 排列优化 —— 滑杆的作用对象紧跟说明）
-  final String? hint;
-
   @override
   Widget build(BuildContext context) {
-    final Widget row = Row(
-      children: <Widget>[
-        SizedBox(
-          width: 110,
-          child: Text(
-            label,
-            style: TextStyle(
-                color: Colors.white.withValues(alpha: 0.86), fontSize: 14),
-          ),
-        ),
-        Expanded(
-          child: SliderTheme(
-            data: SliderTheme.of(context).copyWith(
-              trackHeight: 3,
-              overlayShape: const RoundSliderOverlayShape(overlayRadius: 14),
-            ),
-            child: Slider(
-              value: value.clamp(0.0, 1.0),
-              activeColor: AppConstants.brandColor,
-              onChanged: onChanged,
-            ),
-          ),
-        ),
-        SizedBox(
-          width: 52,
-          child: Text(
-            display,
-            textAlign: TextAlign.right,
-            style: TextStyle(
-                color: Colors.white.withValues(alpha: 0.5), fontSize: 11.5),
-          ),
-        ),
-      ],
-    );
-    if (hint == null) {
-      return Padding(
-        padding: const EdgeInsets.only(bottom: 8),
-        child: row,
-      );
-    }
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      child: Row(
         children: <Widget>[
-          row,
-          Padding(
-            padding: const EdgeInsets.only(left: 110, top: 2),
+          SizedBox(
+            width: 110,
             child: Text(
-              hint!,
+              label,
               style: TextStyle(
-                  color: Colors.white.withValues(alpha: 0.36), fontSize: 11),
+                  color: Colors.white.withValues(alpha: 0.86), fontSize: 14),
+            ),
+          ),
+          Expanded(
+            child: SliderTheme(
+              data: SliderTheme.of(context).copyWith(
+                trackHeight: 3,
+                overlayShape: const RoundSliderOverlayShape(overlayRadius: 14),
+              ),
+              child: Slider(
+                value: value.clamp(0.0, 1.0),
+                activeColor: AppConstants.brandColor,
+                onChanged: onChanged,
+              ),
+            ),
+          ),
+          SizedBox(
+            width: 52,
+            child: Text(
+              display,
+              textAlign: TextAlign.right,
+              style: TextStyle(
+                  color: Colors.white.withValues(alpha: 0.5), fontSize: 11.5),
             ),
           ),
         ],

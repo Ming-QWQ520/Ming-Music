@@ -234,33 +234,31 @@ class NeteaseRepository {
     return SearchSuggest.fromJson(result);
   }
 
-  /// 链路一可用性进程内记忆（搜索联想服务封装端点）：
-  /// true = /play/suggest 可用，后续按键直达；false = 本进程降级旧接口。
+  /// 联想词主接口可用性进程内记忆：
+  /// true = /search/suggest/mobile 可用，后续按键直达；false = 本进程降级旧接口。
   static bool _suggestWrapperOk = true;
 
-  /// 搜索联想词（需求修复：联想词未正常显示，改用《搜索联想接入与卡片
-  /// 渲染指南》链路一）。
+  /// 搜索联想词（需求修复：上一版误用 POST /play/suggest，服务端实际
+  /// 部署的接口按文档《搜索联想词（App 移动端版）》为
+  /// GET /search/suggest/mobile，query 参数名必须是 keyword —— 传
+  /// keywords/s 会返回 HTTP 400 空体）。
   ///
-  /// 链路一：本项目服务端封装端点 POST /play/suggest（JSON body：
-  /// {keyword, cookie}），内部已处理加密通道与移动端档案，实际调用官方
-  /// /api/search/suggest/keyword/get —— 响应为官方联想接口透传 JSON
-  /// （code + data.suggests），entity_card 直 hit 卡/高亮分段/标签/相关
-  /// 搜索全量可用。
+  /// 响应为官方联想接口 JSON：code + data.suggests，第 0 条直 hit 歌曲
+  /// 卡（simpleSongData 全量字段）、其后联想词列表（首条"热搜"标签、
+  /// 另有"原唱"标签），每条带 highLightInfo 高亮分段 —— 与现有
+  /// KeywordSuggest/SuggestWord 模型字段完全对齐。
   ///
-  /// 旧实现直连 /api/search/suggest/keyword/get 与增强路径，线上服务
-  /// 未部署该模块且请求会长时间挂起（实测 >60s 无响应），联想词永远
-  /// 转不出来 —— 已移除这两层；降级层改为旧 /search/suggest
-  /// （type=mobile，联想词可用，无直 hit 卡与高亮，功能不缺席）。
+  /// 降级层保留旧 /search/suggest（type=mobile，无直 hit 卡与高亮，
+  /// 功能不缺席）。
   Future<KeywordSuggest> searchKeywordSuggest(String keyword) async {
     final String kw = keyword.trim();
     if (kw.isEmpty) return const KeywordSuggest();
-    // 链路一：服务封装端点（失败形态：未部署 404 / code 502 → 降级）
+    // 主接口（失败形态：未部署 404 / 400 空体 / 网络异常 → 降级）
     if (_suggestWrapperOk) {
       try {
-        return _parseKeywordSuggest(await _api.postJson(
-          '/play/suggest',
-          <String, Object?>{'keyword': kw},
-          attachCookie: true,
+        return _parseKeywordSuggest(await _api.get(
+          '/search/suggest/mobile',
+          <String, String>{'keyword': kw},
         ));
       } catch (_) {
         _suggestWrapperOk = false; // 本进程降级，后续按键不再试错

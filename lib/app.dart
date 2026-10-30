@@ -93,16 +93,26 @@ class _GlobalMiniBarHostState extends ConsumerState<_GlobalMiniBarHost> {
   int _stackDepth = 1;
   bool _playerOpen = false;
 
+  /// 需求：设置界面不显示底部 Mini 条
+  bool _settingsOpen = false;
+
   void _onRouteChanged() {
     final List<RouteMatchBase> matches =
         appRouter.routerDelegate.currentConfiguration.matches;
     final int depth = matches.length;
     final bool playerOpen =
         matches.any((RouteMatchBase m) => m.matchedLocation == '/player');
-    if (depth == _stackDepth && playerOpen == _playerOpen) return;
+    final bool settingsOpen =
+        matches.any((RouteMatchBase m) => m.matchedLocation == '/settings');
+    if (depth == _stackDepth &&
+        playerOpen == _playerOpen &&
+        settingsOpen == _settingsOpen) {
+      return;
+    }
     setState(() {
       _stackDepth = depth;
       _playerOpen = playerOpen;
+      _settingsOpen = settingsOpen;
     });
   }
 
@@ -115,6 +125,8 @@ class _GlobalMiniBarHostState extends ConsumerState<_GlobalMiniBarHost> {
     _stackDepth = initial.length;
     _playerOpen =
         initial.any((RouteMatchBase m) => m.matchedLocation == '/player');
+    _settingsOpen =
+        initial.any((RouteMatchBase m) => m.matchedLocation == '/settings');
   }
 
   @override
@@ -126,8 +138,9 @@ class _GlobalMiniBarHostState extends ConsumerState<_GlobalMiniBarHost> {
   /// 显隐判定（需求：进入非首页页面正常显示 Mini 条）：
   ///  - 栈深度 == 1：在主骨架（Mini 条已由导航栏内/悬浮位负责）→ 不重复显示；
   ///  - 栈内有 '/player'：全屏播放页本身就是播放器 → 不显示；
+  ///  - 栈内有 '/settings'：需求 —— 设置界面不显示底部 Mini 条；
   ///  - 其余（任意子页面，无论 push 多少层）→ 显示。
-  bool get _showFloat => _stackDepth > 1 && !_playerOpen;
+  bool get _showFloat => _stackDepth > 1 && !_playerOpen && !_settingsOpen;
 
   @override
   Widget build(BuildContext context) {

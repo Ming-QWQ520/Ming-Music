@@ -276,6 +276,13 @@ class PlayerNotifier extends Notifier<PlayerState> {
   /// 队尾自动再拉 /personal_fm 追加，避免同一次切歌触发多次批量拉取）
   bool _fmReplenishing = false;
 
+  /// 无网播放失败标记：置位后网络恢复事件到达时自动刷新直链并接续播放
+  /// （需求：无网播放再连接网络时无法正常播放）
+  bool _networkResumePending = false;
+
+  /// 网络恢复事件订阅（原生 ConnectivityManager，离线→在线发一次）
+  StreamSubscription<dynamic>? _netSub;
+
   @override
   set state(PlayerState value) {
     _lastState = value;
@@ -312,12 +319,19 @@ class PlayerNotifier extends Notifier<PlayerState> {
       if (!_ready) return;
       state = state.copyWith(processing: ps);
     });
+    // 需求：无网播放失败/中断 → 联网后自动接续。原生只在离线→在线
+    // 转变时发一次事件，不打扰正常在线播放。
+    _netSub = PlatformActions.networkRestoredStream().listen((_) {
+      if (!_ready) return;
+      unawaited(_onNetworkRestored());
+    });
 
     ref.onDispose(() {
       _ready = false; // 销毁后到达的微任务/回调一律静默
       _playingSub?.cancel();
       _indexSub?.cancel();
       _processingSub?.cancel();
+      _netSub?.cancel();
       _persistDebounce?.cancel();
       _playTickTimer?.cancel();
       _preloadTimer?.cancel();
@@ -526,6 +540,39 @@ class PlayerNotifier extends Notifier<PlayerState> {
       _syncNotificationLike();
     } catch (e) {
       debugPrint('restoreQueue: 内核装载失败（播放时会重试）：$e');
+    }
+  }
+
+  // ------------------------------------------------------------ 网络接续
+
+  /// 网络恢复：自动接续无网期间失败的播放（需求）。
+  ///
+  /// 触发动作（避免打扰用户手动暂停的场景）：
+  ///  - 存在未解析曲目（无网进入恢复队列场景）→ 静默刷新直链，
+  ///    保留进度，不自动播放；
+  ///  - 曾因离线播放失败（[_networkResumePending]）→ 刷新直链后
+  ///    自动恢复播放；
+  ///  - 直链存在但内核报错卡死（无网时 URL 失效）→ 刷新当前曲目
+  ///    直链重建内核，再接续播放。
+  Future<void> _onNetworkRestored() async {
+    if (state.queue.isEmpty || state.playing) return;
+    final bool offline = !(await PlatformActions.isNetworkAvailable());
+    if (offline) return; // 事件抖动：实际仍未联网
+    final bool pending = _networkResumePending;
+    _networkResumePending = false;
+    final bool hasUnresolved = state.queue.any((Track t) => t.needsUrlResolve);
+    if (!pending && !hasUnresolved) return;
+    try {
+      final Duration pos = _handler.player.position;
+      await requeueIfNeeded(); // 内含直链刷新 + 内核重装
+      if (!state.playing && pending) {
+        await _handler.play();
+      } else if (!state.playing && pos > Duration.zero) {
+        // 仅刷新直链（非失败接续）：保留原进度，不自动播放
+        await _handler.seek(pos);
+      }
+    } catch (e) {
+      debugPrint('网络恢复接续失败：$e');
     }
   }
 
@@ -985,6 +1032,8 @@ class PlayerNotifier extends Notifier<PlayerState> {
     if (!needsResolve) return;
     final List<Track> resolved = await resolveTracks(state.queue);
     if (resolved.isEmpty) {
+      // 需求：离线失败联网后自动接续 —— 置位由网络恢复事件消费
+      _networkResumePending = true;
       state = state.copyWith(error: '播放链接已失效，且重新获取失败');
       return;
     }
@@ -1214,13 +1263,20 @@ class PlayerNotifier extends Notifier<PlayerState> {
         await requeueIfNeeded();
       }
       // 第十七批兜底：内核仍为空（恢复流程未装载/装载被跳过）时
-      // 强制装载一次 —— 否则 play() 无源可放，点击播放毫无反应
+      // 强制装载一次 —— 否则 play() 无源可放，点击播放毫无反应。
+      // 未解析曲目先整体刷新直链（空源会被内核当 asset 解析报错）
       if (_handler.player.audioSources.isEmpty && state.queue.isNotEmpty) {
         try {
-          await _handler.loadQueue(
-            state.queue,
-            initialIndex: state.index.clamp(0, state.queue.length - 1),
-          );
+          if (state.queue.any((Track t) => t.needsUrlResolve)) {
+            await requeueIfNeeded();
+          }
+          if (_handler.player.audioSources.isEmpty &&
+              !state.queue.any((Track t) => t.needsUrlResolve)) {
+            await _handler.loadQueue(
+              state.queue,
+              initialIndex: state.index.clamp(0, state.queue.length - 1),
+            );
+          }
         } catch (e) {
           debugPrint('playPause: 内核兜底装载失败：$e');
         }
@@ -1274,16 +1330,42 @@ class PlayerNotifier extends Notifier<PlayerState> {
         state = state.copyWith(queue: q);
       }
       if (state.queue[safe].needsUrlResolve) {
-        state = state.copyWith(error: '该歌曲暂无法播放（离线且未缓存，联网后重试）');
+        // 需求：联网后自动接续 —— 由网络恢复事件刷新直链并恢复播放
+        _networkResumePending = true;
+        state = state.copyWith(error: '该歌曲暂无法播放（离线且未缓存，联网后自动重试）');
         return;
       }
     }
-    state = state.copyWith(index: safe);
-    await _handler.player.seek(Duration.zero, index: safe);
+    // 内核空兜底（无网启动从未装载成功、联网后直接点歌/切歌）：
+    // 先就绪直链并装载内核，否则空队列 seek(index:) 直接抛错
+    if (_handler.player.audioSources.isEmpty) {
+      try {
+        if (state.queue.any((Track t) => t.needsUrlResolve)) {
+          await requeueIfNeeded();
+          if (state.queue.any((Track t) => t.needsUrlResolve)) {
+            _networkResumePending = true;
+            return; // 仍解析不齐（离线）：等网络恢复自动接续
+          }
+        } else {
+          await _handler.loadQueue(
+            state.queue,
+            initialIndex: state.index.clamp(0, state.queue.length - 1),
+          );
+        }
+      } catch (e) {
+        debugPrint('_jumpTo: 内核兜底装载失败：$e');
+      }
+    }
+    // 解析/装载可能剔除灰曲致下标漂移：按曲目 id 重新定位
+    final Track target = state.queue[safe];
+    final int relocated = state.queue.indexWhere((Track t) => t.id == target.id);
+    final int safe2 = relocated >= 0 ? relocated : safe;
+    state = state.copyWith(index: safe2);
+    await _handler.player.seek(Duration.zero, index: safe2);
     if (!state.playing) {
       await _handler.play();
     }
-    _schedulePlayStat(state.queue[safe]);
+    _schedulePlayStat(state.queue[safe2]);
     _schedulePersist();
     _schedulePreload();
   }

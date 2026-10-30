@@ -265,6 +265,9 @@ class _MiniQueueButton extends ConsumerWidget {
 /// 紧凑极简嵌入导航栏（需求：像 kgka_Music_hl 那样只显示歌曲封面，
 /// 周围显示歌曲进度）—— 仅封面 + 圆环进度，无播放/列表键，
 /// 点击主体进全屏。
+///
+/// 需求：进度环离封面的距离增加 3px —— 外框 46→54（环内缘
+/// 20→23，封面 38 不变，间距 1px→4px），环也更饱满。
 class _NavCompact extends ConsumerWidget {
   const _NavCompact();
 
@@ -279,8 +282,8 @@ class _NavCompact extends ConsumerWidget {
       behavior: HitTestBehavior.opaque,
       onTap: () => openFullPlayer(context),
       child: SizedBox(
-        width: 46,
-        height: 46,
+        width: 54,
+        height: 54,
         child: Stack(
           alignment: Alignment.center,
           children: <Widget>[

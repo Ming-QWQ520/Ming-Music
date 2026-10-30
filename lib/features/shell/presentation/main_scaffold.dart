@@ -344,7 +344,9 @@ class _GlassNavBarSurface extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return LiquidGlassBarPanel(child: child);
+    // 需求：增加圆角曲率使左右边为半圆 —— 面板高 64，圆角 = 高/2 = 32
+    // 时两端呈完整半圆（stadium 造型；clamp 后超宽自动收敛为胶囊）
+    return LiquidGlassBarPanel(borderRadius: 32, child: child);
   }
 }
 
