@@ -93,7 +93,7 @@ class NpSettingsNotifier extends Notifier<NpPlayerSettings> {
       _commit(state.copyWith(lyricFade: v.clamp(0, 1)));
 
   void setLyricBlur(double px) =>
-      _commit(state.copyWith(lyricBlur: px.clamp(0, 10)));
+      _commit(state.copyWith(lyricBlur: px.clamp(0, 1.5)));
 
   void setYrcColors(Color played, Color unplayed) =>
       _commit(state.copyWith(yrcPlayed: played, yrcUnplayed: unplayed));

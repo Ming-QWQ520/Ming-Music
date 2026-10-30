@@ -243,34 +243,61 @@ class NeteaseRepository {
   /// GET /search/suggest/mobile，query 参数名必须是 keyword —— 传
   /// keywords/s 会返回 HTTP 400 空体）。
   ///
-  /// 响应为官方联想接口 JSON：code + data.suggests，第 0 条直 hit 歌曲
-  /// 卡（simpleSongData 全量字段）、其后联想词列表（首条"热搜"标签、
-  /// 另有"原唱"标签），每条带 highLightInfo 高亮分段 —— 与现有
-  /// KeywordSuggest/SuggestWord 模型字段完全对齐。
+  /// 响应为官方联想接口 JSON：code + data.suggests —— 与现有
+  /// KeywordSuggest/SuggestWord 模型字段对齐；但实测 relatedResource
+  /// 恒为 null（无 entity_card 直 hit 卡），需求修复「联想词未显示
+  /// 歌曲或歌手卡片」：同时并行补拉结构化搜索（/search type=1018）
+  /// 取前几首歌曲/歌手生成卡片，与联想词同屏展示。
   ///
-  /// 降级层保留旧 /search/suggest（type=mobile，无直 hit 卡与高亮，
+  /// 降级层保留旧 /search/suggest（type=mobile，无高亮分段，
   /// 功能不缺席）。
   Future<KeywordSuggest> searchKeywordSuggest(String keyword) async {
     final String kw = keyword.trim();
     if (kw.isEmpty) return const KeywordSuggest();
+    // 结构化补拉（歌曲/歌手卡片）：与联想词请求并行，失败静默降级为无卡
+    final Future<SearchResults> structured = searchByType(kw, 1018, limit: 10)
+        .catchError((Object _) => SearchResults(type: 1018));
     // 主接口（失败形态：未部署 404 / 400 空体 / 网络异常 → 降级）
     if (_suggestWrapperOk) {
       try {
-        return _parseKeywordSuggest(await _api.get(
+        final KeywordSuggest parsed = _parseKeywordSuggest(await _api.get(
           '/search/suggest/mobile',
           <String, String>{'keyword': kw},
         ));
+        final SearchResults extra = await structured;
+        // await：卡片补封面失败也走本层降级（_fillMissingCovers 内部已兜底）
+        return await _withCards(parsed, extra);
       } catch (_) {
         _suggestWrapperOk = false; // 本进程降级，后续按键不再试错
       }
     }
-    // 降级：旧联想接口（明文 GET，匿名可用）
+    // 降级：旧联想接口（明文 GET，匿名可用）+ 结构化卡片
+    final SearchResults extra = await structured;
     final SearchSuggest legacy = await searchSuggest(kw);
+    return _withCards(
+      KeywordSuggest(
+        words: <SuggestWord>[for (final String w in legacy.keywords) SuggestWord(keyword: w)],
+      ),
+      extra,
+    );
+  }
+
+  /// 联想词结果 + 结构化卡片聚合：前 3 首歌曲（/song/detail 补封面）/
+  /// 前 3 位歌手（同名歌手卡去重）
+  Future<KeywordSuggest> _withCards(KeywordSuggest s, SearchResults extra) async {
+    final String kwHead = s.directHit?.keyword ?? '';
+    final List<Song> songs =
+        await _fillMissingCovers(extra.songs.take(3).toList(growable: false));
     return KeywordSuggest(
-      words: <SuggestWord>[
-        for (final String w in legacy.keywords)
-          SuggestWord(keyword: w),
-      ],
+      directHit: s.directHit,
+      words: s.words,
+      recTitle: s.recTitle,
+      recs: s.recs,
+      songs: songs,
+      artists: extra.artists
+          .where((SearchArtist a) => a.name != kwHead)
+          .take(3)
+          .toList(growable: false),
     );
   }
 

@@ -323,10 +323,11 @@ class _LyricsPane extends ConsumerWidget {
         ),
         _SliderRow(
           label: '非活跃行模糊',
-          value: cfg.lyricBlur / 3,
+          // 需求：非活跃行模糊最高 1.5px（旧上限 3 收敛减半）
+          value: cfg.lyricBlur / 1.5,
           display: '${cfg.lyricBlur.toStringAsFixed(1)}px',
           onChanged: (double v) =>
-              ref.read(npSettingsProvider.notifier).setLyricBlur(v * 3),
+              ref.read(npSettingsProvider.notifier).setLyricBlur(v * 1.5),
         ),
         _SwitchRow(
           label: '高亮已播放歌词',

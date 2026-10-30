@@ -20,6 +20,8 @@ import 'package:flutter/material.dart';
 import 'package:crypto/crypto.dart' as crypto;
 import 'package:path_provider/path_provider.dart';
 
+import '../utils/platform_actions.dart';
+
 enum CoverSize { small, large, original }
 
 /// 歌单封面 Hero 标签（需求：点击歌单封面 → 歌单详情页大图 Hero 转场）。
@@ -202,11 +204,29 @@ class _CoverImageState extends State<CoverImage> {
   Uint8List? _bytes;
   bool _failed = false;
 
+  /// 需求修复「恢复网络后不自动获取歌单封面，需手动进出才显示」：
+  /// 旧实现失败后 _failed 永久置位，网络恢复也不重试 —— 订阅原生
+  /// 离线→在线事件，恢复时自动重拉（封面全局生效，不止我的页）
+  StreamSubscription<dynamic>? _netSub;
+
   @override
   void initState() {
     super.initState();
     _hydrateFromMemoryCache();
     _load();
+    _netSub = PlatformActions.networkRestoredStream().listen((_) {
+      if (!mounted) return;
+      if (_bytes != null) return;
+      // 失败/加载中均重试（加载中重试无损：并发去重 + 内存命中短路）
+      _failed = false;
+      _load();
+    });
+  }
+
+  @override
+  void dispose() {
+    _netSub?.cancel();
+    super.dispose();
   }
 
   @override

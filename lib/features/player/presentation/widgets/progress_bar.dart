@@ -45,6 +45,9 @@ class _PlayerProgressBarState extends ConsumerState<PlayerProgressBar> {
   /// 是否正在拖动（Apple Music：拖动时两条一起变粗）
   bool _dragging = false;
 
+  /// 当前曲目标识（切歌时复位预览态用）
+  Object? _lastTrackKey;
+
   /// 常规/拖动态的条高（Apple Music 观感：4 → 8）
   static const double _kRestHeight = 4;
   static const double _kDragHeight = 8;
@@ -65,8 +68,44 @@ class _PlayerProgressBarState extends ConsumerState<PlayerProgressBar> {
     });
   }
 
+  /// 提交预览位置：真正 seek + 复位预览态
+  ///（需求修复：拖动/点按后进度不跳转）
+  void _commitPreview() {
+    final double? v = _previewMs;
+    setState(() {
+      _dragging = false;
+      _previewMs = null;
+    });
+    if (v != null) {
+      ref
+          .read(playerProvider.notifier)
+          .seek(Duration(milliseconds: v.round()));
+    }
+  }
+
+  /// 复位预览态（手势被打断/取消时不 seek）
+  ///（需求修复：加粗「hover」效果未取消复原）
+  void _resetPreview() {
+    if (_previewMs == null && !_dragging) return;
+    setState(() {
+      _dragging = false;
+      _previewMs = null;
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
+    // 需求修复（进度条 bug）：切歌瞬间复位预览态 —— 切歌时旧预览值
+    // /加粗态若残留，显示与真实进度脱节且手势状态错乱（「刚切换歌曲时」
+    // 复现的主路径；拖动中不受影响：仅复位非拖动残留）
+    final Object? trackKey = ref.watch(
+        playerProvider.select((PlayerState s) => s.currentTrack?.id));
+    if (trackKey != _lastTrackKey) {
+      _lastTrackKey = trackKey;
+      _previewMs = null;
+      _dragging = false;
+    }
+
     final double positionMs =
         ref.watch(positionProvider).value?.inMilliseconds.toDouble() ?? 0;
     final double durationMs =
@@ -219,6 +258,10 @@ class _PlayerProgressBarState extends ConsumerState<PlayerProgressBar> {
         mainAxisSize: MainAxisSize.min,
         children: <Widget>[
           // 手势层：点按/拖动均可定位（拖动期间两条同步放大）
+          // 需求修复（进度条 bug）：旧实现只注册 onTapDown/onHorizontalDrag*，
+          // 点按松手无回调提交 → _previewMs/_dragging 永久滞留：显示冻结
+          // 在点按处、加粗态不回弹；手势被取消（切歌打断竞技场）也无复位。
+          // 补齐 onTapUp 提交 + onTapCancel/onHorizontalDragCancel 复位
           GestureDetector(
             behavior: HitTestBehavior.opaque,
             onTapDown: (TapDownDetails d) {
@@ -226,6 +269,13 @@ class _PlayerProgressBarState extends ConsumerState<PlayerProgressBar> {
               if (box == null || !box.hasSize) return;
               _seekToDx(box.globalToLocal(d.globalPosition).dx, box.size.width);
             },
+            onTapUp: (TapUpDetails d) {
+              final RenderBox? box = context.findRenderObject() as RenderBox?;
+              if (box == null || !box.hasSize) return;
+              _seekToDx(box.globalToLocal(d.globalPosition).dx, box.size.width);
+              _commitPreview();
+            },
+            onTapCancel: _resetPreview,
             onHorizontalDragStart: (DragStartDetails d) {
               final RenderBox? box = context.findRenderObject() as RenderBox?;
               if (box == null || !box.hasSize) return;
@@ -236,16 +286,8 @@ class _PlayerProgressBarState extends ConsumerState<PlayerProgressBar> {
               if (box == null || !box.hasSize) return;
               _seekToDx(box.globalToLocal(d.globalPosition).dx, box.size.width);
             },
-            onHorizontalDragEnd: (DragEndDetails d) {
-              final double? v = _previewMs;
-              setState(() => _dragging = false);
-              _previewMs = null;
-              if (v != null) {
-                ref
-                    .read(playerProvider.notifier)
-                    .seek(Duration(milliseconds: v.round()));
-              }
-            },
+            onHorizontalDragEnd: (DragEndDetails d) => _commitPreview(),
+            onHorizontalDragCancel: _resetPreview,
             child: bar,
           ),
           Padding(

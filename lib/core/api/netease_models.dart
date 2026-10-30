@@ -940,6 +940,8 @@ class SuggestWord {
 class KeywordSuggest {
   const KeywordSuggest({
     this.directHit,
+    this.songs = const <Song>[],
+    this.artists = const <SearchArtist>[],
     this.words = const <SuggestWord>[],
     this.recTitle = '相关搜索',
     this.recs = const <String>[],
@@ -947,6 +949,15 @@ class KeywordSuggest {
 
   /// 第 0 条直 hit 歌曲卡（可为空：老接口兜底时没有）
   final SuggestWord? directHit;
+
+  /// 需求修复「联想词未显示歌曲或歌手卡片」：线上 /search/suggest/mobile
+  /// 实测只回关键词（relatedResource 恒 null，无 entity_card）——
+  /// 歌曲卡/歌手卡改由并行补拉的结构化搜索（/search type=1018）前几名
+  /// 生成，与联想词同屏展示（官方 App 同款观感）。
+  final List<Song> songs;
+
+  /// 歌手卡（同上，来自结构化搜索 result.artists）
+  final List<SearchArtist> artists;
 
   /// 联想词列表（含「热搜」标签词条）
   final List<SuggestWord> words;
@@ -958,7 +969,11 @@ class KeywordSuggest {
   final List<String> recs;
 
   bool get isEmpty =>
-      directHit == null && words.isEmpty && recs.isEmpty;
+      directHit == null &&
+      songs.isEmpty &&
+      artists.isEmpty &&
+      words.isEmpty &&
+      recs.isEmpty;
 }
 
 // ---------------------------------------------------------------- 搜索分类结果

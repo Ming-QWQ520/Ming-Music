@@ -1,6 +1,6 @@
 /// 播放页自定义底部弹出菜单（对齐网易云「播放页自定义」与 描述文件）：
 ///
-///  1. 顶部信息区：拖拽条 + 方形专辑封面 + 歌名(VIP)/歌手 + 「为TA心动」胶囊；
+///  1. 顶部信息区：拖拽条 + 方形专辑封面 + 歌名(VIP)/歌手 + 喜欢/取消喜欢胶囊；
 ///  2. 横向快捷操作（5 图标）：收藏 / 下载 / 分享 / 横屏 / 一起听；
 ///  3. 纵向功能列表：
 ///     · 信息：专辑 / 歌手(+关注) / 查看歌曲百科；
@@ -279,7 +279,9 @@ class _PlayerMoreSheetState extends ConsumerState<_PlayerMoreSheet> {
                             ),
                             const SizedBox(width: 4),
                             Text(
-                              '为TA心动',
+                              // 需求：按当前喜欢状态显示 喜欢/取消喜欢
+                              //（旧文案「为TA心动」语义不明）
+                              liked ? '取消喜欢' : '喜欢',
                               style: TextStyle(
                                 fontSize: 11.5,
                                 color: liked

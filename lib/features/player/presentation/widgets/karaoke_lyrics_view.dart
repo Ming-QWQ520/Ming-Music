@@ -393,7 +393,8 @@ class _KaraokeLyricsViewState extends ConsumerState<KaraokeLyricsView> {
         () {
           final TextStyle style = TextStyle(
             fontSize: cfg.lyricFontSize,
-            fontWeight: FontWeight.w600,
+            // 与 _LrcRow 渲染字重一致（统一 w700，见切行字号修复）
+            fontWeight: FontWeight.w700,
             height: 1.35,
           );
           double h =
@@ -416,8 +417,9 @@ const double _kRowHPadding = 28;
 ///
 ///  - **淡出 = 套在非活跃行上的模糊效果，不再联动亮度**：滑杆控制
 ///    上下边界向当前行扩散的模糊强度（距边界越近越模糊，最高
-///    sigma ≈ 3.4px × fade），滑杆为 0 时无模糊；[edgeT] 为行中心
-///    距边界的接近度（0 = 清晰，1 = 贴边），由列表层按滚动偏移实时计算；
+///    sigma = 1.5px × fade，需求第二十批：模糊最高 1.5px），滑杆为
+///    0 时无模糊；[edgeT] 为行中心距边界的接近度（0 = 清晰，
+///    1 = 贴边），由列表层按滚动偏移实时计算；
 ///  - **非活跃行基线压暗恒定 0.45，不随滑杆变化** —— 修复「淡出设为 0
 ///    时歌词几乎同色同亮」：非活跃行永远比当前行暗，淡出只加模糊、
 ///    绝不变亮歌词；
@@ -434,9 +436,11 @@ Widget _applyInactiveEffect(
   if (active) return child;
   Widget result = child;
   // 边界扩散模糊（淡出主体，滑杆唯一作用点）+ 统一额外模糊（设置项，默认 0）
+  // 需求：非活跃行模糊最高 1.5px（边界扩散 + 额外模糊合计上限，
+  // 旧总上限 4.5/边界 3.4 收敛到 1.5）
   final double fadeV = fade.clamp(0.0, 1.0);
-  final double edgeSigma = edgeT.clamp(0.0, 1.0) * 3.4 * fadeV;
-  final double sigma = (blur.clamp(0.0, 3.0) + edgeSigma).clamp(0.0, 4.5);
+  final double edgeSigma = edgeT.clamp(0.0, 1.0) * 1.5 * fadeV;
+  final double sigma = (blur.clamp(0.0, 1.5) + edgeSigma).clamp(0.0, 1.5);
   if (sigma > 0.02) {
     result = RepaintBoundary(
       child: ImageFiltered(
@@ -976,9 +980,10 @@ class _LrcRowState extends ConsumerState<_LrcRow>
         style: TextStyle(
           color: mainColor,
           fontSize: widget.fontSize,
-          fontWeight: widget.active || widget.played
-              ? FontWeight.w700
-              : FontWeight.w500,
+          // 需求修复「当前播放行切换至下一行时文字大小轻微变小」：
+          // 旧实现非活跃未播行 w500、活动行 w700，切行瞬间字重跳变
+          // 导致字形尺寸观感突变 —— 统一 w700（层次交给透明度/模糊）
+          fontWeight: FontWeight.w700,
           height: 1.35,
         ),
       );

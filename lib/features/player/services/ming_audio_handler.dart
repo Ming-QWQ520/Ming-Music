@@ -34,6 +34,12 @@ class MingAudioHandler extends BaseAudioHandler with SeekHandler {
 
   final ja.AudioPlayer _player;
 
+  /// 需求修复（进度条 bug「刚切歌时拖动后不跳转至相应进度」）：
+  /// 装载期间（loading/idle）的 seek 在 just_audio 内会被丢弃 ——
+  /// 挂起待 ready 后补执行（15s TTL 防陈旧残留）
+  Duration? _pendingSeek;
+  DateTime? _pendingSeekAt;
+
   /// UI 层订阅的平滑进度流（约 200ms 一次）。
   /// audio_service 的 BaseAudioHandler 不内置 positionStream，
   /// 这里基于 just_audio 的 createPositionStream 自建。
@@ -84,6 +90,27 @@ class MingAudioHandler extends BaseAudioHandler with SeekHandler {
       onError: (Object e, StackTrace st) =>
           debugPrint('MingAudioHandler playbackEvent error: $e'),
     );
+    // 装载完成后补执行挂起的 seek（需求修复：切歌瞬间拖动进度条丢失；
+    // 15s TTL 防陈旧位置落到新曲目上）
+    _player.processingStateStream.listen((ja.ProcessingState st) {
+      final Duration? pending = _pendingSeek;
+      if (pending == null) return;
+      if (st == ja.ProcessingState.ready) {
+        final DateTime? at = _pendingSeekAt;
+        _pendingSeek = null;
+        _pendingSeekAt = null;
+        final bool fresh = at != null &&
+            DateTime.now().difference(at) <= const Duration(seconds: 15);
+        if (fresh) {
+          _player.seek(pending).catchError((Object e) {
+            debugPrint('MingAudioHandler pendingSeek error: $e');
+          });
+        }
+      } else if (st == ja.ProcessingState.idle) {
+        _pendingSeek = null;
+        _pendingSeekAt = null;
+      }
+    });
     // 曲目切换时同步 MediaItem（锁屏封面/标题）
     _player.sequenceStateStream
         .map((ja.SequenceState? s) => s?.currentIndex ?? -1)
@@ -286,7 +313,21 @@ class MingAudioHandler extends BaseAudioHandler with SeekHandler {
   }
 
   @override
-  Future<void> seek(Duration position) => _player.seek(position);
+  Future<void> seek(Duration position) async {
+    final ja.ProcessingState st = _player.processingState;
+    // 装载期 seek 会被内核丢弃 → 挂起，ready 后补执行（15s TTL）
+    if (st == ja.ProcessingState.loading ||
+        st == ja.ProcessingState.idle) {
+      final bool stale = _pendingSeekAt == null ||
+          DateTime.now().difference(_pendingSeekAt!) >
+              const Duration(seconds: 15);
+      if (stale) _pendingSeekAt = DateTime.now();
+      _pendingSeek = position;
+      debugPrint('MingAudioHandler seek deferred ($st): $position');
+      return;
+    }
+    await _player.seek(position);
+  }
 
   @override
   Future<void> setSpeed(double speed) => _player.setSpeed(speed);

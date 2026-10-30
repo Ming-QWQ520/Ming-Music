@@ -70,7 +70,8 @@ void main() {
       expect(restored.lyricAlign, NpLyricAlign.center);
       expect(restored.showTranslation, isFalse);
       expect(restored.lyricFade, closeTo(0.2, 1e-9));
-      expect(restored.lyricBlur, 3);
+      // 需求（第二十批）：非活跃行模糊上限 1.5px —— 越界旧值往返后收敛到 1.5
+      expect(restored.lyricBlur, closeTo(1.5, 1e-9));
       expect(restored.yrcPlayed, const Color(0xFFFA233B));
       expect(restored.yrcUnplayed, const Color(0x33FFFFFF));
       expect(restored.highlightPlayed, isTrue);
@@ -149,30 +150,48 @@ void main() {
       });
       expect(legacy.displayMode, NpDisplayMode.both);
       expect(legacy.highlightPlayed, isFalse);
-      // 第十三批需求：v1 旧档迁移到 v2 —— 封面页歌词默认升为两行，
-      // 非活跃行淡出/模糊升为 Zephyr（RNP）标准（fade 1.0 / blur 1.0）
+      // 第十三批需求：v1 旧档迁移到 v2 —— 封面页歌词默认升为两行
       expect(legacy.coverLyrics, NpCoverLyricsMode.two);
-      expect(legacy.lyricFade, 1.0);
-      // 第十四批需求：v1/v2 旧档迁移到 v3 —— 非活跃行改统一强度，
-      // 模糊语义改直接 px 且默认关闭（Zephyr 默认 lyricBlur=0）
+      // 需求（第二十批）：v1-v5 旧档统一升为 v6 默认 —— 淡出 40%
+      expect(legacy.lyricFade, closeTo(0.4, 1e-9));
+      // 模糊上限收敛到 1.5px，旧档（含 v2 的 1.0 倍率）升为默认 0 = 关闭
       expect(legacy.lyricBlur, 0);
       // 第十五批需求：v4 迁移 —— 「时刻保持居中」默认开启
       expect(legacy.lyricAlwaysCenter, isTrue);
     });
 
-    test('v2 旧档迁移到 v3：模糊倍率作废统一升为 0，其余字段保留', () {
+    test('v2 旧档迁移到 v6：淡出/模糊统一升为新默认，其余字段保留', () {
       final NpPlayerSettings v2 = NpPlayerSettings.fromMap(<Object?, Object?>{
         '_v': 2,
         'lyricFade': 0.6,
         'lyricBlur': 2.0, // v2 的倍率语义
         'coverLyrics': 'one',
       });
-      // v3 迁移只重置模糊；fade / 封面页行数等用户自定义值保留
+      // 需求（第二十批）：v6 迁移统一重置淡出/模糊为新默认
+      //（淡出 40% / 模糊 0 = 关闭），用户可在设置中再自行调整
+      expect(v2.lyricFade, closeTo(0.4, 1e-9));
       expect(v2.lyricBlur, 0);
-      expect(v2.lyricFade, closeTo(0.6, 1e-9));
       expect(v2.coverLyrics, NpCoverLyricsMode.one);
       // 迁移后写回即为当前版本
       expect(v2.toMap()['_v'], NpPlayerSettings.version);
+    });
+
+    test('v5 旧档迁移到 v6：淡出默认 40%/模糊上限 1.5px', () {
+      final NpPlayerSettings v5 = NpPlayerSettings.fromMap(<Object?, Object?>{
+        '_v': 5,
+        'lyricFade': 1.0,
+        'lyricBlur': 3.0, // v5 上限 3，v6 收敛到 1.5
+      });
+      expect(v5.lyricFade, closeTo(0.4, 1e-9));
+      expect(v5.lyricBlur, 0);
+      // v6 新档：用户自定义值保留（模糊越界值收敛到 1.5）
+      final NpPlayerSettings v6 = NpPlayerSettings.fromMap(<Object?, Object?>{
+        '_v': NpPlayerSettings.version,
+        'lyricFade': 0.7,
+        'lyricBlur': 3.0,
+      });
+      expect(v6.lyricFade, closeTo(0.7, 1e-9));
+      expect(v6.lyricBlur, closeTo(1.5, 1e-9));
     });
 
     test('v4 迁移：时刻保持居中升为开启；v4 档保留用户显式关闭', () {

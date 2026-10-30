@@ -11,6 +11,7 @@
 ///  - 未登录 → 登录引导卡；校验失败 → 重试卡（对齐 Zephyr 容错策略）。
 library;
 
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -32,6 +33,7 @@ import '../../settings/providers/settings_providers.dart'
     show libraryPlaylistLayoutProvider, sharedPreferencesProvider;
 import '../../player/presentation/cache_songs_page.dart';
 import '../../player/providers/player_providers.dart';
+import '../../../core/utils/platform_actions.dart';
 
 class MyMusicPage extends ConsumerStatefulWidget {
   const MyMusicPage({super.key});
@@ -45,6 +47,11 @@ class _MyMusicPageState extends ConsumerState<MyMusicPage> {
   bool _createdExpanded = true;
   bool _collectedExpanded = true;
 
+  /// 需求修复「恢复网络后不自动获取歌单封面/列表，需手动进出才刷新」：
+  /// 订阅原生离线→在线事件，恢复时重拉歌单（未登录态同时重新校验
+  /// 登录，成功后经既有 auth 监听自动重拉）
+  StreamSubscription<dynamic>? _netSub;
+
   @override
   void initState() {
     super.initState();
@@ -56,6 +63,24 @@ class _MyMusicPageState extends ConsumerState<MyMusicPage> {
     // AuthNotifier 的 _restore（网络校验 cookie）尚未完成，loggedIn
     // 仍为 false，直接跳过 → 重启后歌单空白，必须手动下拉刷新。
     WidgetsBinding.instance.addPostFrameCallback((_) => _loadPlaylists());
+    // 4) 网络恢复（离线冷启动后联网）：重新校验登录 + 重拉歌单
+    _netSub = PlatformActions.networkRestoredStream().listen((_) {
+      if (!mounted) return;
+      final AuthState auth = ref.read(authProvider);
+      if (auth.loggedIn) {
+        _loadPlaylists();
+      } else {
+        // 离线启动时校验失败停在未恢复态：联网后自动重试登录校验
+        //（成功后 loggedIn 翻转，既有监听会自动重拉歌单）
+        ref.read(authProvider.notifier).recheckLogin();
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _netSub?.cancel();
+    super.dispose();
   }
 
   @override

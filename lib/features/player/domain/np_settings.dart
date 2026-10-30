@@ -129,8 +129,8 @@ class NpPlayerSettings {
     this.showTranslation = true,
     // 第十四批需求：非活跃行效果改统一强度（不再按行距辐射渐暗，
     // 用户反馈「以当前播放行向外辐射从亮变暗观感不好」）——
-    // 淡出 1.0 = 非活跃行统一压暗到 0.45；模糊 0 = 关闭（Zephyr 默认）
-    this.lyricFade = 1.0,
+    // 需求（第二十批）：非活跃行淡出默认 40%（旧默认 1.0）
+    this.lyricFade = 0.40,
     this.lyricBlur = 0,
     this.yrcPlayed = const Color(0xFFFFFFFF),
     this.yrcUnplayed = const Color(0x66FFFFFF),
@@ -148,7 +148,7 @@ class NpPlayerSettings {
     this.stripButtons = kStripButtonDefaults,
   });
 
-  static const int version = 5;
+  static const int version = 6;
 
   static const NpPlayerSettings defaults = NpPlayerSettings();
 
@@ -193,12 +193,12 @@ class NpPlayerSettings {
   /// 显示翻译副行
   final bool showTranslation;
 
-  /// 非活跃行淡出强度（0 - 1；1.0 = 非活跃行统一压暗到 0.45，
-  /// 第十四批起不再按行距辐射衰减）
+  /// 非活跃行淡出强度（0 - 1；默认 0.40 = 40%，需求第二十批；
+  /// 作为边界扩散模糊/边缘减淡的强度系数，基线压暗恒定不随滑杆变化）
   final double lyricFade;
 
-  /// 非活跃行模糊强度 px（0 - 3；0 = 关闭，Zephyr 默认；
-  /// 第十四批起由「倍率」改为直接 px，所有非活跃行统一）
+  /// 非活跃行模糊强度 px（0 - 1.5；0 = 关闭，Zephyr 默认；
+  /// 需求第二十批：模糊最高 px 从 3 收敛到 1.5）
   final double lyricBlur;
 
   /// 逐字已唱颜色
@@ -328,11 +328,14 @@ class NpPlayerSettings {
     // 版本迁移（v5，第十六批需求）：
     //  - 播放页始终亮屏默认开启（旧档未开启的用户升为开启，
     //    升级后可再自行关闭）。
+    // 版本迁移（v6，第二十批需求）：
+    //  - 非活跃行淡出默认 40%、模糊上限收敛到 1.5px —— 旧档两值
+    //    统一升为新默认，用户可在设置中再自行调整。
     final int storedVersion = (map['_v'] as num?)?.toInt() ?? 1;
     final bool migrateToV2 = storedVersion < 2;
-    final bool migrateToV3 = storedVersion < 3;
     final bool migrateToV4 = storedVersion < 4;
     final bool migrateToV5 = storedVersion < 5;
+    final bool migrateToV6 = storedVersion < 6;
 
     return NpPlayerSettings(
       displayMode: NpDisplayMode.values.firstWhere(
@@ -362,13 +365,13 @@ class NpPlayerSettings {
       showTranslation: map['showTranslation'] is bool
           ? map['showTranslation']! as bool
           : defaults.showTranslation,
-      lyricFade: migrateToV2
+      // v6：淡出默认 40%/模糊上限 1.5px（第二十批需求），旧档统一升为新默认
+      lyricFade: migrateToV6
           ? defaults.lyricFade
           : clampD(map['lyricFade'], 0, 1, defaults.lyricFade),
-      // v3：模糊倍率语义作废，旧档（含 v2 的 1.0）统一升为 0 = 关闭
-      lyricBlur: migrateToV3
+      lyricBlur: migrateToV6
           ? defaults.lyricBlur
-          : clampD(map['lyricBlur'], 0, 3, defaults.lyricBlur),
+          : clampD(map['lyricBlur'], 0, 1.5, defaults.lyricBlur),
       yrcPlayed: colorOf(map['yrcPlayed'], defaults.yrcPlayed),
       yrcUnplayed: colorOf(map['yrcUnplayed'], defaults.yrcUnplayed),
       highlightPlayed: map['highlightPlayed'] == true,

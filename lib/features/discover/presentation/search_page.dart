@@ -278,10 +278,14 @@ class _SearchPageState extends ConsumerState<SearchPage> {
           ),
         ),
         // 第十四批需求：分类筛选条（综合/单曲/歌单/专辑/歌手/MV/用户/歌词）
-        bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(46),
-          child: _SearchTypeBar(current: _searchType, onSelect: _switchType),
-        ),
+        // 需求：筛选条只在搜索后的结果页显示 —— 未搜索时
+        //（历史/联想/热榜首页）不占高度
+        bottom: _showResults
+            ? PreferredSize(
+                preferredSize: const Size.fromHeight(46),
+                child: _SearchTypeBar(current: _searchType, onSelect: _switchType),
+              )
+            : null,
       ),
       body: !_showResults
           ? (_suggest != null && !_suggest!.isEmpty
@@ -1000,14 +1004,92 @@ class _SectionHeader extends StatelessWidget {
 // ---------------------------------------------------------------- 搜索首页
 
 /// 空态首页（需求）：搜索历史 + 猜你喜欢 + 热榜矩阵
-class _SearchHome extends ConsumerWidget {
+///
+/// 需求：长按搜索历史词条 1s 弹出 X，点击 X 删除该条记录 ——
+/// 词条状态化管理（长按 1s 后该 chip 右上角浮出删除角标）。
+class _SearchHome extends ConsumerStatefulWidget {
   const _SearchHome({required this.onWord});
 
   /// 词点击 → 原页直接搜索
   final ValueChanged<String> onWord;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<_SearchHome> createState() => _SearchHomeState();
+}
+
+class _SearchHomeState extends ConsumerState<_SearchHome> {
+  /// 当前处于「待删除」编辑态的历史词条（null = 无）
+  String? _editingKw;
+
+  /// 1s 长按计时器（onLongPressStart 后 500ms 手势层才判定长按，
+  /// 这里从长按判定时刻起再计 1s，松手取消）
+  Timer? _lpTimer;
+
+  @override
+  void dispose() {
+    _lpTimer?.cancel();
+    super.dispose();
+  }
+
+  Widget _historyChip(String kw) {
+    final bool editing = _editingKw == kw;
+    return Stack(
+      clipBehavior: Clip.none,
+      children: <Widget>[
+        GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onLongPressStart: (LongPressStartDetails _) {
+            _lpTimer?.cancel();
+            _lpTimer = Timer(const Duration(seconds: 1), () {
+              if (mounted) setState(() => _editingKw = kw);
+            });
+          },
+          onLongPressEnd: (LongPressEndDetails _) => _lpTimer?.cancel(),
+          onLongPressCancel: () => _lpTimer?.cancel(),
+          child: ActionChip(
+            label: Text(kw, style: const TextStyle(fontSize: 13)),
+            backgroundColor: editing
+                ? AppConstants.brandColor.withValues(alpha: 0.14)
+                : Theme.of(context)
+                    .colorScheme
+                    .surfaceContainerHighest
+                    .withValues(alpha: 0.5),
+            side: BorderSide.none,
+            // 编辑态下点词条本体 = 退出编辑态（防误触跳转）
+            onPressed: editing
+                ? () => setState(() => _editingKw = null)
+                : () => widget.onWord(kw),
+          ),
+        ),
+        if (editing)
+          Positioned(
+            right: -5,
+            top: -5,
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: () {
+                ref.read(searchHistoryProvider.notifier).remove(kw);
+                if (mounted) setState(() => _editingKw = null);
+              },
+              child: Container(
+                width: 22,
+                height: 22,
+                decoration: BoxDecoration(
+                  color: AppConstants.brandColor,
+                  shape: BoxShape.circle,
+                  border: Border.all(color: Colors.white, width: 1.5),
+                ),
+                child: const Icon(Icons.close_rounded,
+                    size: 13, color: Colors.white),
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final List<String> history = ref.watch(searchHistoryProvider);
     final AsyncValue<List<HotWord>> hot = ref.watch(hotWordsProvider);
 
@@ -1055,18 +1137,9 @@ class _SearchHome extends ConsumerWidget {
             padding: const EdgeInsets.fromLTRB(20, 0, 20, 4),
             child: Wrap(
               spacing: 10,
-              runSpacing: 10,
+              runSpacing: 14,
               children: <Widget>[
-                for (final String kw in history)
-                  ActionChip(
-                    label: Text(kw, style: const TextStyle(fontSize: 13)),
-                    backgroundColor: Theme.of(context)
-                        .colorScheme
-                        .surfaceContainerHighest
-                        .withValues(alpha: 0.5),
-                    side: BorderSide.none,
-                    onPressed: () => onWord(kw),
-                  ),
+                for (final String kw in history) _historyChip(kw),
               ],
             ),
           ),
@@ -1100,7 +1173,7 @@ class _SearchHome extends ConsumerWidget {
                               .surfaceContainerHighest
                               .withValues(alpha: 0.35),
                           side: BorderSide.none,
-                          onPressed: () => onWord(w.word),
+                          onPressed: () => widget.onWord(w.word),
                         ),
                     ],
                   ),
@@ -1113,7 +1186,7 @@ class _SearchHome extends ConsumerWidget {
 
         // ---------------- 热榜矩阵（第十七批：top20 + 官方图同款卡片） ----------------
         const _HeaderRow(title: '热榜'),
-        _HotChartRail(onWord: onWord),
+        _HotChartRail(onWord: widget.onWord),
       ],
     );
   }
@@ -1578,9 +1651,26 @@ class _SuggestList extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final ThemeData theme = Theme.of(context);
     final List<SuggestWord> words = suggest.words;
+    final bool hasCards =
+        suggest.songs.isNotEmpty || suggest.artists.isNotEmpty;
     return ListView(
       padding: const EdgeInsets.symmetric(vertical: 6),
       children: <Widget>[
+        // ---- 歌曲/歌手卡片（需求修复：联想词未显示歌曲或歌手卡片 ——
+        // 线上 mobile 联想接口无 entity_card，卡片由并行结构化搜索生成） ----
+        for (final Song s in suggest.songs)
+          _SuggestSongCard(
+            song: s,
+            onPlay: () {
+              ref.read(playerProvider.notifier).playSongs(
+                    <Track>[s.toTrack()],
+                    queueTitle: '搜索直达：${s.name}',
+                  );
+            },
+          ),
+        for (final SearchArtist a in suggest.artists)
+          _SuggestArtistCard(artist: a),
+        if (hasCards) const Divider(height: 10, indent: 16, endIndent: 16),
         // ---- 直 hit 歌曲卡（entity_card，点击直接播放整首） ----
         if (suggest.directHit != null && suggest.directHit!.directHit != null)
           _DirectHitCard(
@@ -1685,6 +1775,150 @@ class _DirectHitCard extends StatelessWidget {
                           fontWeight: FontWeight.w700,
                           color: AppConstants.brandColor)),
                 ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// 联想下拉歌曲卡（需求修复：联想词未显示歌曲/歌手卡片 ——
+/// 点击直接播放该曲，VIP 歌曲带徽标）
+class _SuggestSongCard extends StatelessWidget {
+  const _SuggestSongCard({required this.song, required this.onPlay});
+
+  final Song song;
+  final VoidCallback onPlay;
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    return InkWell(
+      onTap: onPlay,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 7, 16, 7),
+        child: Row(
+          children: <Widget>[
+            ClipRRect(
+              borderRadius: BorderRadius.circular(7),
+              child: CoverImage(src: song.coverUrl, size: 46, radius: 7),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Row(
+                    children: <Widget>[
+                      Flexible(
+                        child: Text(
+                          song.name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                              fontSize: 14.5, fontWeight: FontWeight.w600),
+                        ),
+                      ),
+                      if (song.isVipOnly) ...<Widget>[
+                        const SizedBox(width: 5),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 4, vertical: 1),
+                          decoration: BoxDecoration(
+                            color: AppConstants.brandColor,
+                            borderRadius: BorderRadius.circular(3),
+                          ),
+                          child: const Text(
+                            'VIP',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 9,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    '${song.artists} · ${song.album}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                        fontSize: 12,
+                        color: theme.colorScheme.onSurfaceVariant),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            const Icon(Icons.play_circle_fill_rounded,
+                size: 26, color: AppConstants.brandColor),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// 联想下拉歌手卡（圆形头像 + 歌手标签，点击进入歌手页）
+class _SuggestArtistCard extends StatelessWidget {
+  const _SuggestArtistCard({required this.artist});
+
+  final SearchArtist artist;
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    return InkWell(
+      onTap: () => context
+          .push('/artist/${artist.id}?name=${Uri.encodeComponent(artist.name)}'),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 7, 16, 7),
+        child: Row(
+          children: <Widget>[
+            CoverImage(src: artist.picUrl, size: 44, radius: 22),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Text(
+                    artist.name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                        fontSize: 14.5, fontWeight: FontWeight.w600),
+                  ),
+                  if (artist.alias.isNotEmpty)
+                    Text(
+                      artist.alias,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                          fontSize: 12,
+                          color: theme.colorScheme.onSurfaceVariant),
+                    ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            Container(
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+              decoration: BoxDecoration(
+                color: AppConstants.brandColor.withValues(alpha: 0.13),
+                borderRadius: BorderRadius.circular(6),
+              ),
+              child: const Text(
+                '歌手',
+                style: TextStyle(
+                    fontSize: 10.5,
+                    fontWeight: FontWeight.w700,
+                    color: AppConstants.brandColor),
               ),
             ),
           ],

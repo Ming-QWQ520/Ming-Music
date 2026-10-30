@@ -1,12 +1,14 @@
-/// 单行跑马灯文本：溢出时平滑向右滚动，滚至尽头停留 3s 后重新滚动。
+/// 单行跑马灯文本（需求：往返滚动）——
 ///
-/// 行为（需求：歌曲名称过长则平滑向右滚动，滚动至尽头时停留 3s 后重新滚动）：
+/// 行为（需求：滚动至最右侧停留 3s 后向左滚动回起点，停留 3s 后
+/// 再向右滚动，一直重复）：
 ///  - 文本未溢出：静态显示；
-///  - 溢出：向左平移至文本尽头 → 停留 [endPause] → 瞬间回到起点再滚动，
-///    循环往复；滚动时长与溢出宽度成正比（约 40ms/px，不低于 1.6s）。
+///  - 溢出：向左平移至文本尽头（露出结尾）→ 停留 [endPause] →
+///    平滑滚回起点 → 再停留 [endPause] → 循环往复（乒乓式，
+///    不再旧版的「瞬间回跳」）；滚动时长与溢出宽度成正比
+///    （约 40ms/px，不低于 1.6s）。
 ///
-/// 参考 kgka_Music_hl `_MarqueeSingleLine` 的溢出测量思路，
-/// 停留与重滚节奏对齐网易云播放页。
+/// 参考 kgka_Music_hl `_MarqueeSingleLine` 的溢出测量思路。
 library;
 
 import 'package:flutter/material.dart';
@@ -33,10 +35,10 @@ class MarqueeText extends StatefulWidget {
   /// 滚动速度（px/s）
   final double velocity;
 
-  /// 滚到尽头后的停留时长
+  /// 滚到尽头/起点后的停留时长
   final Duration endPause;
 
-  /// 文本对齐（未溢出时生效；溢出滚动时恒为左滚）
+  /// 文本对齐（未溢出时生效；溢出滚动时恒为左对齐往返）
   final TextAlign textAlign;
 
   @override
@@ -97,15 +99,29 @@ class _MarqueeTextState extends State<MarqueeText>
       setState(() => _overflow = overflow);
 
       if (overflow > 0) {
-        final Duration scroll = _scrollDuration(overflow);
-        // 总时长 = 滚动 + 尽头停留；滚动段占前 scroll/total 比例
-        _ctrl.duration = scroll + widget.endPause;
+        // 乒乓总时长 = 去 + 停 + 回 + 停；滚动段占每半程
+        // scroll/total 比例（去程 0→s，回程 2s→3s）
+        final Duration half = _scrollDuration(overflow) + widget.endPause;
+        _ctrl.duration = half * 2;
         if (!_ctrl.isAnimating) _ctrl.repeat();
       } else {
         _ctrl.stop();
         _ctrl.value = 0;
       }
     });
+  }
+
+  /// 乒乓位移分数：0 = 起点，1 = 尽头。
+  /// 半程占比 s = scroll/total：
+  ///  [0, s)      0→1 向尽头滚；
+  ///  [s, 2s)     1   尽头停留；
+  ///  [2s, 3s)    1→0 滚回起点；
+  ///  [3s, 4s)    0   起点停留（repeat 后循环）。
+  double _pong(double t, double s) {
+    if (t < s) return t / s;
+    if (t < 2 * s) return 1;
+    if (t < 3 * s) return 1 - (t - 2 * s) / s;
+    return 0;
   }
 
   @override
@@ -129,13 +145,11 @@ class _MarqueeTextState extends State<MarqueeText>
       child: AnimatedBuilder(
         animation: _ctrl,
         builder: (BuildContext ctx, Widget? child) {
-          final Duration total = _ctrl.duration ?? const Duration(seconds: 4);
+          final Duration total = _ctrl.duration ?? const Duration(seconds: 8);
           final double scrollFraction =
               (scroll(total).inMilliseconds / total.inMilliseconds)
-                  .clamp(0.01, 1.0);
-          final double t = _ctrl.value;
-          // 滚动段：0→1 线性；停留段：恒为 1（停在尽头）
-          final double p = (t / scrollFraction).clamp(0.0, 1.0);
+                  .clamp(0.01, 0.49);
+          final double p = _pong(_ctrl.value, scrollFraction);
           return Transform.translate(
             offset: Offset(-_overflow * p, 0),
             child: child,
@@ -146,5 +160,6 @@ class _MarqueeTextState extends State<MarqueeText>
     );
   }
 
-  Duration scroll(Duration total) => total - widget.endPause;
+  /// 单程滚动时长（总时长 - 两个停留段）
+  Duration scroll(Duration total) => total - widget.endPause * 2;
 }
