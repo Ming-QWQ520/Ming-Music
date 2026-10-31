@@ -65,6 +65,9 @@ class _ListenTogetherPageState extends ConsumerState<ListenTogetherPage> {
       if (!mounted) return;
       final ListenRoomNotifier notifier = ref.read(listenRoomProvider.notifier);
       unawaited(notifier.refreshLogin());
+      // 第二十七批：打开页面先做服务端会话自愈（本地 idle 但服务端仍在
+      // 好友房间 → 恢复访客连接），防止后续误创建房间被判成房主
+      unawaited(notifier.recoverIfServerRoomExists());
       _handleIncomingInvite();
     });
   }

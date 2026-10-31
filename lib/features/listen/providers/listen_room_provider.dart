@@ -196,6 +196,7 @@ class ListenRoomNotifier extends Notifier<ListenRoomState> {
     _svc.onCommand = _applyCommand;
     _svc.onRoomChanged = _onRoomChanged;
     _svc.onRoomExpired = _onRoomExpired;
+    _svc.onRoleCorrected = _onRoleCorrected;
     _svc.statusSupplier = () {
       final PlayerState ps = ref.read(playerProvider);
       return (
@@ -411,6 +412,12 @@ class ListenRoomNotifier extends Notifier<ListenRoomState> {
   Future<void> _onRoomChanged(List<ListenRoomUser> users) async {
     final List<ListenRoomUser> prev = state.users;
     state = state.copyWith(users: users);
+    // 角色与本地 phase 不一致时拉回（服务端权威，第二十七批防御纵深）
+    final ListenRoomPhase expectPhase =
+        _svc.isCreator ? ListenRoomPhase.host : ListenRoomPhase.guest;
+    if (state.inRoom && state.phase != expectPhase && !state.busy) {
+      state = state.copyWith(phase: expectPhase);
+    }
     if (prev.length >= users.length) return; // 只在人数增加时广播
     final bool gainedOther = users.any((ListenRoomUser u) =>
         u.userId != _svc.myUserId &&
@@ -418,6 +425,16 @@ class ListenRoomNotifier extends Notifier<ListenRoomState> {
     if (gainedOther && _lastReportedSongId != null) {
       // 有新伙伴 → 把当前歌广播一次（对方轮询即得）
       await broadcastCurrentState();
+    }
+  }
+
+  /// 服务端权威角色校正回调（status 返回的房主字段与本地冲突时触发）
+  void _onRoleCorrected(bool iAmHost) {
+    if (!state.inRoom || state.busy) return;
+    final ListenRoomPhase expectPhase =
+        iAmHost ? ListenRoomPhase.host : ListenRoomPhase.guest;
+    if (state.phase != expectPhase) {
+      state = state.copyWith(phase: expectPhase);
     }
   }
 
@@ -440,14 +457,73 @@ class ListenRoomNotifier extends Notifier<ListenRoomState> {
 
   Future<void> refreshLogin() => _ensureLogin();
 
+  /// 服务端会话自愈（一起听页/面板打开时调用）：
+  /// 本地 idle 而服务端仍在好友房间（杀进程重开、状态清理不彻底）时，
+  /// 以访客姿态恢复房间连接，防止后续误创建房间被服务端「返回所在房间」
+  /// 而误置房主。已在房/请求中/未登录时不做任何事。
+  Future<void> recoverIfServerRoomExists() async {
+    if (state.inRoom || state.busy) return;
+    if (!_svc.ensureLoginQuickCheck) return;
+    final ListenServerRoom? server = await _svc.probeServerRoom();
+    if (server == null || state.inRoom || state.busy) return;
+    _svc.resumeRoom(
+      roomId: server.roomId,
+      inviterId: server.iAmHost ? _svc.myUserId : server.hostId ?? 0,
+      isCreator: server.iAmHost,
+    );
+    state = state.copyWith(
+      phase: server.iAmHost ? ListenRoomPhase.host : ListenRoomPhase.guest,
+      roomId: server.roomId,
+      inviterId: server.iAmHost ? _svc.myUserId : server.hostId ?? 0,
+      users: server.users,
+      notice: '',
+    );
+    _startMemberLoop();
+    _svc.startSync();
+    AppNotify.show(
+        server.iAmHost ? '检测到你的房间仍在进行中，已恢复连接' : '检测到你仍在好友的一起听房间中，已恢复连接');
+  }
+
   /// 创建房间（官方语义：已有房间时返回已存在的房间）
+  ///
+  /// ⚠️ 第二十七批「房主却是我」根治：网易 room/create 对已在房的账号
+  /// 会把当前所在房间原样返回 —— 访客误触创建/重启后服务端会话仍在时
+  /// 调创建，本地就会把自己误置为房主并覆盖房主队列。故创建前先做
+  /// 两道检查：①本地已在房 → 直接拒绝；②服务端会话仍在（本地状态
+  /// 已丢）→ 以访客姿态恢复房间连接，绝不创建新房间。
   Future<String?> createRoom() async {
     if (state.busy) return null;
+    if (state.inRoom) {
+      return '你已在一间一起听房间中，退出当前房间后才能创建新房间';
+    }
     state = state.copyWith(phase: ListenRoomPhase.busy, notice: '');
     try {
       if (!await _ensureLogin()) {
         state = state.copyWith(phase: ListenRoomPhase.idle);
         return '请先登录网易云账号';
+      }
+      // 服务端残留会话检查（杀进程重开/清理不彻底时本地 idle 但服务端在房）
+      final ListenServerRoom? server = await _svc.probeServerRoom();
+      if (server != null) {
+        // 以访客姿态恢复服务端会话（宁可为访客，不可误判房主）；
+        // 只有服务端明确指认 hostId==我 才恢复为房主。
+        _svc.resumeRoom(
+          roomId: server.roomId,
+          inviterId: server.iAmHost ? _svc.myUserId : server.hostId ?? 0,
+          isCreator: server.iAmHost,
+        );
+        state = state.copyWith(
+          phase: server.iAmHost ? ListenRoomPhase.host : ListenRoomPhase.guest,
+          roomId: server.roomId,
+          inviterId: server.iAmHost ? _svc.myUserId : server.hostId ?? 0,
+          users: server.users,
+          notice: '',
+        );
+        _startMemberLoop();
+        _svc.startSync();
+        return server.iAmHost
+            ? '检测到你名下的房间仍在进行中，已恢复房间连接'
+            : '你正在好友的一起听房间中，已恢复连接（未创建新房间）';
       }
       final String? err = await _svc.createRoom();
       if (err != null) {
@@ -493,7 +569,16 @@ class ListenRoomNotifier extends Notifier<ListenRoomState> {
       }
       final String? err = await _svc.joinRoom(rid, inviterId);
       if (err != null) {
-        state = state.copyWith(phase: ListenRoomPhase.idle, notice: err);
+        // 加入失败时不能无脑回 idle：service 里可能还持有原房间
+        // （换房场景 accept 被拒）—— 按 service 真实状态恢复，防漂移。
+        final ListenRoomPhase fallback = _svc.inRoom
+            ? (_svc.isCreator ? ListenRoomPhase.host : ListenRoomPhase.guest)
+            : ListenRoomPhase.idle;
+        state = state.copyWith(phase: fallback, notice: err);
+        if (fallback != ListenRoomPhase.idle) {
+          _startMemberLoop();
+          _svc.startSync();
+        }
         return err;
       }
       state = state.copyWith(
