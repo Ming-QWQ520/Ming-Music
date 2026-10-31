@@ -311,6 +311,13 @@ class SongCacheService {
   }
 
   /// 缓存条目列表（缓存列表页；按缓存时间倒序）
+  ///
+  /// 需求第二十二批修复「缓存页不显示歌名」：meta.json 的键统一为
+  /// keyFor(songId, level)（如 `123456_lossless`，与 saveEntryMeta 写入
+  /// 一致）—— 旧实现用文件名（含 `.done` 后缀）查表，永远查不到，导致
+  /// 歌名/歌手/封面恒为空、缓存页只显示「歌曲 id / 元信息未记录」；
+  /// 同时 CacheEntry.key 改存规范键，removeEntry 拼接 .done/.part 后缀
+  /// 才能命中真实文件（旧值带 .done 会拼出 `.done.done`，删除实际未删）。
   Future<List<CacheEntry>> listEntries() async {
     final List<CacheEntry> out = <CacheEntry>[];
     try {
@@ -325,9 +332,11 @@ class SongCacheService {
         final int? songId = int.tryParse(name.substring(0, under));
         final String level = name.substring(under + 1, name.length - 5);
         if (songId == null) continue;
-        final Map<String, Object?> m = meta[name] ?? const <String, Object?>{};
+        // 规范键 = `${songId}_$level`（与 saveEntryMeta/removeEntry 一致）
+        final String key = keyFor(songId, level);
+        final Map<String, Object?> m = meta[key] ?? const <String, Object?>{};
         out.add(CacheEntry(
-          key: name,
+          key: key,
           songId: songId,
           level: level,
           path: e.path,
@@ -464,6 +473,8 @@ class SongCacheService {
       int total = 0;
       await for (final FileSystemEntity e in dir.list()) {
         if (e is! File) continue;
+        // meta.json 是展示元信息（歌名/歌手/封面），不参与 LRU 收敛
+        if (e.path == _metaPath(dir)) continue;
         try {
           final FileStat st = e.statSync();
           if (st.type != FileSystemEntityType.file) continue;
@@ -478,12 +489,36 @@ class SongCacheService {
       if (total <= _maxTotalBytes) return;
       files.sort(
           (_CacheMeta a, _CacheMeta b) => a.lastUsedAt.compareTo(b.lastUsedAt));
+      final int beforePrune = total;
       for (final _CacheMeta m in files) {
         if (total <= _maxTotalBytes) break;
         try {
           File(m.path).deleteSync();
           total -= m.size;
         } catch (_) {}
+      }
+      // 确有文件被收敛删除时，同步清理其元信息条目，防 meta.json 无限增长
+      if (total != beforePrune) {
+        final Map<String, Map<String, Object?>> meta = await _readMeta(dir);
+        if (meta.isNotEmpty) {
+          final Set<String> alive = <String>{
+            for (final FileSystemEntity e in dir.listSync())
+              if (e is File)
+                e.path
+                    .split(Platform.pathSeparator)
+                    .last
+                    .replaceAll('.done', ''),
+          };
+          final List<String> orphans = <String>[
+            for (final String k in meta.keys) if (!alive.contains(k)) k,
+          ];
+          if (orphans.isNotEmpty) {
+            for (final String k in orphans) {
+              meta.remove(k);
+            }
+            await _writeMeta(dir, meta);
+          }
+        }
       }
     } catch (e) {
       debugPrint('SongCache prune failed: $e');

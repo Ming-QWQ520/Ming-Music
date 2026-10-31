@@ -407,6 +407,22 @@ class PlayerNotifier extends Notifier<PlayerState> {
   /// 旧实现在队列解析（resolveTracks）时对整个队列批量预缓存 —— 装载一个
   /// 大歌单即缓存全部曲目，占用暴涨；现改为开播触发，队列解析不再写盘。
   /// 落盘完成同时写入展示元信息（歌名/歌手/封面，缓存列表页与歌名着色用）。
+  /// 落盘元信息写入统一走 _saveCacheMeta（需求第二十二批：
+  /// 播放缓存与预加载缓存两条链路一致，避免预载曲目无元信息、
+  /// 缓存页退化为「歌曲 id / 元信息未记录」）
+  void _saveCacheMeta(Track track, String level) {
+    final int? id = track.neteaseId;
+    if (id == null || id <= 0) return;
+    unawaited(ref.read(songCacheProvider).saveEntryMeta(
+          id,
+          level,
+          title: track.title,
+          artist: track.artist,
+          // 需求第二十一批：数据缓存列表封面统一 200x200 参数
+          cover: SongCacheService.normalizeCover200(track.cover),
+        ));
+  }
+
   Future<void> _cacheCurrentTrack() async {
     if (!_ready) return;
     if (!ref.read(listenCacheProvider)) return;
@@ -422,14 +438,7 @@ class PlayerNotifier extends Notifier<PlayerState> {
       if (cached != null && cached.isNotEmpty) return; // 已缓存
       final bool ok = await cache.download(id, level, src);
       if (ok) {
-        unawaited(cache.saveEntryMeta(
-          id,
-          level,
-          title: track.title,
-          artist: track.artist,
-          // 需求第二十一批：数据缓存列表封面统一 200x200 参数
-          cover: SongCacheService.normalizeCover200(track.cover),
-        ));
+        _saveCacheMeta(track, level);
         // 缓存列表/歌名着色刷新
         refreshCacheProviders(ref);
       }
@@ -1112,7 +1121,12 @@ class PlayerNotifier extends Notifier<PlayerState> {
       if (ref.read(listenCacheProvider)) {
         final String? cached = await cache.cachedPathFor(id, level);
         if (cached != null) return; // 已缓存，无需预载
-        await cache.download(id, level, info.url);
+        final bool ok = await cache.download(id, level, info.url);
+        if (ok) {
+          // 预载落盘同样写入展示元信息（否则缓存页该条无歌名/歌手/封面）
+          _saveCacheMeta(next, level);
+          refreshCacheProviders(ref);
+        }
       } else {
         // 缓存关闭：退化为临时播放器预热（提前建立连接与首段缓冲）
         await cache.warmUp(info.url);

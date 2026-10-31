@@ -224,10 +224,9 @@ class NeteaseRepository {
     }
   }
 
-  /// 搜索联想词（需求第二十一批：只用文档《搜索联想词（App 移动端版）》
+  /// 搜索联想词（联想词本体严格只走文档《搜索联想词（App 移动端版）》
   /// 的 GET /search/suggest/mobile，query 参数名必须是 keyword —— 传
-  /// keywords/s 会返回 HTTP 400 空体；不再并行补拉 /search，也不
-  /// 再降级旧 /search/suggest）。
+  /// keywords/s 会返回 HTTP 400 空体；不使用 /search 搜索接口）。
   ///
   /// 需要携带 cookie：统一请求层（_api.get）自动附加当前生效 cookie
   /// （登录态 MUSIC_U 优先，游客 MUSIC_A 兜底）—— 匿名无 cookie 实测
@@ -236,16 +235,87 @@ class NeteaseRepository {
   /// 与 KeywordSuggest/SuggestWord 模型字段对齐；suggests 第 0 条若
   /// 携带 entity_card（relatedResource.baseInfo.simpleSongData）则
   /// 解析为直 hit 歌曲卡，由搜索页同屏渲染。
+  ///
+  /// 卡片补充（需求第二十二批修复「联想词不显示歌曲/歌手卡片」）：
+  /// 线上 mobile 接口实测 suggests[].relatedResource 恒为 null（无
+  /// entity_card 实体），歌曲/歌手卡片改由**同族联想接口**
+  /// GET /search/suggest（web 联想，keywords 参数）并行补拉 —— 其
+  /// result.songs[]/result.artists[] 自带实体（歌手 img1v1Url 头像、
+  /// 歌曲 duration/fee；歌曲封面为空时经 /song/detail 批量回填），
+  /// 全程不触碰 /search 搜索接口。两路请求独立容错：
+  ///  - mobile 失败（服务偶发截断/抖动）→ 仍展示卡片；
+  ///  - 实体失败 → 仍展示联想词（与上一版行为一致）。
   Future<KeywordSuggest> searchKeywordSuggest(String keyword) async {
     final String kw = keyword.trim();
     if (kw.isEmpty) return const KeywordSuggest();
+    // 两路并行：联想词（mobile）+ 卡片实体（web 联想 /search/suggest）
+    final Future<KeywordSuggest> wordsF = _mobileKeywordSuggest(kw);
+    final Future<KeywordSuggest> cardsF = _suggestEntityCards(kw);
+    final List<KeywordSuggest> parts = await Future.wait(<Future<KeywordSuggest>>[
+      wordsF,
+      cardsF,
+    ]);
+    final KeywordSuggest words = parts[0];
+    final KeywordSuggest cards = parts[1];
+    // 直 hit 歌曲卡与实体卡同曲去重（直 hit 优先）
+    final int? hitId = words.directHit?.directHit?.id;
+    return KeywordSuggest(
+      directHit: words.directHit,
+      songs: <Song>[
+        for (final Song s in cards.songs)
+          if (hitId == null || s.id != hitId) s,
+      ],
+      artists: cards.artists,
+      words: words.words,
+      recTitle: words.recTitle,
+      recs: words.recs,
+    );
+  }
+
+  /// mobile 联想词（words/recs/entity_card）；失败返回空包不抛异常
+  Future<KeywordSuggest> _mobileKeywordSuggest(String kw) async {
     try {
       return _parseKeywordSuggest(await _api.get(
         '/search/suggest/mobile',
         <String, String>{'keyword': kw},
       ));
     } catch (_) {
-      // 接口异常（网络/服务抖动）：本次按键返回空联想，不降级其他接口
+      // 接口异常（网络/服务抖动）：本路返回空联想，卡片路不受影响
+      return const KeywordSuggest();
+    }
+  }
+
+  /// 卡片实体（web 联想接口 /search/suggest 的 songs/artists，
+  /// 非搜索接口）；失败返回空包不抛异常
+  Future<KeywordSuggest> _suggestEntityCards(String kw) async {
+    try {
+      final Map<String, Object?> res = await _api.get(
+        '/search/suggest',
+        <String, String>{'keywords': kw},
+      );
+      final Object? result = res['result'];
+      if (result is! Map<String, Object?>) return const KeywordSuggest();
+      // 歌曲卡：result.songs[]（老字段 artists/album/duration，
+      // Song.fromCloudJson 直接兼容）；封面多为空，经 /song/detail 回填
+      final List<Song> rawSongs = <Song>[
+        for (final Object? item in (result['songs'] as List<Object?>? ??
+            const <Object?>[]))
+          if (item is Map<String, Object?>) Song.fromCloudJson(item),
+      ];
+      final List<Song> songs =
+          await _fillMissingCovers(rawSongs.take(3).toList(growable: false));
+      // 歌手卡：result.artists[]（img1v1Url 头像）；搜歌手名本尊时
+      // 恰是最需要歌手卡的场景（如搜「周杰伦」），不做同名剔除
+      final List<SearchArtist> artists = <SearchArtist>[
+        for (final Object? item in (result['artists'] as List<Object?>? ??
+            const <Object?>[]))
+          if (item is Map<String, Object?>) SearchArtist.fromJson(item),
+      ]
+          .where((SearchArtist a) => a.id > 0)
+          .take(3)
+          .toList(growable: false);
+      return KeywordSuggest(songs: songs, artists: artists);
+    } catch (_) {
       return const KeywordSuggest();
     }
   }
