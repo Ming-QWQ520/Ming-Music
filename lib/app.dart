@@ -14,6 +14,7 @@ import 'core/theme/app_theme.dart';
 import 'core/widgets/app_notify.dart';
 import 'features/auth/providers/auth_providers.dart';
 import 'features/discover/data/netease_providers.dart' show cloudDriveProvider;
+import 'features/listen/providers/listen_room_provider.dart';
 import 'features/player/presentation/widgets/mini_player.dart';
 import 'features/player/providers/player_providers.dart';
 import 'features/settings/providers/settings_providers.dart';
@@ -37,6 +38,9 @@ class MingMusicApp extends ConsumerWidget {
     });
     // 需求：LRU 缓存上限/开关 → SongCacheService 同步（应用级常驻）
     ref.watch(cacheConfigSyncProvider);
+    // 需求（第二十五批）：一起听全局状态机激活（keepAlive）——
+    // 命令应用/状态上报/成员刷新挂到进程级，任何页面离开后照样闭环
+    ref.watch(listenRoomProvider);
     // 需求：全局图片背景（除播放页外）—— 启用时页面底色透明化，
     // 背景图层铺在 Router 之下（BackdropFilter 仍可采样到）
     final AppBackgroundConfig appBg = ref.watch(appBackgroundProvider);

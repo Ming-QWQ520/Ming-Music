@@ -51,6 +51,9 @@ dependencies:
   flutter_markdown: ^0.7.7   # 更新弹窗 / 版本更新日志渲染 release body
   open_filex: ^4.7.0         # APK 下载完成后拉起系统安装器
 
+  # --- 一起听深链（第二十五批需求） ---
+  app_links: ^6.3.2          # mingmusic://listen/join 邀请链接冷/热启动接收
+
   cupertino_icons: ^1.0.8
 
 dev_dependencies:

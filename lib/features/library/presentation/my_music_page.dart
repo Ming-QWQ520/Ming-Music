@@ -33,6 +33,7 @@ import '../../settings/providers/settings_providers.dart'
     show libraryPlaylistLayoutProvider, sharedPreferencesProvider;
 import '../../player/presentation/cache_songs_page.dart';
 import '../../player/providers/player_providers.dart';
+import '../../listen/providers/listen_room_provider.dart';
 import '../../../core/utils/platform_actions.dart';
 
 import '../../../core/widgets/app_notify.dart';
@@ -567,11 +568,15 @@ class _QuickGrid extends ConsumerWidget {
     <Color>[Color(0xFF70B9FE), Color(0xFF2C7BF6)], // 最近：蓝
     <Color>[Color(0xFF67E3C8), Color(0xFF00BFA5)], // 本地：青
     <Color>[Color(0xFF9BE7A4), Color(0xFF4ADE80)], // 云盘：绿
+    <Color>[Color(0xFFC3A5FF), Color(0xFF7C4DFF)], // 好友：紫
+    <Color>[Color(0xFFFFB56B), Color(0xFFFF7A3D)], // 一起听：橙
   ];
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final AuthState auth = ref.watch(authProvider);
+    // 需求（第二十五批）：一起听磁贴副标题随房间状态变化
+    final ListenRoomState listenRoom = ref.watch(listenRoomProvider);
     final String likeSub =
         auth.loggedIn ? '${auth.likedIds.length} 首' : '登录后可用';
     // 第十五批需求：本地音乐授权扫描后在我的页显示歌曲总数
@@ -638,6 +643,34 @@ class _QuickGrid extends ConsumerWidget {
                 // 需求：云盘样式上移 —— 原「我的云盘」行样式移至本 tile
                 //（登录后显示云盘歌曲数），底部行已删除
                 child: const _CloudDriveTile(),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          // 需求（第二十五批）：为支持一起听新增「好友」项，
+          // 与「一起听」磁贴同排
+          Row(
+            children: <Widget>[
+              Expanded(
+                child: _QuickHubTile(
+                  icon: Icons.group_rounded,
+                  gradient: _gradients[4],
+                  title: '好友',
+                  subtitle: '邀请好友一起听',
+                  onTap: () => context.push('/friends'),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: _QuickHubTile(
+                  icon: Icons.headset_mic_rounded,
+                  gradient: _gradients[5],
+                  title: '一起听',
+                  subtitle: listenRoom.inRoom
+                      ? '${listenRoom.users.length} 人房间进行中'
+                      : '开房同步听歌',
+                  onTap: () => context.push('/listen'),
+                ),
               ),
             ],
           ),

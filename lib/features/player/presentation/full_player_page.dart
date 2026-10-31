@@ -47,6 +47,8 @@ import '../providers/lyrics_providers.dart'
     show ParsedLyrics, currentLyricsProvider;
 import '../providers/np_settings_providers.dart';
 import '../providers/player_providers.dart';
+import '../../listen/providers/listen_room_provider.dart';
+import '../../listen/presentation/listen_room_sheet.dart';
 import 'player_more_sheet.dart';
 import 'widgets/cover_art_view.dart' show CoverArtView, kSquareCoverRadiusRatio;
 import 'widgets/cover_viewer.dart';
@@ -781,6 +783,11 @@ class _TopBar extends ConsumerWidget {
     // 无 MV（mvId=0）或设置关闭时用等宽占位保持标题绝对居中
     final NpPlayerSettings npCfg = ref.watch(npSettingsProvider);
     final bool hasMv = npCfg.showMvBadge && (track?.mvId ?? 0) > 0;
+    // 需求（第二十五批）：播放页一起听 —— 顶栏耳机键常驻（点击弹一起听
+    // 面板），在房时高亮并在标题下显示「N 人一起听」；
+    // 右侧两键占位 104px，左侧收起键后补对称占位保持标题绝对居中
+    final ListenRoomState room = ref.watch(listenRoomProvider);
+    final bool inRoom = room.inRoom;
 
     return SizedBox(
       height: 52,
@@ -796,20 +803,59 @@ class _TopBar extends ConsumerWidget {
               }
             },
           ),
+          // 右侧双键（一起听 48 + MV 槽 56 = 104）的对称补偿占位
+          const SizedBox(width: 48),
           Expanded(
-            child: Text(
-              center,
-              textAlign: TextAlign.center,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                color: Colors.white.withValues(alpha: 0.85),
-                fontSize: 15,
-                fontWeight: FontWeight.w500,
-              ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: <Widget>[
+                Text(
+                  center,
+                  textAlign: TextAlign.center,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: Colors.white.withValues(alpha: 0.85),
+                    fontSize: 15,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+                if (inRoom) ...<Widget>[
+                  const SizedBox(height: 1),
+                  GestureDetector(
+                    onTap: () => unawaited(showListenRoomSheet(context)),
+                    child: Text(
+                      '${room.users.length} 人一起听 · 点击管理',
+                      style: TextStyle(
+                        color: AppConstants.brandColor
+                            .withValues(alpha: 0.95),
+                        fontSize: 9.5,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ],
+              ],
             ),
           ),
-          // 右侧：MV 图标（与左侧收起键同宽占位，保证标题绝对居中）
+          // 右侧：一起听键（常驻）+ MV 图标（与左侧收起键区域对称，
+          // 保证标题绝对居中）
+          SizedBox(
+            width: 48,
+            child: IconButton(
+              tooltip: '一起听',
+              icon: Icon(
+                inRoom
+                    ? Icons.headset_mic_rounded
+                    : Icons.headset_mic_outlined,
+                size: 22,
+                color: inRoom
+                    ? AppConstants.brandColor
+                    : Colors.white.withValues(alpha: 0.85),
+              ),
+              onPressed: () => unawaited(showListenRoomSheet(context)),
+            ),
+          ),
           SizedBox(
             width: 56,
             child: hasMv && track?.mvId != null

@@ -62,6 +62,15 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+
+            <!-- 一起听邀请深链（第二十五批）：mingmusic://listen/join?roomId=X&inviterId=Y
+                 好友点击分享链接直接拉起 App 加入房间；浏览器/备忘录/短信内可点 -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="mingmusic" android:host="listen" />
+            </intent-filter>
         </activity>
 
         <!-- 灰屏修复（2026-10）：Impeller OpenGLES 后端在部分老 GPU

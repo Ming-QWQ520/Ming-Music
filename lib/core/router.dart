@@ -17,7 +17,8 @@
 ///  - `/recent-songs`        最近播放；
 ///  - `/listen-rank`         听歌排行榜；
 ///  - `/profile`             个人主页（Zephyr 对齐）；
-///  - `/listen`              一起听（实验性 Beta，局域网同步）。
+///  - `/listen?roomId=&inviterId=` 一起听（深链自动加入房间）；
+///  - `/friends`            好友页（关注/粉丝 + 一起听邀请）；
 ///
 /// 通知栏点击 / Mini 播放条统一经 `openFullPlayer` 跳 `/player`，
 /// 全屏播放页使用 CustomTransitionPage（上滑进入 + 淡入），
@@ -45,6 +46,7 @@ import '../features/library/presentation/recent_songs_page.dart';
 import '../features/library/presentation/listen_rank_page.dart';
 import '../features/library/presentation/profile_page.dart';
 import '../features/listen/presentation/listen_together_page.dart';
+import '../features/listen/presentation/friends_page.dart';
 import '../features/player/presentation/full_player_page.dart';
 import '../features/settings/presentation/settings_page.dart';
 import '../features/shell/presentation/main_scaffold.dart';
@@ -215,8 +217,20 @@ final GoRouter appRouter = GoRouter(
         GoRoute(
           path: 'listen',
           name: 'listen-together',
+          // 需求（第二十五批）：深链 mingmusic://listen/join?roomId=X&inviterId=Y
+          // 好友点击邀请链接拉起 App 自动加入
           builder: (BuildContext context, GoRouterState state) =>
-              const ListenTogetherPage(),
+              ListenTogetherPage(
+            initialRoomId: state.uri.queryParameters['roomId'],
+            initialInviterId:
+                int.tryParse(state.uri.queryParameters['inviterId'] ?? ''),
+          ),
+        ),
+        GoRoute(
+          path: 'friends',
+          name: 'friends',
+          builder: (BuildContext context, GoRouterState state) =>
+              const FriendsPage(),
         ),
       ],
     ),

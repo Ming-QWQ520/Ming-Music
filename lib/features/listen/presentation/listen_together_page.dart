@@ -1,395 +1,230 @@
-/// 一起听 —— 网易云官方「一起听」接口（第十三批需求：对齐
-/// musicapi.mingqwq.top/listen_together_host.html 官方示例流程，
-/// 替换旧局域网方案 —— 两端登录网易云账号即可，无需同一 Wi-Fi）。
+/// 一起听管理页（第十三批建立，第二十五批接入全局状态机闭环）。
 ///
-///  - 发起一起听：创建房间（room/create）→ 分享邀请串「房间号|邀请人ID」
-///    （对齐官方分享链接语义 st.music.163.com/listen-together/share）；
-///  - 加入一起听：粘贴邀请串 → accept（需邀请者 id 一对凭据）→ check；
-///  - 双端对称同步：换歌/播放暂停经 play/command 上报（GOTO/PLAY/PAUSE），
-///    每 2s 轮询 sync/playlist/get 读对方命令（serverSeq 判新旧）；
-///    心跳 10s 上报本机状态保活在房；
-///  - 队列公布：把当前播放队列 REPLACE 到房间（sync/list/command），
-///    对方拉取后可在同一列表里继续上/下一首；
-///  - 官方语义：sync/playlist/get 读到的是「对方」的命令，单人房间
-///    返回空 data（自测需要两个账号）。
+/// 网易云官方「一起听」接口族（NeteaseCloudMusicApi Enhanced）：
+///  - 发起：创建房间（room/create）→ 分享邀请（深链 + 邀请串双形态）；
+///  - 加入：粘贴邀请串 / 好友深链点击自动带入 / 剪贴板自动识别 →
+///    accept（房间号+邀请人ID）→ check；
+///  - 同步闭环：命令应用与状态上报已提升至 [listenRoomProvider]
+///    （全局生效，离开本页照样跟随），本页只负责房间管理与展示。
 library;
 
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../../core/constants/app_constants.dart';
 import '../../../core/api/netease_models.dart' show Song;
-import '../../../core/utils/platform_actions.dart';
 import '../../../core/widgets/cover_image.dart';
+import '../../../core/widgets/app_notify.dart';
 import '../../auth/presentation/login_sheet.dart' show showLoginSheet;
 import '../../discover/data/netease_providers.dart'
-    show neteaseApiProvider, neteaseRepositoryProvider;
+    show neteaseRepositoryProvider;
 import '../../library/domain/track.dart';
 import '../../player/providers/player_providers.dart';
-import '../services/listen_together_service.dart';
+import '../providers/listen_room_provider.dart';
+import '../services/listen_together_service.dart'
+    show ListenTogetherService, ListenRoomUser;
 
-import '../../../core/widgets/app_notify.dart';
-/// 全局唯一同步服务实例（复用网易云 API 客户端与登录 cookie）
-final Provider<ListenTogetherService> listenServiceProvider =
-    Provider<ListenTogetherService>(
-        (Ref ref) => ListenTogetherService(ref.read(neteaseApiProvider)));
-
+/// 一起听页（/listen；深链可带 roomId/inviterId 自动加入）
 class ListenTogetherPage extends ConsumerStatefulWidget {
-  const ListenTogetherPage({super.key});
+  const ListenTogetherPage({
+    super.key,
+    this.initialRoomId,
+    this.initialInviterId,
+  });
+
+  /// 深链 mingmusic://listen/join?roomId=X&inviterId=Y 自动带入
+  final String? initialRoomId;
+  final int? initialInviterId;
 
   @override
-  ConsumerState<ListenTogetherPage> createState() => _ListenTogetherPageState();
+  ConsumerState<ListenTogetherPage> createState() =>
+      _ListenTogetherPageState();
 }
 
 class _ListenTogetherPageState extends ConsumerState<ListenTogetherPage> {
-  bool _busy = false;
-  bool _loginOk = false;
-  String _loginError = '';
-  List<ListenRoomUser> _users = const <ListenRoomUser>[];
-  String _notice = '';
-  int _remoteSongId = 0;
-
-  /// 跟随换歌进行中（抑制本机状态上报，避免把对方命令反向报回去）
-  bool _following = false;
-
-  /// 上次上报的歌曲/播放状态（变化才上报）
-  int? _lastReportedSongId;
-  bool? _lastReportedPlaying;
-
   final TextEditingController _inviteCtrl = TextEditingController();
 
-  ListenTogetherService get _svc => ref.read(listenServiceProvider);
+  /// 剪贴板识别出的邀请（进入页面自动检测一次）
+  ListenInvite? _pendingInvite;
+
+  /// 深链参数已尝试自动加入（防重复触发）
+  bool _autoJoinDone = false;
+
+  List<Track> _roomSongs = const <Track>[];
+  bool _pulling = false;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _svc.onCommand = _applyCommand;
-      _svc.onRoomChanged = (List<ListenRoomUser> users) {
-        if (mounted) setState(() => _users = users);
-      };
-      _svc.statusSupplier = () {
-        final PlayerState ps = ref.read(playerProvider);
-        return (
-          songId: ps.currentTrack?.neteaseId ?? 0,
-          playing: ps.playing,
-          progressMs:
-              ref.read(audioHandlerProvider).player.position.inMilliseconds,
-        );
-      };
-      // 本机播放状态变化 → 上报命令（防回环窗口内跳过）
-      ref.listenManual<PlayerState>(playerProvider, (_, PlayerState ps) {
-        _reportLocalState(ps);
-      });
-      _bootstrap();
+      if (!mounted) return;
+      final ListenRoomNotifier notifier =
+          ref.read(listenRoomProvider.notifier);
+      unawaited(notifier.refreshLogin());
+      _handleIncomingInvite();
     });
   }
 
   @override
   void dispose() {
-    // 离开页面：保留房间（后台继续同步轮询），仅解绑 UI 回调
-    _svc.onCommand = null;
-    _svc.onRoomChanged = null;
+    _inviteCtrl.dispose();
     super.dispose();
   }
 
-  Future<void> _bootstrap() async {
-    final String? err = await _svc.ensureLogin();
-    if (!mounted) return;
-    setState(() {
-      _loginOk = err == null;
-      _loginError = err ?? '';
-    });
-    // 恢复场景：service 已在房间（快速切换页面回来）
-    if (err == null && _svc.inRoom && !_svc.isSyncing) {
-      await _svc.startSync();
-      if (mounted) setState(() {});
-    }
-  }
-
-  // ---------------------------------------------------------- 本机上报
-
-  /// 播放状态变化上报（换歌 → GOTO；播放暂停 → PLAY/PAUSE；
-  /// 以播放器实际状态为准，变化才上报）
-  void _reportLocalState(PlayerState ps) {
-    if (!mounted || _following) return;
-    if (!_svc.inRoom || _svc.reportSuppressed) return;
-    final int songId = ps.currentTrack?.neteaseId ?? 0;
-    if (songId <= 0) return;
-    final int progressMs =
-        ref.read(audioHandlerProvider).player.position.inMilliseconds;
-    if (songId != _lastReportedSongId) {
-      _lastReportedSongId = songId;
-      _lastReportedPlaying = ps.playing;
-      unawaited(_svc.sendPlayCommand(
-        'GOTO',
-        targetSongId: songId,
-        progressMs: progressMs,
-        playStatus: ps.playing ? 'PLAY' : 'PAUSE',
-      ));
-    } else if (_lastReportedPlaying != ps.playing) {
-      _lastReportedPlaying = ps.playing;
-      unawaited(_svc.sendPlayCommand(
-        ps.playing ? 'PLAY' : 'PAUSE',
-        targetSongId: songId,
-        progressMs: progressMs,
-        playStatus: ps.playing ? 'PLAY' : 'PAUSE',
-      ));
-    }
-  }
-
-  // ---------------------------------------------------------- 跟随对方
-
-  /// 应用对方命令（GOTO 换歌 / PLAY / PAUSE / PROGRESS 拖动进度）；
-  /// 进度按收到时刻补流逝时间（仅播放中），防回环窗口 3s。
-  Future<void> _applyCommand(ListenPlayCommand cmd) async {
-    if (!mounted || !ref.read(playerProvider).loaded) return;
-    final PlayerNotifier notifier = ref.read(playerProvider.notifier);
-    final PlayerState ps = ref.read(playerProvider);
-    final int? currentId = ps.currentTrack?.neteaseId;
-
-    final bool cmdPlaying =
-        cmd.playStatus == 'PLAY' || cmd.isPlay || cmd.isGoto;
-    final int progressMs = cmdPlaying
-        ? cmd.progressMs +
-            DateTime.now().difference(cmd.receivedAt).inMilliseconds
-        : cmd.progressMs;
-
-    _svc.suppressReportFor(const Duration(seconds: 3));
-    if (mounted) setState(() => _remoteSongId = cmd.targetSongId);
-
-    // ① 换歌：GOTO 无条件跟随；PLAY/seek 且歌曲不同也先换
-    final bool needSwitch = cmd.targetSongId > 0 &&
-        currentId != cmd.targetSongId &&
-        (cmd.isGoto || cmd.isPlay || cmd.isSeek);
-    if (needSwitch) {
-      int idx = -1;
-      for (int i = 0; i < ps.queue.length; i++) {
-        if (ps.queue[i].neteaseId == cmd.targetSongId) {
-          idx = i;
-          break;
-        }
-      }
-      _following = true;
-      try {
-        if (idx >= 0) {
-          // 同一队列内跳转（对方也在这个列表里，后续上一首/下一首自然同步）
-          await notifier.playAt(idx);
-        } else if (cmd.isGoto) {
-          // 队列没有 → 拉歌曲详情单曲入队（保持房内后续命令可跟）
-          final List<Song> songs = await ref
-              .read(neteaseRepositoryProvider)
-              .songDetails(<int>[cmd.targetSongId]);
-          if (songs.isNotEmpty && mounted) {
-            await notifier.playSongs(
-              <Track>[songs.first.toTrack()],
-              queueTitle: '一起听',
-            );
-          }
-        } else {
-          return; // 非命令型差异不强制换歌
-        }
-        if (cmd.isSeek && cmdPlaying) {
-          await notifier
-              .seek(Duration(milliseconds: progressMs.clamp(0, 1 << 31)));
-        }
-      } finally {
-        _following = false;
+  /// 深链参数优先 → 自动加入；否则读剪贴板识别邀请给出确认卡
+  Future<void> _handleIncomingInvite() async {
+    final ListenRoomNotifier notifier =
+        ref.read(listenRoomProvider.notifier);
+    final ListenRoomState st = ref.read(listenRoomProvider);
+    final String? deepRoom = widget.initialRoomId;
+    final int? deepInviter = widget.initialInviterId;
+    if (deepRoom != null &&
+        deepRoom.isNotEmpty &&
+        (deepInviter ?? 0) > 0 &&
+        !_autoJoinDone &&
+        !st.inRoom) {
+      _autoJoinDone = true;
+      _inviteCtrl.text = '$deepRoom|$deepInviter';
+      final String? err =
+          await notifier.joinRoom(deepRoom, deepInviter ?? 0);
+      if (!mounted) return;
+      if (err != null) {
+        AppNotify.show(err);
+      } else {
+        AppNotify.success('已加入好友的一起听房间');
       }
       return;
     }
-
-    // ② 播放/暂停（命令类型决定，不靠位置差推断）
-    if (cmd.isPlay && !ps.playing) {
-      await notifier.playPause();
-      return;
-    }
-    if (cmd.isPause && ps.playing) {
-      await notifier.playPause();
-      return;
-    }
-
-    // ③ 进度（仅同曲 seek）
-    if (cmd.isSeek && currentId == cmd.targetSongId) {
-      await notifier.seek(Duration(milliseconds: progressMs.clamp(0, 1 << 31)));
-    }
+    if (st.inRoom) return;
+    final ListenInvite? clip = await notifier.readInviteFromClipboard();
+    if (!mounted || clip == null) return;
+    setState(() => _pendingInvite = clip);
   }
 
   // ---------------------------------------------------------- 动作
 
   Future<void> _create() async {
-    if (_busy) return;
-    setState(() => _busy = true);
-    try {
-      final String? err = await _svc.createRoom();
-      if (!mounted) return;
-      if (err != null) {
-        setState(() => _notice = err);
-      } else {
-        setState(() => _notice = '');
-        await _svc.refreshStatus();
-        await _svc.startSync();
-        if (mounted) setState(() {});
-      }
-    } finally {
-      if (mounted) setState(() => _busy = false);
-    }
-  }
-
-  Future<void> _join() async {
-    if (_busy) return;
-    final String raw = _inviteCtrl.text.trim();
-    if (raw.isEmpty) {
-      setState(() => _notice = '请粘贴邀请串（房间号|邀请人ID）');
-      return;
-    }
-    final List<String> parts = raw.split('|');
-    final String roomId = parts.first.trim();
-    final int inviterId =
-        parts.length > 1 ? int.tryParse(parts[1].trim()) ?? 0 : 0;
-    if (inviterId <= 0) {
-      setState(() => _notice = '邀请串格式应为「房间号|邀请人ID」');
-      return;
-    }
-    setState(() {
-      _busy = true;
-      _notice = '';
-    });
-    try {
-      final String? err = await _svc.joinRoom(roomId, inviterId);
-      if (!mounted) return;
-      if (err != null) {
-        setState(() => _notice = err);
-      } else {
-        await _svc.refreshStatus();
-        await _svc.startSync();
-        if (mounted) {
-          setState(() {});
-          _toast('已加入一起听，正在同步房间');
-        }
-      }
-    } finally {
-      if (mounted) setState(() => _busy = false);
-    }
-  }
-
-  /// 把当前播放队列公布到房间（sync/list/command REPLACE）
-  Future<void> _syncQueue() async {
-    final List<Track> queue = ref.read(playerProvider).queue;
-    final List<int> ids = <int>[
-      for (final Track t in queue)
-        if (t.neteaseId != null && t.neteaseId! > 0) t.neteaseId!,
-    ];
-    if (ids.isEmpty) {
-      setState(() => _notice = '当前队列没有可同步的歌曲');
-      return;
-    }
-    final String? err = await _svc.syncList(ids);
+    final String? err =
+        await ref.read(listenRoomProvider.notifier).createRoom();
     if (!mounted) return;
-    setState(() => _notice = err ?? '已把当前队列同步到房间（${ids.length} 首）');
+    if (err != null) {
+      AppNotify.show(err);
+    } else {
+      AppNotify.success('房间已开启，邀请好友加入吧');
+      unawaited(_pullRoomPlaylist(silent: true));
+    }
   }
 
-  /// 拉取房间播放列表（demo 同款：sync/playlist/get → displayList →
-  /// /song/detail 补全 → 展示并可直接播放跟随）
-  Future<void> _pullRoomPlaylist() async {
-    setState(() => _busy = true);
+  Future<void> _joinText() async {
+    final String raw = _inviteCtrl.text.trim();
+    final ListenInvite? invite = parseListenInvite(raw);
+    if (invite == null) {
+      AppNotify.show('邀请串格式应为「房间号|邀请人ID」或完整邀请链接');
+      return;
+    }
+    await _join(invite);
+  }
+
+  Future<void> _join(ListenInvite invite) async {
+    final String? err = await ref
+        .read(listenRoomProvider.notifier)
+        .joinRoom(invite.roomId, invite.inviterId);
+    if (!mounted) return;
+    if (err != null) {
+      AppNotify.show(err);
+    } else {
+      setState(() => _pendingInvite = null);
+      AppNotify.success('已加入一起听，正在同步房间');
+      unawaited(_pullRoomPlaylist(silent: true));
+    }
+  }
+
+  /// 拉取房间播放列表（sync/playlist/get → /song/detail 补全 → 展示点播）
+  Future<void> _pullRoomPlaylist({bool silent = false}) async {
+    if (_pulling) return;
+    setState(() => _pulling = true);
     try {
       final List<int> ids = await _svc.fetchRoomPlaylist();
       if (!mounted) return;
       if (ids.isEmpty) {
-        setState(() => _notice = '房间暂无播放列表（对方未公布队列）');
+        if (!silent) {
+          AppNotify.show('房间暂无播放列表（对方未公布队列）');
+        }
         return;
       }
       final List<Song> songs =
           await ref.read(neteaseRepositoryProvider).songDetails(ids);
       if (!mounted) return;
-      if (songs.isEmpty) {
-        setState(() => _notice = '房间列表歌曲详情获取失败');
-        return;
-      }
       setState(() {
-        _notice = '已拉取房间列表（${songs.length} 首）';
         _roomSongs = <Track>[for (final Song s in songs) s.toTrack()];
       });
-    } catch (e) {
-      if (mounted) setState(() => _notice = '拉取失败：$e');
+      if (!silent) AppNotify.show('已拉取房间列表（${songs.length} 首）');
+    } catch (_) {
+      if (!silent && mounted) AppNotify.show('拉取房间列表失败，可重试');
     } finally {
-      if (mounted) setState(() => _busy = false);
+      if (mounted) setState(() => _pulling = false);
     }
   }
 
-  List<Track> _roomSongs = const <Track>[];
+  ListenTogetherService get _svc => ref.read(listenServiceProvider);
 
   Future<void> _playRoomSong(Track t) async {
     // 房间列表点播：换到该曲并上报 GOTO（其余成员跟随）
     _svc.suppressReportFor(const Duration(seconds: 2));
     await ref.read(playerProvider.notifier).playSongs(
-      <Track>[t],
-      queueTitle: '一起听',
-    );
+          <Track>[t],
+          queueTitle: '一起听',
+        );
   }
 
   Future<void> _leave({bool end = false}) async {
-    final String? err = await _svc.leave(end: end);
+    await ref.read(listenRoomProvider.notifier).leave(end: end);
     if (!mounted) return;
-    setState(() {
-      _users = const <ListenRoomUser>[];
-      _roomSongs = const <Track>[];
-      _notice = err ?? (end ? '房间已关闭' : '已退出房间');
-      _lastReportedSongId = null;
-      _lastReportedPlaying = null;
-    });
+    setState(() => _roomSongs = const <Track>[]);
+    AppNotify.show(end ? '房间已关闭' : '已退出房间');
   }
 
-  Future<void> _refreshRoom() async {
-    final String? err = await _svc.refreshStatus();
+  Future<void> _syncQueue() async {
+    final String? err =
+        await ref.read(listenRoomProvider.notifier).syncQueueToRoom();
     if (!mounted) return;
-    if (err != null) setState(() => _notice = err);
-  }
-
-  Future<void> _shareInvite() async {
-    final String? rid = _svc.roomId;
-    if (rid == null) return;
-    final String invite = '$rid|${_svc.inviterId}';
-    await PlatformActions.shareText(
-      '【MingMusic 一起听】把邀请串粘贴到「加入一起听」即可同步收听：\n$invite',
-    );
-  }
-
-  Future<void> _copyInvite() async {
-    final String? rid = _svc.roomId;
-    if (rid == null) return;
-    await PlatformActions.shareText('$rid|${_svc.inviterId}');
+    AppNotify.show(err ?? '已把当前队列同步到房间');
   }
 
   // ---------------------------------------------------------- 控制三键
 
   Future<void> _ctrlPlay() async {
     final PlayerState ps = ref.read(playerProvider);
-    if (!ps.playing) {
-      _svc.suppressReportFor(const Duration(seconds: 2));
-      await ref.read(playerProvider.notifier).playPause();
-      final int songId = ps.currentTrack?.neteaseId ?? 0;
-      final int pos =
-          ref.read(audioHandlerProvider).player.position.inMilliseconds;
-      unawaited(_svc.sendPlayCommand('PLAY',
-          targetSongId: songId, progressMs: pos, playStatus: 'PLAY'));
-    }
+    if (ps.playing) return;
+    final int songId = ps.currentTrack?.neteaseId ?? 0;
+    final int pos =
+        ref.read(audioHandlerProvider).player.position.inMilliseconds;
+    await ref.read(playerProvider.notifier).playPause();
+    await ref.read(listenRoomProvider.notifier).sendManualCommand(
+          'PLAY',
+          targetSongId: songId,
+          progressMs: pos,
+          playStatus: 'PLAY',
+        );
   }
 
   Future<void> _ctrlPause() async {
     final PlayerState ps = ref.read(playerProvider);
-    if (ps.playing) {
-      _svc.suppressReportFor(const Duration(seconds: 2));
-      await ref.read(playerProvider.notifier).playPause();
-      final int songId = ps.currentTrack?.neteaseId ?? 0;
-      final int pos =
-          ref.read(audioHandlerProvider).player.position.inMilliseconds;
-      unawaited(_svc.sendPlayCommand('PAUSE',
-          targetSongId: songId, progressMs: pos, playStatus: 'PAUSE'));
-    }
+    if (!ps.playing) return;
+    final int songId = ps.currentTrack?.neteaseId ?? 0;
+    final int pos =
+        ref.read(audioHandlerProvider).player.position.inMilliseconds;
+    await ref.read(playerProvider.notifier).playPause();
+    await ref.read(listenRoomProvider.notifier).sendManualCommand(
+          'PAUSE',
+          targetSongId: songId,
+          progressMs: pos,
+          playStatus: 'PAUSE',
+        );
   }
 
   Future<void> _ctrlSeek() async {
@@ -397,31 +232,40 @@ class _ListenTogetherPageState extends ConsumerState<ListenTogetherPage> {
     final int songId = ps.currentTrack?.neteaseId ?? 0;
     final int pos =
         ref.read(audioHandlerProvider).player.position.inMilliseconds;
-    _svc.suppressReportFor(const Duration(seconds: 2));
-    final String? err = await _svc.sendPlayCommand('PROGRESS',
-        targetSongId: songId, progressMs: pos, playStatus: 'PLAY');
+    await ref.read(listenRoomProvider.notifier).sendManualCommand(
+          'PROGRESS',
+          targetSongId: songId,
+          progressMs: pos,
+          playStatus: ps.playing ? 'PLAY' : 'PAUSE',
+        );
     if (!mounted) return;
-    setState(() => _notice = err ?? '已把当前进度同步给房间');
+    AppNotify.show('已把当前进度同步给房间');
   }
 
   // ---------------------------------------------------------- build
-
-  void _toast(String msg) {
-    AppNotify.show(msg);
-  }
 
   @override
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
     final PlayerState ps = ref.watch(playerProvider);
     final Track? track = ps.currentTrack;
-    final bool inRoom = _svc.inRoom;
+    final ListenRoomState st = ref.watch(listenRoomProvider);
+    final bool inRoom = st.inRoom;
 
     return Scaffold(
       appBar: AppBar(
         titleSpacing: 20,
         title: const Text('一起听',
             style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700)),
+        actions: <Widget>[
+          // 好友入口（第二十五批：为了支持一起听新增「好友」项）
+          IconButton(
+            tooltip: '好友',
+            onPressed: () => context.push('/friends'),
+            icon: const Icon(Icons.group_rounded, size: 22),
+          ),
+          const SizedBox(width: 6),
+        ],
       ),
       body: ListView(
         padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
@@ -445,9 +289,9 @@ class _ListenTogetherPageState extends ConsumerState<ListenTogetherPage> {
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
-                    '网易云官方一起听：发起方创建房间，把邀请串发给好友，'
-                    '好友粘贴加入即可同步收听。换歌、播放暂停与进度拖动'
-                    '双端实时互相同步，无需同一 Wi-Fi。',
+                    '网易云官方一起听：发起方创建房间，把邀请转发给好友，'
+                    '好友点击链接（或粘贴邀请串）加入即可同步收听。换歌、'
+                    '播放暂停与进度拖动双端实时互相同步，无需同一 Wi-Fi。',
                     style: TextStyle(
                         fontSize: 12.5,
                         height: 1.5,
@@ -461,45 +305,69 @@ class _ListenTogetherPageState extends ConsumerState<ListenTogetherPage> {
 
           // 登录状态卡
           _AccountCard(
-            loginOk: _loginOk,
-            nickname: _svc.nickname,
-            error: _loginError,
+            loginOk: st.loggedIn,
+            nickname: st.nickname,
             onLogin: () => showLoginSheet(context),
           ),
           const SizedBox(height: 14),
 
-          if (!_loginOk) ...<Widget>[
-            _HintCard('登录网易云账号后即可使用一起听'),
+          if (!st.loggedIn) ...<Widget>[
+            const _HintCard('登录网易云账号后即可使用一起听'),
+          ] else if (st.busy) ...<Widget>[
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 32),
+              child: Center(
+                child: SizedBox(
+                  width: 26,
+                  height: 26,
+                  child: CircularProgressIndicator(strokeWidth: 2.4),
+                ),
+              ),
+            ),
           ] else if (!inRoom) ...<Widget>[
+            // 剪贴板邀请识别卡（好友复制了邀请串后打开本页自动出现）
+            if (_pendingInvite != null) ...<Widget>[
+              _InviteConfirmCard(
+                invite: _pendingInvite!,
+                onJoin: () => _join(_pendingInvite!),
+                onDismiss: () => setState(() => _pendingInvite = null),
+              ),
+              const SizedBox(height: 12),
+            ],
             _RoleCard(
               icon: Icons.podcasts_rounded,
               title: '发起一起听',
-              subtitle: '创建房间并分享邀请串，好友加入后同步收听你的播放',
-              busy: _busy,
+              subtitle: '创建房间并转发邀请，好友点击即可同步收听你的播放',
+              busy: false,
               onTap: _create,
             ),
             const SizedBox(height: 12),
             _JoinCard(
               controller: _inviteCtrl,
-              busy: _busy,
-              onJoin: _join,
+              onJoin: _joinText,
             ),
+            const SizedBox(height: 12),
           ] else ...<Widget>[
             _RoomCard(
-              roomId: _svc.roomId ?? '',
-              inviterId: _svc.inviterId,
-              isCreator: _svc.isCreator,
-              users: _users,
-              onShare: _shareInvite,
-              onCopy: _copyInvite,
-              onRefresh: _refreshRoom,
-              onClose: () => _leave(end: _svc.isCreator),
+              roomId: st.roomId,
+              inviterId: st.inviterId,
+              isCreator: st.phase == ListenRoomPhase.host,
+              users: st.users,
+              onShare: () =>
+                  ref.read(listenRoomProvider.notifier).shareInvite(),
+              onCopy: () =>
+                  ref.read(listenRoomProvider.notifier).copyInvite(),
+              onInviteFriends: () => context.push('/friends'),
+              onRefresh: () => ref
+                  .read(listenRoomProvider.notifier)
+                  .refreshStatus(silent: false),
+              onClose: () => _leave(end: st.phase == ListenRoomPhase.host),
             ),
             const SizedBox(height: 12),
             _SyncCard(
-              busy: _busy,
+              busy: _pulling,
               onSyncQueue: _syncQueue,
-              onPullPlaylist: _pullRoomPlaylist,
+              onPullPlaylist: () => unawaited(_pullRoomPlaylist()),
             ),
             if (_roomSongs.isNotEmpty) ...<Widget>[
               const SizedBox(height: 12),
@@ -518,16 +386,17 @@ class _ListenTogetherPageState extends ConsumerState<ListenTogetherPage> {
             ),
           ],
 
-          if (_notice.isNotEmpty) ...<Widget>[
+          if (st.notice.isNotEmpty) ...<Widget>[
             const SizedBox(height: 14),
             Container(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
               decoration: BoxDecoration(
                 color: theme.colorScheme.surfaceContainerHighest
                     .withValues(alpha: 0.5),
                 borderRadius: BorderRadius.circular(12),
               ),
-              child: Text(_notice,
+              child: Text(st.notice,
                   style: const TextStyle(fontSize: 12.5, height: 1.45)),
             ),
           ],
@@ -535,8 +404,8 @@ class _ListenTogetherPageState extends ConsumerState<ListenTogetherPage> {
           const SizedBox(height: 18),
           Center(
             child: Text(
-              inRoom && _remoteSongId > 0
-                  ? '房间正在同步：${track?.neteaseId == _remoteSongId ? '${track!.title} - ${track.artist}' : '歌曲 $_remoteSongId'}'
+              inRoom && st.remoteSongId > 0
+                  ? '房间正在同步：${track?.neteaseId == st.remoteSongId ? '${track!.title} - ${track.artist}' : '歌曲 ${st.remoteSongId}'}'
                   : '当前播放：${track == null ? '未在播放' : '${track.title} - ${track.artist}'}',
               textAlign: TextAlign.center,
               style: TextStyle(
@@ -555,13 +424,11 @@ class _AccountCard extends StatelessWidget {
   const _AccountCard({
     required this.loginOk,
     required this.nickname,
-    required this.error,
     required this.onLogin,
   });
 
   final bool loginOk;
   final String nickname;
-  final String error;
   final VoidCallback onLogin;
 
   @override
@@ -594,9 +461,9 @@ class _AccountCard extends StatelessWidget {
                 Text(loginOk ? '已登录：$nickname' : '未登录网易云账号',
                     style: const TextStyle(
                         fontSize: 14, fontWeight: FontWeight.w700)),
-                if (error.isNotEmpty) ...<Widget>[
+                if (!loginOk) ...<Widget>[
                   const SizedBox(height: 2),
-                  Text(error,
+                  Text('一起听需要双方都登录网易云账号',
                       style: TextStyle(
                           fontSize: 11.5,
                           color: theme.colorScheme.onSurfaceVariant)),
@@ -633,6 +500,72 @@ class _HintCard extends StatelessWidget {
           style: TextStyle(
               fontSize: 12.5,
               color: Theme.of(context).colorScheme.onSurfaceVariant)),
+    );
+  }
+}
+
+/// 剪贴板邀请确认卡
+class _InviteConfirmCard extends StatelessWidget {
+  const _InviteConfirmCard({
+    required this.invite,
+    required this.onJoin,
+    required this.onDismiss,
+  });
+
+  final ListenInvite invite;
+  final VoidCallback onJoin;
+  final VoidCallback onDismiss;
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppConstants.brandColor.withValues(alpha: 0.10),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+            color: AppConstants.brandColor.withValues(alpha: 0.35), width: 1),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Row(
+            children: <Widget>[
+              Icon(Icons.mark_email_read_rounded,
+                  size: 18, color: AppConstants.brandColor),
+              const SizedBox(width: 8),
+              const Expanded(
+                child: Text('检测到好友的一起听邀请',
+                    style: TextStyle(
+                        fontSize: 13.5, fontWeight: FontWeight.w700)),
+              ),
+              GestureDetector(
+                onTap: onDismiss,
+                child: Icon(Icons.close_rounded,
+                    size: 16, color: theme.colorScheme.onSurfaceVariant),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text('房间 ${invite.roomId} · 邀请人 ${invite.inviterId}',
+              style: TextStyle(
+                  fontSize: 12, color: theme.colorScheme.onSurfaceVariant)),
+          const SizedBox(height: 10),
+          SizedBox(
+            width: double.infinity,
+            child: FilledButton.icon(
+              style: FilledButton.styleFrom(
+                backgroundColor: AppConstants.brandColor,
+              ),
+              onPressed: onJoin,
+              icon: const Icon(Icons.connect_without_contact_rounded,
+                  size: 17),
+              label: const Text('立即加入'),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -694,15 +627,8 @@ class _RoleCard extends StatelessWidget {
                   ],
                 ),
               ),
-              if (busy)
-                const SizedBox(
-                  width: 18,
-                  height: 18,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                )
-              else
-                Icon(Icons.chevron_right_rounded,
-                    size: 22, color: theme.colorScheme.onSurfaceVariant),
+              Icon(Icons.chevron_right_rounded,
+                  size: 22, color: theme.colorScheme.onSurfaceVariant),
             ],
           ),
         ),
@@ -715,12 +641,10 @@ class _JoinCard extends StatelessWidget {
   const _JoinCard({
     required this.controller,
     required this.onJoin,
-    required this.busy,
   });
 
   final TextEditingController controller;
   final VoidCallback onJoin;
-  final bool busy;
 
   @override
   Widget build(BuildContext context) {
@@ -738,7 +662,7 @@ class _JoinCard extends StatelessWidget {
             const Text('加入一起听',
                 style: TextStyle(fontSize: 15.5, fontWeight: FontWeight.w700)),
             const SizedBox(height: 4),
-            Text('粘贴好友分享的邀请串（房间号|邀请人ID）',
+            Text('粘贴好友分享的邀请串（房间号|邀请人ID）或邀请链接',
                 style: TextStyle(
                     fontSize: 12,
                     color: Theme.of(context).colorScheme.onSurfaceVariant)),
@@ -750,7 +674,7 @@ class _JoinCard extends StatelessWidget {
                     controller: controller,
                     keyboardType: TextInputType.text,
                     decoration: InputDecoration(
-                      hintText: '例如 1873xxxxxxxxx|365xxx88',
+                      hintText: '例如 1873xxxxxxxxx|36547588',
                       isDense: true,
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(12),
@@ -764,14 +688,8 @@ class _JoinCard extends StatelessWidget {
                       backgroundColor: AppConstants.brandColor,
                       padding: const EdgeInsets.symmetric(
                           horizontal: 18, vertical: 12)),
-                  onPressed: busy ? null : onJoin,
-                  child: busy
-                      ? const SizedBox(
-                          width: 16,
-                          height: 16,
-                          child: CircularProgressIndicator(
-                              strokeWidth: 2, color: Colors.white))
-                      : const Text('加入'),
+                  onPressed: onJoin,
+                  child: const Text('加入'),
                 ),
               ],
             ),
@@ -782,7 +700,7 @@ class _JoinCard extends StatelessWidget {
   }
 }
 
-/// 房间卡：房间号 + 邀请人 + 成员列表 + 分享/复制/刷新 + 关闭/退出
+/// 房间卡：房间号 + 邀请人 + 成员列表 + 转发/复制/邀请好友 + 关闭/退出
 class _RoomCard extends StatelessWidget {
   const _RoomCard({
     required this.roomId,
@@ -791,6 +709,7 @@ class _RoomCard extends StatelessWidget {
     required this.users,
     required this.onShare,
     required this.onCopy,
+    required this.onInviteFriends,
     required this.onRefresh,
     required this.onClose,
   });
@@ -801,6 +720,7 @@ class _RoomCard extends StatelessWidget {
   final List<ListenRoomUser> users;
   final VoidCallback onShare;
   final VoidCallback onCopy;
+  final VoidCallback onInviteFriends;
   final VoidCallback onRefresh;
   final VoidCallback onClose;
 
@@ -847,16 +767,23 @@ class _RoomCard extends StatelessWidget {
                         children: <Widget>[
                           CircleAvatar(
                             radius: 18,
+                            backgroundColor: theme.colorScheme.primary
+                                .withValues(alpha: 0.14),
                             backgroundImage: u.avatarUrl.isNotEmpty
                                 ? NetworkImage(u.avatarUrl)
                                 : null,
+                            onBackgroundImageError: u.avatarUrl.isEmpty
+                                ? null
+                                : (_, __) {},
                             child: u.avatarUrl.isEmpty
                                 ? const Icon(Icons.person_rounded, size: 18)
                                 : null,
                           ),
                           const SizedBox(height: 4),
                           Text(
-                            u.nickname,
+                            u.nickname.isEmpty
+                                ? '用户${u.userId}'
+                                : u.nickname,
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: const TextStyle(fontSize: 10.5),
@@ -876,10 +803,18 @@ class _RoomCard extends StatelessWidget {
                         backgroundColor: AppConstants.brandColor),
                     onPressed: onShare,
                     icon: const Icon(Icons.share_rounded, size: 16),
-                    label: const Text('分享邀请串'),
+                    label: const Text('转发邀请'),
                   ),
                 ),
-                const SizedBox(width: 10),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: onInviteFriends,
+                    icon: const Icon(Icons.group_rounded, size: 16),
+                    label: const Text('私信邀请'),
+                  ),
+                ),
+                const SizedBox(width: 8),
                 Expanded(
                   child: OutlinedButton(
                     onPressed: onClose,
@@ -932,7 +867,7 @@ class _SyncCard extends StatelessWidget {
               children: <Widget>[
                 Expanded(
                   child: OutlinedButton.icon(
-                    onPressed: busy ? null : onSyncQueue,
+                    onPressed: onSyncQueue,
                     icon: const Icon(Icons.upload_rounded, size: 16),
                     label: const Text('同步当前队列'),
                   ),
@@ -1124,7 +1059,10 @@ class _KV extends StatelessWidget {
           ),
           if (copyable)
             GestureDetector(
-              onTap: () => PlatformActions.shareText(value),
+              onTap: () async {
+                await Clipboard.setData(ClipboardData(text: value));
+                AppNotify.success('已复制');
+              },
               child: Icon(Icons.copy_rounded,
                   size: 15,
                   color: Theme.of(context).colorScheme.onSurfaceVariant),

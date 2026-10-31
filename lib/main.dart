@@ -12,6 +12,7 @@
 /// 38 秒）；全程诊断打点落盘（设置 → 运行诊断 可查看）。
 library;
 
+import 'dart:async' show unawaited;
 import 'dart:io';
 
 import 'package:audio_service/audio_service.dart';
@@ -28,6 +29,7 @@ import 'app.dart';
 import 'core/constants/app_constants.dart';
 import 'core/utils/diag.dart';
 import 'core/widgets/cover_image.dart';
+import 'features/listen/services/deep_link_service.dart';
 import 'features/player/providers/player_providers.dart';
 import 'features/player/services/ming_audio_handler.dart';
 import 'features/settings/providers/settings_providers.dart';
@@ -148,6 +150,21 @@ Future<void> main() async {
           Diag.log('通知权限申请失败（忽略）: $e');
         }
       }();
+      // 6) 一起听邀请深链（第二十五批）：首帧后初始化，
+      // 冷启动 getInitialLink / 热启动 uriLinkStream，全链路容错不阻塞
+      () async {
+        try {
+          await DeepLinkService.init();
+          Diag.milestone('deepLink ready');
+        } catch (e) {
+          Diag.log('深链初始化失败（忽略）: $e');
+        }
+      }();
+    });
+  } else {
+    // 非 Android 平台同样初始化（桌面端 web 协议唤起，失败静默）
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      unawaited(DeepLinkService.init());
     });
   }
 }
