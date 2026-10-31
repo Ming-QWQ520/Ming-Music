@@ -199,33 +199,42 @@ class _ListenTogetherPageState extends ConsumerState<ListenTogetherPage> {
   // ---------------------------------------------------------- 控制三键
 
   Future<void> _ctrlPlay() async {
+    // 修复：先取齐全部引用再 await（旧写法在 playPause 后再用 ref，
+    // 页面已关闭时报 "Cannot use ref after the widget was disposed"，
+    // 用户日志 22:01:39 实录）
+    final PlayerNotifier player = ref.read(playerProvider.notifier);
+    final ListenRoomNotifier room = ref.read(listenRoomProvider.notifier);
     final PlayerState ps = ref.read(playerProvider);
     if (ps.playing) return;
     final int songId = ps.currentTrack?.neteaseId ?? 0;
     final int pos =
         ref.read(audioHandlerProvider).player.position.inMilliseconds;
-    await ref.read(playerProvider.notifier).playPause();
-    await ref.read(listenRoomProvider.notifier).sendManualCommand(
-          'PLAY',
-          targetSongId: songId,
-          progressMs: pos,
-          playStatus: 'PLAY',
-        );
+    await player.playPause();
+    if (!mounted) return;
+    await room.sendManualCommand(
+      'PLAY',
+      targetSongId: songId,
+      progressMs: pos,
+      playStatus: 'PLAY',
+    );
   }
 
   Future<void> _ctrlPause() async {
+    final PlayerNotifier player = ref.read(playerProvider.notifier);
+    final ListenRoomNotifier room = ref.read(listenRoomProvider.notifier);
     final PlayerState ps = ref.read(playerProvider);
     if (!ps.playing) return;
     final int songId = ps.currentTrack?.neteaseId ?? 0;
     final int pos =
         ref.read(audioHandlerProvider).player.position.inMilliseconds;
-    await ref.read(playerProvider.notifier).playPause();
-    await ref.read(listenRoomProvider.notifier).sendManualCommand(
-          'PAUSE',
-          targetSongId: songId,
-          progressMs: pos,
-          playStatus: 'PAUSE',
-        );
+    await player.playPause();
+    if (!mounted) return;
+    await room.sendManualCommand(
+      'PAUSE',
+      targetSongId: songId,
+      progressMs: pos,
+      playStatus: 'PAUSE',
+    );
   }
 
   Future<void> _ctrlSeek() async {
@@ -256,8 +265,16 @@ class _ListenTogetherPageState extends ConsumerState<ListenTogetherPage> {
     return Scaffold(
       appBar: AppBar(
         titleSpacing: 20,
-        title: const Text('一起听',
-            style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700)),
+        title: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            const Text('一起听',
+                style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700)),
+            const SizedBox(width: 6),
+            // 需求（第二十八批）：一起听整体处于 Beta 阶段，页面与面板均标注
+            _BetaBadge(),
+          ],
+        ),
         actions: <Widget>[
           // 好友入口（第二十五批：为了支持一起听新增「好友」项）
           IconButton(
@@ -419,6 +436,44 @@ class _ListenTogetherPageState extends ConsumerState<ListenTogetherPage> {
 }
 
 // ---------------------------------------------------------------- 组件
+
+/// Beta 徽标（第二十八批需求：一起听界面增加 Beta 字样）。
+/// 一起听页面与面板头部共用；描边胶囊样式，随主题色不抢主标题。
+class ListenBetaBadge extends StatelessWidget {
+  const ListenBetaBadge({super.key, this.fontSize = 9.5});
+
+  final double fontSize;
+
+  @override
+  Widget build(BuildContext context) {
+    final ColorScheme cs = Theme.of(context).colorScheme;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: cs.primary.withValues(alpha: 0.55)),
+        color: cs.primary.withValues(alpha: 0.08),
+      ),
+      child: Text(
+        'Beta',
+        style: TextStyle(
+          fontSize: fontSize,
+          height: 1.25,
+          fontWeight: FontWeight.w700,
+          letterSpacing: 0.3,
+          color: cs.primary.withValues(alpha: 0.95),
+        ),
+      ),
+    );
+  }
+}
+
+class _BetaBadge extends StatelessWidget {
+  const _BetaBadge();
+
+  @override
+  Widget build(BuildContext context) => ListenBetaBadge();
+}
 
 class _AccountCard extends StatelessWidget {
   const _AccountCard({

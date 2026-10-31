@@ -22,6 +22,7 @@ import '../../../core/widgets/sheet_host.dart' show GlassSheet, showMingSheet;
 import '../../../core/widgets/user_avatar.dart'
     show UserAvatar, avatarDisplayName;
 import '../../auth/presentation/login_sheet.dart' show showLoginSheet;
+import 'listen_together_page.dart' show ListenBetaBadge;
 import '../providers/listen_room_provider.dart';
 import '../services/listen_together_service.dart' show ListenRoomUser;
 
@@ -177,9 +178,17 @@ class _ListenRoomSheetState extends ConsumerState<_ListenRoomSheet> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: <Widget>[
-                          const Text('一起听',
-                              style: TextStyle(
-                                  fontSize: 17, fontWeight: FontWeight.w800)),
+                          Row(
+                            children: <Widget>[
+                              const Text('一起听',
+                                  style: TextStyle(
+                                      fontSize: 17,
+                                      fontWeight: FontWeight.w800)),
+                              const SizedBox(width: 6),
+                              // 需求（第二十八批）：面板标题同样标注 Beta
+                              const ListenBetaBadge(),
+                            ],
+                          ),
                           Text(
                             st.inRoom
                                 ? (st.phase == ListenRoomPhase.host

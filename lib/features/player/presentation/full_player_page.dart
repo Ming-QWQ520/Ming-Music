@@ -1833,6 +1833,11 @@ class _ProgressSection extends ConsumerWidget {
       child: PlayerProgressBar(
         // 仿网易云：进度行中央为音质标签（可点击弹音质选择）
         centerLabel: const _QualityButton(),
+        // 二十八批：一起听房内松手拖动进度立即上报 PROGRESS 给房间
+        //（「任何操作都要立即同步」；29批 provider 重补 reportSeekNow）
+        onSeeked: (Duration pos) {
+          ref.read(listenRoomProvider.notifier).reportSeekNow();
+        },
       ),
     );
   }

@@ -4,7 +4,7 @@
 ///  - 我的页「私信」磁贴副标题读未读总数（keepAlive，应用启动即拉一次）。
 library;
 
-import 'dart:async' show unawaited;
+import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -75,7 +75,11 @@ class ConversationsState {
 class ConversationsNotifier extends Notifier<ConversationsState> {
   @override
   ConversationsState build() {
-    unawaited(load());
+    // Future.microtask 延迟到 build 返回后再加载。修复：build 内同步调
+    // load() 会在 provider 初始化完成前读 state，riverpod 抛
+    // 「Tried to read the state of an uninitialized provider」
+    //（用户日志 21:47:57 / 21:56:27 两次实录）。
+    Future.microtask(() => load());
     return const ConversationsState();
   }
 

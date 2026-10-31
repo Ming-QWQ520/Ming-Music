@@ -28,12 +28,17 @@ import '../../../../core/utils/duration_utils.dart';
 import '../../providers/player_providers.dart';
 
 class PlayerProgressBar extends ConsumerStatefulWidget {
-  const PlayerProgressBar({super.key, this.compact = false, this.centerLabel});
+  const PlayerProgressBar(
+      {super.key, this.compact = false, this.centerLabel, this.onSeeked});
 
   final bool compact;
 
   /// 进度行中央标签（仿网易云：音质标识）
   final Widget? centerLabel;
+
+  /// 松手提交 seek 后回调（第二十八批：一起听房内立即上报 PROGRESS，
+  /// 不等播放状态变化监听）
+  final void Function(Duration position)? onSeeked;
 
   @override
   ConsumerState<PlayerProgressBar> createState() => _PlayerProgressBarState();
@@ -77,7 +82,9 @@ class _PlayerProgressBarState extends ConsumerState<PlayerProgressBar> {
       _previewMs = null;
     });
     if (v != null) {
-      ref.read(playerProvider.notifier).seek(Duration(milliseconds: v.round()));
+      final Duration pos = Duration(milliseconds: v.round());
+      ref.read(playerProvider.notifier).seek(pos);
+      widget.onSeeked?.call(pos);
     }
   }
 
