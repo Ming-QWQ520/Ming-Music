@@ -13,6 +13,7 @@ import '../data/netease_auth_repository.dart' show QrStatus;
 import '../providers/auth_providers.dart';
 import '../../../core/widgets/sheet_host.dart' show showMingSheet;
 
+import '../../../core/widgets/app_notify.dart';
 /// 全局登录入口：弹出底部登录面板
 Future<void> showLoginSheet(BuildContext context) {
   return showMingSheet<void>(
@@ -107,7 +108,7 @@ class _LoginSheetState extends ConsumerState<LoginSheet>
   }
 
   void _toast(String msg) {
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+    AppNotify.show(msg);
   }
 
   @override

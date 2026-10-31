@@ -418,6 +418,14 @@ const double _kRowHPadding = 28;
 ///  - 模糊（lyricBlur）保留为统一额外模糊，默认 0 = 关闭；
 ///  - 当前播放行永不受影响（active 时直通）。
 /// RepaintBoundary 隔离模糊层，避免滚动时全列表重绘。
+/// 需求（第二十四批）：歌词切行平滑曲线 —— 活动行⇄非活跃行的
+/// 淡出/模糊过渡改为 320ms easeOutCubic 动画（旧实现瞬时跳变，
+/// 切行瞬间亮度/模糊阶梯式突变；现新行缓缓点亮、旧行缓缓淡出）。
+///
+/// 实现说明：TweenAnimationBuilder 以 `end = active ? 0 : 1` 驱动动画值
+/// t；[edgeT]（滚动边界接近度）仍随滚动逐帧变化 —— 父组件重建时
+/// TweenAnimationBuilder 以当前动画值重跑 builder（end 未变则不重启
+/// 动画），滚动实时性与切换平滑性互不干扰。
 Widget _applyInactiveEffect(
   Widget child, {
   required double fade,
@@ -425,37 +433,45 @@ Widget _applyInactiveEffect(
   required bool active,
   double edgeT = 0,
 }) {
-  if (active) return child;
-  Widget result = child;
-  // 边界扩散模糊（淡出主体，滑杆唯一作用点）+ 统一额外模糊（设置项，默认 0）
-  // 需求：非活跃行模糊最高 1.5px（边界扩散 + 额外模糊合计上限，
-  // 旧总上限 4.5/边界 3.4 收敛到 1.5）
-  final double fadeV = fade.clamp(0.0, 1.0);
-  final double edgeSigma = edgeT.clamp(0.0, 1.0) * 1.5 * fadeV;
-  final double sigma = (blur.clamp(0.0, 1.5) + edgeSigma).clamp(0.0, 1.5);
-  if (sigma > 0.02) {
-    result = RepaintBoundary(
-      child: ImageFiltered(
-        imageFilter: ui.ImageFilter.blur(
-          sigmaX: sigma,
-          sigmaY: sigma,
-          tileMode: ui.TileMode.decal,
-        ),
-        child: result,
-      ),
-    );
-  }
-  // 第十六批修复：非活跃行基线压暗恒定，不随淡出滑杆变化 ——
-  // 滑杆为 0 时非活跃行不再亮回全白（用户报「同色同亮」的根因）；
-  // 越贴边越透的边缘衰减保留（只更暗，不变亮）
-  // 需求：默认非活跃行淡出改为 40%（0.45 → 0.40）
-  const double baseAlpha = 0.40;
-  final double edgeAlpha = 1 - edgeT.clamp(0.0, 1.0) * 0.25 * fadeV;
-  final double alpha = (baseAlpha * edgeAlpha).clamp(0.0, 1.0);
-  if (alpha < 1.0) {
-    result = Opacity(opacity: alpha, child: result);
-  }
-  return result;
+  return TweenAnimationBuilder<double>(
+    tween: Tween<double>(end: active ? 0 : 1),
+    duration: const Duration(milliseconds: 320),
+    curve: Curves.easeOutCubic,
+    child: child,
+    builder: (BuildContext context, double t, Widget? cached) {
+      final Widget content = cached ?? child;
+      if (t <= 0.01) return content; // 活动行：全亮、无模糊
+      final double fadeV = fade.clamp(0.0, 1.0);
+      // 边界扩散模糊（淡出主体，滑杆唯一作用点）+ 统一额外模糊（设置项，
+      // 默认 0）；需求：非活跃行模糊最高 1.5px，整体随动画值 t 渐入
+      final double edgeSigma = edgeT.clamp(0.0, 1.0) * 1.5 * fadeV;
+      final double sigma =
+          ((blur.clamp(0.0, 1.5) + edgeSigma) * t).clamp(0.0, 1.5);
+      Widget result = content;
+      if (sigma > 0.02) {
+        result = RepaintBoundary(
+          child: ImageFiltered(
+            imageFilter: ui.ImageFilter.blur(
+              sigmaX: sigma,
+              sigmaY: sigma,
+              tileMode: ui.TileMode.decal,
+            ),
+            child: result,
+          ),
+        );
+      }
+      // 第十六批修复：非活跃行基线压暗恒定（不随淡出滑杆变化），
+      // 越贴边越透的边缘衰减保留；透明度随动画值 t 渐入渐出
+      const double baseAlpha = 0.40;
+      final double edgeAlpha = 1 - edgeT.clamp(0.0, 1.0) * 0.25 * fadeV;
+      final double alpha =
+          (1 - (1 - baseAlpha * edgeAlpha) * t).clamp(0.0, 1.0);
+      if (alpha < 0.999) {
+        result = Opacity(opacity: alpha, child: result);
+      }
+      return result;
+    },
+  );
 }
 
 // ---------------------------------------------------------------- 逐字行
@@ -880,15 +896,16 @@ class _LrcRowState extends ConsumerState<_LrcRow> {
     );
 
     // 第十五批需求：非活跃行淡出 = 边界向当前行扩散的轻模糊感
-    if (!widget.active) {
-      rowContent = _applyInactiveEffect(
-        rowContent,
-        fade: widget.fade,
-        blur: widget.blur,
-        active: false,
-        edgeT: widget.edgeT,
-      );
-    }
+    // 需求（第二十四批）：恒定包裹（active 交给效果函数内部动画）——
+    // 旧实现仅在 !active 时包裹，行变活跃瞬间效果层直接摘除产生跳变；
+    // 现在「点亮/淡出」双向均走 320ms easeOutCubic 曲线
+    rowContent = _applyInactiveEffect(
+      rowContent,
+      fade: widget.fade,
+      blur: widget.blur,
+      active: widget.active,
+      edgeT: widget.edgeT,
+    );
 
     return GestureDetector(
       behavior: HitTestBehavior.opaque,

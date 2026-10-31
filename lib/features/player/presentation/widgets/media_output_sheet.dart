@@ -23,6 +23,7 @@ import '../../providers/player_providers.dart';
 import '../../../../core/widgets/sheet_host.dart'
     show GlassSheet, showMingSheet;
 
+import '../../../../core/widgets/app_notify.dart';
 /// 输出模式：auto = 跟随系统（连接蓝牙自动切蓝牙）；speaker = 强制扬声器；
 /// bluetooth = 强制蓝牙（deviceId 定位具体设备）。
 enum AudioOutputMode { auto, speaker, bluetooth }
@@ -115,9 +116,7 @@ class _MediaOutputSheetState extends ConsumerState<_MediaOutputSheet> {
     if (!mounted) return;
     setState(() => _switching = false);
     if (!ok) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('当前设备不支持手动切换，已恢复系统自动路由')),
-      );
+      AppNotify.show('当前设备不支持手动切换，已恢复系统自动路由');
       ref.read(audioOutputModeProvider.notifier).state = AudioOutputMode.auto;
     }
   }
@@ -147,9 +146,7 @@ class _MediaOutputSheetState extends ConsumerState<_MediaOutputSheet> {
       await _mediaChannel.sendOpenBluetoothSettings();
     } catch (_) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('无法打开系统蓝牙设置')),
-        );
+        AppNotify.show('无法打开系统蓝牙设置');
       }
     }
   }

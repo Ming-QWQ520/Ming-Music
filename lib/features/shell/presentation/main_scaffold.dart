@@ -35,6 +35,7 @@ import '../../player/providers/player_providers.dart';
 import '../../settings/presentation/widgets/update_dialog.dart';
 import '../../settings/services/app_update_service.dart';
 
+import '../../../core/widgets/app_notify.dart';
 /// 当前 Tab
 final NotifierProvider<TabNotifier, int> selectedTabProvider =
     NotifierProvider<TabNotifier, int>(TabNotifier.new);
@@ -75,14 +76,8 @@ class _MainScaffoldState extends ConsumerState<MainScaffold> {
       return;
     }
     _lastBackAt = now;
-    ScaffoldMessenger.of(context).hideCurrentSnackBar();
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('再按一次退出应用'),
-        duration: Duration(milliseconds: 1600),
-        behavior: SnackBarBehavior.floating,
-      ),
-    );
+    // 需求（第二十四批）：应用内通知（SnackBar 已全面移除，无需 hide）
+    AppNotify.show('再按一次退出应用');
   }
 
   @override

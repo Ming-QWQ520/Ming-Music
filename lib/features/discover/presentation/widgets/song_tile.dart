@@ -1,7 +1,10 @@
-/// 歌曲条目组件：封面/序号 + 标题 + VIP 徽章 + 副标题。
+/// 歌曲条目组件：封面/序号 + 标题 + 副标题（歌手 + VIP 徽章）。
 /// 需求：所有歌曲支持长按弹出统一操作菜单（onLongPress）；
 /// 需求修正「无缓存暗淡」：仅无网且未缓存时整行暗淡（歌名/歌手/VIP/封面），
 /// 有网一律正常；正在播放行保持红色高亮不受暗淡影响。
+/// 需求（第二十四批）：① VIP 徽章从歌名右侧移至歌手名称右侧
+/// （歌名下方副标题行尾）；② 可选爱心喜欢键（showLike），置于三点
+/// 菜单键左侧，红心态实时跟随 authProvider.likedIds。
 library;
 
 import 'package:flutter/material.dart';
@@ -9,7 +12,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/api/netease_models.dart';
 import '../../../../core/constants/app_constants.dart';
+import '../../../../core/widgets/app_notify.dart';
 import '../../../../core/widgets/cover_image.dart';
+import '../../../auth/providers/auth_providers.dart';
 import '../../../player/providers/cache_providers.dart'
     show cachedSongIdsProvider, networkAvailableProvider;
 
@@ -56,6 +61,7 @@ class SongTile extends ConsumerWidget {
     this.onMore,
     this.playing = false,
     this.trailing,
+    this.showLike = false,
   });
 
   final Song song;
@@ -77,6 +83,9 @@ class SongTile extends ConsumerWidget {
 
   /// 行尾自定义组件（替代三点按钮，如播放列表弹窗的删除/拖动）
   final Widget? trailing;
+
+  /// 需求（第二十四批）：三点菜单左侧爱心喜欢键（搜索页等场景开启）
+  final bool showLike;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -114,6 +123,44 @@ class SongTile extends ConsumerWidget {
                 onPressed: onMore,
               )
             : null);
+    // 需求（第二十四批）：爱心喜欢键（三点菜单左侧）—— 红心态取自
+    // authProvider.likedIds；未登录点击提示先登录，成功/取消均弹
+    // 应用内通知反馈
+    final AuthState auth = showLike
+        ? ref.watch(authProvider)
+        : const AuthState(status: AuthStatus.guest);
+    final bool liked =
+        showLike && auth.loggedIn && auth.likedIds.contains(song.id);
+
+    Future<void> toggleLike() async {
+      if (song.id <= 0) return;
+      if (!auth.loggedIn) {
+        AppNotify.show('请先登录网易云音乐');
+        return;
+      }
+      final String? err =
+          await ref.read(authProvider.notifier).toggleLikeSong(song.id);
+      if (err != null && err.isNotEmpty) {
+        AppNotify.error(err);
+      }
+    }
+
+    final Widget? likeWidget = showLike
+        ? IconButton(
+            icon: Icon(
+              liked ? Icons.favorite_rounded : Icons.favorite_border_rounded,
+              color: liked
+                  ? AppConstants.brandColor
+                  : theme.colorScheme.onSurfaceVariant,
+              size: 21,
+            ),
+            visualDensity: VisualDensity.compact,
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+            constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+            tooltip: liked ? '取消喜欢' : '喜欢',
+            onPressed: toggleLike,
+          )
+        : null;
 
     return InkWell(
       onTap: onPlay,
@@ -155,6 +202,26 @@ class SongTile extends ConsumerWidget {
                           ),
                         ),
                       ),
+                    ],
+                  ),
+                  const SizedBox(height: 3),
+                  // 需求（第二十四批）：VIP 徽章移至歌手名称右侧
+                  // （歌名下方副标题行尾；徽章不与超长歌手/专辑文案争宽）
+                  Row(
+                    children: <Widget>[
+                      Expanded(
+                        child: Text(
+                          song.album.isEmpty
+                              ? song.artists
+                              : '${song.artists} · ${song.album}',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: subtitleColor,
+                            fontSize: 12.5,
+                          ),
+                        ),
+                      ),
                       if (song.isVipOnly) ...<Widget>[
                         const SizedBox(width: 6),
                         Opacity(
@@ -164,21 +231,10 @@ class SongTile extends ConsumerWidget {
                       ],
                     ],
                   ),
-                  const SizedBox(height: 3),
-                  Text(
-                    song.album.isEmpty
-                        ? song.artists
-                        : '${song.artists} · ${song.album}',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      color: subtitleColor,
-                      fontSize: 12.5,
-                    ),
-                  ),
                 ],
               ),
             ),
+            if (likeWidget != null) likeWidget,
             if (endWidget != null) endWidget,
           ],
         ),

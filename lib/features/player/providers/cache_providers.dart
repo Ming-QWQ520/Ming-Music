@@ -35,41 +35,77 @@ final StreamProvider<bool> networkAvailableProvider =
 ///
 /// 需求（第二十一批）：数据缓存中的歌曲缓存需要显示歌曲名称、歌手名称
 /// 和封面（200x200）—— 旧版本缓存没有落盘展示元信息（只显示「歌曲 id /
-/// 元信息未记录」），本层检测到元信息缺失时经 /song/detail 批量回填
-/// （歌名/歌手/封面归一 200x200 后写入 meta.json），下次直读不再请求；
-/// 离线回填失败保持原状不阻断列表。
+/// 元信息未记录」），本层检测到元信息缺失时批量回填（歌名/歌手/封面
+/// 归一 200x200 后写入 meta.json），下次直读不再请求；
+/// 需求（第二十四批）：回填改两段式多源 —— 服务端 /song/detail 为
+/// 主源，失败/未命中的 id 再走官方旧版公开详情（music.163.com 匿名
+/// 明文 GET）兜底，离线双源皆败保持原状不阻断列表；
+/// 落盘写入经 saveEntryMeta 字段合并保护（非空优先）+ 原子 rename，
+/// 并发回填不再互相抹除或写坏 meta.json。
 final FutureProvider<List<CacheEntry>> cacheEntriesProvider =
     FutureProvider<List<CacheEntry>>((Ref ref) async {
   final SongCacheService cache = ref.watch(songCacheProvider);
   List<CacheEntry> entries = await cache.listEntries();
+
+  // 单段回填：sources 任一命中即写入；返回仍缺信息的 id 集合
+  Future<Set<int>> backfill(Set<int> ids, Future<List<Song>> Function(List<int>) fetch) async {
+    final List<Song> songs = await fetch(ids.toList());
+    final Set<int> unresolved = <int>{...ids};
+    for (final Song s in songs) {
+      final String cover = SongCacheService.normalizeCover200(s.coverUrl);
+      // 同一歌曲可能存在多档音质缓存条目，元信息一并补齐
+      for (final CacheEntry e in entries) {
+        if (e.songId != s.id) continue;
+        final bool needTitle = e.title.isEmpty && s.name.isNotEmpty;
+        final bool needArtist = e.artist.isEmpty && s.artists.isNotEmpty;
+        final bool needCover = e.cover.isEmpty && cover.isNotEmpty;
+        if (!needTitle && !needArtist && !needCover) continue;
+        await cache.saveEntryMeta(
+          e.songId,
+          e.level,
+          title: needTitle ? s.name : '',
+          artist: needArtist ? s.artists : '',
+          cover: needCover ? cover : '',
+        );
+      }
+      // 至少拿到一个非空字段即视为已解决（下次列表不再重复拉取）
+      if (s.name.isNotEmpty || s.artists.isNotEmpty || cover.isNotEmpty) {
+        unresolved.remove(s.id);
+      }
+    }
+    return unresolved;
+  }
 
   final Set<int> missing = <int>{
     for (final CacheEntry e in entries)
       if (e.title.isEmpty || e.artist.isEmpty || e.cover.isEmpty) e.songId,
   };
   if (missing.isNotEmpty) {
+    Set<int> rest = missing;
     try {
-      final List<Song> songs = await ref
-          .read(neteaseRepositoryProvider)
-          .songDetails(missing.toList());
-      for (final Song s in songs) {
-        final String cover = SongCacheService.normalizeCover200(s.coverUrl);
-        // 同一歌曲可能存在多档音质缓存条目，元信息一并补齐
-        for (final CacheEntry e in entries) {
-          if (e.songId != s.id) continue;
-          await cache.saveEntryMeta(
-            e.songId,
-            e.level,
-            title: s.name,
-            artist: s.artists,
-            cover: cover,
-          );
-        }
-      }
-      entries = await cache.listEntries();
+      rest = await backfill(missing,
+          (List<int> ids) => ref.read(neteaseRepositoryProvider).songDetails(ids));
     } catch (_) {
-      // 回填失败（离线/接口异常）：按原条目展示
+      // 主源整体失败：全部交给备用源
     }
+    if (rest.isNotEmpty) {
+      try {
+        await backfill(rest, (List<int> ids) async {
+          final List<Song> out = <Song>[];
+          // 官方旧版接口无批量上限但保守分批（≤50/批）
+          for (int i = 0; i < ids.length; i += 50) {
+            final List<int> chunk =
+                ids.sublist(i, (i + 50).clamp(0, ids.length));
+            out.addAll(
+                await ref.read(neteaseRepositoryProvider).songDetailsViaOfficial(chunk));
+          }
+          return out;
+        });
+      } catch (_) {
+        // 备用源也失败（离线/风控）：按原条目展示
+      }
+    }
+    entries = await cache.listEntries();
   }
   return entries;
 });

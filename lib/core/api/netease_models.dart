@@ -1071,6 +1071,42 @@ class KeywordSuggest {
       recs: const <String>[],
     );
   }
+
+  /// 需求（第二十四批）：web 联想**仅取实体** —— 每分组第 0 条：
+  /// 第 0 首歌 → 直 hit 歌曲卡、第 0 位歌手 → 歌手卡；不生成任何
+  /// 类型徽标词行（补全词主列表由 /search/suggest/mobile 提供，
+  /// 与官方 App 同源，见 NeteaseRepository.searchKeywordSuggest）。
+  /// 官方 /api/search/suggest/web 与服务代理 /search/suggest 同构。
+  static KeywordSuggest entitiesFromWebSuggest(
+      Map<String, Object?> res, String kw) {
+    final Object? r = res['result'];
+    if (r is! Map<String, Object?>) return const KeywordSuggest();
+    Song? hitSong;
+    SearchArtist? hitArtist;
+    final List<Object?> order =
+        (r['order'] as List<Object?>?) ?? const <Object?>[];
+    for (final Object? g in order) {
+      if (g is! String) continue;
+      final List<Object?>? items = r[g] as List<Object?>?;
+      if (items == null || items.isEmpty) continue;
+      final Object? first = items.first;
+      if (first is! Map<String, Object?>) continue;
+      // 歌曲块优先于歌手块（判定不可调换，与联想指南 3.3 一致）
+      if (g == 'songs' && hitSong == null) {
+        final Song s = Song.fromCloudJson(first);
+        if (s.id != 0) hitSong = s;
+      } else if (g == 'artists' && hitArtist == null) {
+        final SearchArtist a = SearchArtist.fromJson(first);
+        if (a.id != 0) hitArtist = a;
+      }
+    }
+    return KeywordSuggest(
+      songs: hitSong == null ? const <Song>[] : <Song>[hitSong],
+      artists: hitArtist == null
+          ? const <SearchArtist>[]
+          : <SearchArtist>[hitArtist],
+    );
+  }
 }
 
 // ---------------------------------------------------------------- 搜索分类结果

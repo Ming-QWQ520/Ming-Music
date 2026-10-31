@@ -14,6 +14,7 @@ import '../../player/providers/player_providers.dart';
 import '../data/netease_providers.dart' show neteaseRepositoryProvider;
 import 'widgets/song_actions_sheet.dart';
 
+import '../../../core/widgets/app_notify.dart';
 class ArtistSongsPage extends ConsumerStatefulWidget {
   const ArtistSongsPage({
     super.key,
@@ -154,8 +155,7 @@ class _ArtistSongsPageState extends ConsumerState<ArtistSongsPage> {
       final String? error = await notifier.playSimilarNext(song.toTrack());
       if (!mounted) return;
       if (error != null) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text(error)));
+        AppNotify.show(error);
       }
     } else {
       await notifier

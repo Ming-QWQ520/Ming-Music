@@ -58,6 +58,7 @@ import 'widgets/quality_sheet.dart';
 import 'widgets/queue_sheet.dart';
 import 'widgets/similar_songs_sheet.dart';
 
+import '../../../core/widgets/app_notify.dart';
 class FullPlayerPage extends ConsumerStatefulWidget {
   const FullPlayerPage({super.key});
 
@@ -133,9 +134,7 @@ class _FullPlayerPageState extends ConsumerState<FullPlayerPage> {
     ref.listen<String?>(playerProvider.select((PlayerState s) => s.error),
         (String? prev, String? next) {
       if (next != null && next.isNotEmpty) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(next)),
-        );
+        AppNotify.show(next);
         ref.read(playerProvider.notifier).clearError();
       }
     });
@@ -878,8 +877,7 @@ class _InfoSectionState extends ConsumerState<_InfoSection> {
         await ref.read(authProvider.notifier).toggleLikeSong(songId);
     if (!mounted) return;
     if (error != null) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text(error)));
+      AppNotify.show(error);
     }
   }
 
@@ -2135,8 +2133,7 @@ class _DownloadStripButtonState extends ConsumerState<_DownloadStripButton> {
               final DownloadResult r = await downloadTrack(ref, track);
               if (!context.mounted) return;
               setState(() => _busy = false);
-              ScaffoldMessenger.of(context)
-                  .showSnackBar(SnackBar(content: Text(r.message)));
+              AppNotify.show(r.message);
             },
     );
   }

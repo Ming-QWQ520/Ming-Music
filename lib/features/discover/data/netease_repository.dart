@@ -227,22 +227,66 @@ class NeteaseRepository {
     }
   }
 
-  /// 搜索联想词（需求第二十三批：按用户提供的 API 项目「联想演示」
-  /// 完整使用方法实现 —— 数据源为官方明文接口
-  /// GET https://music.163.com/api/search/suggest/web?s=关键词&limit=8，
-  /// 分组式结构（result.order + songs/artists/albums/playlists/mvis/
-  /// djRadios），原生客户端直连无跨域限制、匿名可用、无需 cookie。
+  /// 搜索联想词（需求第二十四批：对齐官方 App 观感 —— 用户对比截图
+  /// screen.png/our vs screen2.netease 后修正）：
   ///
-  /// 渲染与调用节奏对齐演示页 suggest-standalone.html：
-  ///  - result.order 顺序驱动；songs 第 0 条 → 歌曲卡、artists 第 0 条 →
-  ///    歌手卡，其余条目 → 类型徽标联想词行（KeywordSuggest.fromWebSuggest）；
-  ///  - 450ms 防抖 + 竞态保护在搜索页实现；
-  ///  - 三层容错：官方直连失败 → 服务代理 /search/suggest（同构分组）→
-  ///    mobile 联想词（仅词，末路兜底）。
+  /// 主列表 = /search/suggest/mobile 的**官方补全词**（与网易云 App 完全
+  /// 同源：如「如果呢DJ」「如果呢 郑润泽」「如果呢0.8」，自带
+  /// highLightInfo 分段，红色高亮命中前缀，无类型徽标）；
+  /// web 联想（官方直连 → 服务代理）并行只取**实体**：第 0 首歌 →
+  /// 直 hit 歌曲卡、第 0 位歌手 → 歌手卡 —— 不再把歌名/专辑名转成
+  /// 类型徽标词行（第二十三批按联想演示页渲染徽标行，与官方 App 的
+  /// 纯补全词列表不符，本次为修正点）。
+  ///
+  /// 调用节奏：450ms 防抖 + 竞态保护在搜索页实现（演示页同款）。
   Future<KeywordSuggest> searchKeywordSuggest(String keyword) async {
     final String kw = keyword.trim();
     if (kw.isEmpty) return const KeywordSuggest();
-    // ① 官方直连（演示同款，匿名明文 GET）
+    final List<KeywordSuggest> parts =
+        await Future.wait(<Future<KeywordSuggest>>[
+      _mobileKeywordSuggest(kw), // ① 补全词主列表（网易云 App 同源）
+      _webSuggestEntities(kw), // ② 实体卡（直 hit 歌曲卡 + 歌手卡）
+    ]);
+    final KeywordSuggest mobile = parts[0];
+    final KeywordSuggest web = parts[1];
+
+    // 直 hit 卡：mobile entity_card 优先（部分登录态返回），否则用
+    // web 第 0 首歌构造（封面缺失已回填）
+    SuggestWord? hit = mobile.directHit;
+    final Song? webSong = web.songs.isEmpty ? null : web.songs.first;
+    if ((hit == null || hit.directHit == null) && webSong != null) {
+      hit = SuggestWord(
+        keyword: webSong.name,
+        segments: SuggestWord.clientHighlight(webSong.name, kw),
+        directHit: webSong,
+      );
+    }
+    List<SuggestWord> words = mobile.words;
+    // 词行首条与直 hit 歌曲同名 → 并入顶部卡片（官方 App 观感：
+    // 「如果呢」成为卡片，词列表从「如果呢❤️/如果呢伴奏」等开始）
+    if (hit != null &&
+        words.isNotEmpty &&
+        words.first.keyword == hit.keyword) {
+      words = words.sublist(1);
+    }
+    // mobile 也失败 → 退回 web 分组徽标词行（老观感），联想永远有内容
+    if (words.isEmpty && mobile.recs.isEmpty && hit == null) {
+      return web;
+    }
+    return KeywordSuggest(
+      directHit: hit,
+      songs: const <Song>[],
+      artists: web.artists,
+      words: words,
+      recTitle: mobile.recTitle,
+      recs: mobile.recs,
+    );
+  }
+
+  /// web 联想实体提取（官方直连 → 服务代理两层容错）：每分组仅取
+  /// 第 0 条构造实体卡，不生成词行；歌曲封面缺失经 /song/detail 回填。
+  Future<KeywordSuggest> _webSuggestEntities(String kw) async {
+    // ① 官方直连（联想演示同款，匿名明文 GET）
     try {
       final Map<String, Object?> res = await _officialGet(
         'music.163.com',
@@ -250,30 +294,44 @@ class NeteaseRepository {
         <String, String>{'s': kw, 'limit': '8'},
       );
       if (res['result'] is Map<String, Object?>) {
-        return KeywordSuggest.fromWebSuggest(res, kw);
+        return await _fillEntityCovers(
+            KeywordSuggest.entitiesFromWebSuggest(res, kw));
       }
     } catch (_) {
       // 官方直连失败（网络受限/风控）：走服务代理
     }
-    // ② 服务代理兜底（NeteaseCloudMusicApi /search/suggest —— 同为官方
-    //    web 联想的分组式结构，keywords 参数）
+    // ② 服务代理兜底（NeteaseCloudMusicApi /search/suggest —— 同为
+    //    官方 web 联想的分组式结构，keywords 参数）
     try {
       final Map<String, Object?> res = await _api.get(
         '/search/suggest',
         <String, String>{'keywords': kw},
       );
       if (res['result'] is Map<String, Object?>) {
-        return KeywordSuggest.fromWebSuggest(res, kw);
+        return await _fillEntityCovers(
+            KeywordSuggest.entitiesFromWebSuggest(res, kw));
       }
     } catch (_) {
-      // 代理也失败：走 mobile 联想词
+      // 代理也失败：返回空包（词行仍由 mobile 主列表提供）
     }
-    // ③ 末路兜底：mobile 联想（仅关键词行，无实体卡）
-    return _mobileKeywordSuggest(kw);
+    return const KeywordSuggest();
   }
 
-  /// mobile 联想词（App 移动端文档接口；仅返回关键词行，无实体卡，
-  /// 末路兜底用）；失败返回空包不抛异常
+  /// 实体卡封面回填（直 hit 歌曲卡的 album.picUrl 经常缺失）
+  Future<KeywordSuggest> _fillEntityCovers(KeywordSuggest s) async {
+    if (s.songs.isEmpty) return s;
+    final List<Song> filled = await _fillMissingCovers(s.songs);
+    return KeywordSuggest(
+      directHit: s.directHit,
+      songs: filled,
+      artists: s.artists,
+      words: s.words,
+    );
+  }
+
+  /// mobile 联想词（需求第二十四批：升格为联想**主列表** —— 与网易云
+  /// App 同源的官方补全词，含 highLightInfo 分段/图标/标签；失败返回
+  /// 空包不抛异常）
   Future<KeywordSuggest> _mobileKeywordSuggest(String kw) async {
     try {
       return _parseKeywordSuggest(await _api.get(
@@ -404,6 +462,30 @@ class NeteaseRepository {
       if (s.id != 0) out.add(s);
     }
     return out;
+  }
+
+  /// 热门歌手（/top/artists → 顶层 artists[]，实测 musicapi 返回
+  /// {code, more, artists}；需求第二十四批：发现页扩充「热门歌手」
+  /// 头像横滑板块 —— 对齐网易云首页「艺人热门金曲」板块入口）
+  Future<List<SearchArtist>> topArtists({int limit = 20}) async {
+    final Map<String, Object?> res =
+        await _api.get('/top/artists', <String, String>{'limit': '$limit'});
+    final Map<String, Object?> payload = apiPayload(res);
+    // 兼容两种包裹：顶层 artists[]（实测）与 result.artists[]（文档）
+    for (final Map<String, Object?> src in <Map<String, Object?>>[
+      payload,
+      if (payload['result'] is Map<String, Object?>)
+        payload['result']! as Map<String, Object?>,
+    ]) {
+      final Object? list = src['artists'];
+      if (list is! List<Object?>) continue;
+      return list
+          .whereType<Map<String, Object?>>()
+          .map(SearchArtist.fromJson)
+          .where((SearchArtist a) => a.id > 0)
+          .toList(growable: false);
+    }
+    return const <SearchArtist>[];
   }
 
   /// 新歌速递（/top/song → data[]；type: 0全部 7华语 96欧美 8日本 16韩国）
@@ -628,6 +710,22 @@ class NeteaseRepository {
     if (ids.isEmpty) return const <Song>[];
     final Map<String, Object?> res =
         await _api.get('/song/detail', <String, String>{'ids': ids.join(',')});
+    return _songsFrom(res['songs']);
+  }
+
+  /// 需求（第二十四批）缓存页多源回填备用源：官方旧版公开歌曲详情
+  /// （明文 GET，匿名可用，返回 legacy 字段 name/artists/album，与
+  /// fromCloudJson 兼容）。服务端 /song/detail 偶发脱敏/失败时兜底。
+  Future<List<Song>> songDetailsViaOfficial(List<int> ids) async {
+    if (ids.isEmpty) return const <Song>[];
+    final Map<String, Object?> res = await _officialGet(
+      'music.163.com',
+      '/api/song/detail',
+      <String, String>{
+        'id': ids.first.toString(),
+        'ids': '[${ids.join(',')}]',
+      },
+    );
     return _songsFrom(res['songs']);
   }
 

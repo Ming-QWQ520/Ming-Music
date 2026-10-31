@@ -22,6 +22,7 @@ import '../../discover/presentation/widgets/song_actions_sheet.dart';
 import '../../library/domain/track.dart';
 import '../../player/providers/player_providers.dart';
 
+import '../../../core/widgets/app_notify.dart';
 class CloudDrivePage extends ConsumerStatefulWidget {
   const CloudDrivePage({super.key});
 
@@ -68,14 +69,12 @@ class _CloudDrivePageState extends ConsumerState<CloudDrivePage> {
     try {
       await ref.read(neteaseRepositoryProvider).cloudDelete(item.song.id);
       if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('已删除')));
+      AppNotify.show('已删除');
       await _refresh();
     } catch (e) {
       if (!mounted) return;
       setState(() => _deletingId = null);
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('删除失败：$e')));
+      AppNotify.show('删除失败：$e');
     }
   }
 
@@ -299,16 +298,14 @@ class _CloudDrivePageState extends ConsumerState<CloudDrivePage> {
     }
     if (!granted) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('需要「音频」权限以上传本地音乐')));
+      AppNotify.show('需要「音频」权限以上传本地音乐');
       return;
     }
     final List<Map<String, Object?>> files =
         await PlatformActions.localAudioFiles();
     if (!mounted) return;
     if (files.isEmpty) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('未扫描到本地音乐')));
+      AppNotify.show('未扫描到本地音乐');
       return;
     }
     await showMingSheet<void>(
@@ -328,8 +325,7 @@ class _CloudDrivePageState extends ConsumerState<CloudDrivePage> {
         path.isEmpty ? '${file['title'] ?? '未命名'}.mp3' : path.split('/').last;
     if (path.isEmpty || !name.contains('.')) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('文件不可用，已跳过')));
+      AppNotify.show('文件不可用，已跳过');
       return;
     }
     // 上传进度弹窗（文件体积大时耗时较长，禁止中途误触关闭）
@@ -367,19 +363,16 @@ class _CloudDrivePageState extends ConsumerState<CloudDrivePage> {
       await ref.read(neteaseRepositoryProvider).cloudUpload(path, name);
       if (!mounted) return;
       Navigator.of(context, rootNavigator: true).pop(); // 关进度弹窗
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('已上传「$name」到云盘')));
+      AppNotify.show('已上传「$name」到云盘');
       await _refresh();
     } on ApiException catch (e) {
       if (!mounted) return;
       Navigator.of(context, rootNavigator: true).pop();
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('上传失败：${e.message}')));
+      AppNotify.show('上传失败：${e.message}');
     } catch (e) {
       if (!mounted) return;
       Navigator.of(context, rootNavigator: true).pop();
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('上传失败：$e')));
+      AppNotify.show('上传失败：$e');
     }
   }
 

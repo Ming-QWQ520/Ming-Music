@@ -36,6 +36,7 @@ import '../data/netease_repository.dart' show kToplists, ToplistConf;
 import 'widgets/song_actions_sheet.dart';
 import 'widgets/song_tile.dart';
 
+import '../../../core/widgets/app_notify.dart';
 // ---------------------------------------------------------------- 搜索历史
 
 /// 搜索历史（需求：本地持久化，最多 20 条，新词置顶去重）
@@ -371,6 +372,8 @@ Widget _songRow(
     onPlay: onPlay,
     onMore: () => showSongActionsSheet(context, s.toTrack()),
     onLongPress: () => showSongActionsSheet(context, s.toTrack()),
+    // 需求（第二十四批）：三点菜单左侧爱心喜欢键（搜索页歌曲卡片）
+    showLike: true,
   );
   if (!withSwipe) return tile;
   return Dismissible(
@@ -380,9 +383,7 @@ Widget _songRow(
         final String? err =
             await ref.read(playerProvider.notifier).insertNext(s.toTrack());
         if (!context.mounted) return false;
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text(err ?? '已添加至下一首播放：${s.name}'),
-        ));
+        AppNotify.show(err ?? '已添加至下一首播放：${s.name}');
       } else {
         await showAddToPlaylistSheet(context, ref, <int>[s.id]);
       }
@@ -1651,27 +1652,11 @@ class _SuggestList extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final ThemeData theme = Theme.of(context);
     final List<SuggestWord> words = suggest.words;
-    final bool hasCards =
-        suggest.songs.isNotEmpty || suggest.artists.isNotEmpty;
     return ListView(
       padding: const EdgeInsets.symmetric(vertical: 6),
       children: <Widget>[
-        // ---- 歌曲/歌手卡片（需求修复：联想词未显示歌曲或歌手卡片 ——
-        // 线上 mobile 联想接口无 entity_card，卡片由并行结构化搜索生成） ----
-        for (final Song s in suggest.songs)
-          _SuggestSongCard(
-            song: s,
-            onPlay: () {
-              ref.read(playerProvider.notifier).playSongs(
-                    <Track>[s.toTrack()],
-                    queueTitle: '搜索直达：${s.name}',
-                  );
-            },
-          ),
-        for (final SearchArtist a in suggest.artists)
-          _SuggestArtistCard(artist: a),
-        if (hasCards) const Divider(height: 10, indent: 16, endIndent: 16),
-        // ---- 直 hit 歌曲卡（entity_card，点击直接播放整首） ----
+        // ---- 直 hit 歌曲卡（需求第二十四批：置顶，官方 App 观感 ——
+        // entity_card 或 web 第 0 首歌构造，点击直接播放整首） ----
         if (suggest.directHit != null && suggest.directHit!.directHit != null)
           _DirectHitCard(
             song: suggest.directHit!.directHit!,
@@ -1683,7 +1668,15 @@ class _SuggestList extends ConsumerWidget {
                   );
             },
           ),
-        // ---- 联想词 ----
+        // ---- 歌手卡（web 联想第 0 位歌手，圆形头像，点击进歌手页） ----
+        for (final SearchArtist a in suggest.artists)
+          _SuggestArtistCard(artist: a),
+        if (suggest.directHit?.directHit != null ||
+            suggest.artists.isNotEmpty)
+          const Divider(height: 10, indent: 16, endIndent: 16),
+        // ---- 补全词行（需求第二十四批：/search/suggest/mobile 官方
+        // 补全词，highLightInfo 红色分段高亮，无类型徽标，与网易云 App
+        // 联想列表同源同观感） ----
         for (final SuggestWord w in words)
           _SuggestWordRow(
             word: w,
@@ -1777,86 +1770,6 @@ class _DirectHitCard extends StatelessWidget {
                 ],
               ),
             ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-/// 联想下拉歌曲卡（需求修复：联想词未显示歌曲/歌手卡片 ——
-/// 点击直接播放该曲，VIP 歌曲带徽标）
-class _SuggestSongCard extends StatelessWidget {
-  const _SuggestSongCard({required this.song, required this.onPlay});
-
-  final Song song;
-  final VoidCallback onPlay;
-
-  @override
-  Widget build(BuildContext context) {
-    final ThemeData theme = Theme.of(context);
-    return InkWell(
-      onTap: onPlay,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 7, 16, 7),
-        child: Row(
-          children: <Widget>[
-            ClipRRect(
-              borderRadius: BorderRadius.circular(7),
-              child: CoverImage(src: song.coverUrl, size: 46, radius: 7),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: <Widget>[
-                  Row(
-                    children: <Widget>[
-                      Flexible(
-                        child: Text(
-                          song.name,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                              fontSize: 14.5, fontWeight: FontWeight.w600),
-                        ),
-                      ),
-                      if (song.isVipOnly) ...<Widget>[
-                        const SizedBox(width: 5),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 4, vertical: 1),
-                          decoration: BoxDecoration(
-                            color: AppConstants.brandColor,
-                            borderRadius: BorderRadius.circular(3),
-                          ),
-                          child: const Text(
-                            'VIP',
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 9,
-                              fontWeight: FontWeight.w800,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ],
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    '${song.artists} · ${song.album}',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                        fontSize: 12,
-                        color: theme.colorScheme.onSurfaceVariant),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(width: 8),
-            const Icon(Icons.play_circle_fill_rounded,
-                size: 26, color: AppConstants.brandColor),
           ],
         ),
       ),

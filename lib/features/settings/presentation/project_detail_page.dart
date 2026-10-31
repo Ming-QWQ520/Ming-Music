@@ -33,6 +33,7 @@ import '../../../core/utils/platform_actions.dart';
 import 'widgets/update_dialog.dart';
 import '../services/app_update_service.dart';
 
+import '../../../core/widgets/app_notify.dart';
 /// 从 repoUrl 解析 owner/repo（AppConstants 单一来源，不另写死）
 (String, String) _parseRepoSlug() {
   final Uri u = Uri.parse(AppConstants.repoUrl);
@@ -125,8 +126,7 @@ class _GithubProjectPageState extends State<GithubProjectPage> {
           await AppUpdateService.fetchLatestRelease();
       if (!mounted) return;
       if (latest == null) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-            content: Text('暂未获取到更新信息，请稍后重试')));
+        AppNotify.show('暂未获取到更新信息，请稍后重试');
         return;
       }
       final PackageInfo info = await PackageInfo.fromPlatform();
@@ -135,13 +135,11 @@ class _GithubProjectPageState extends State<GithubProjectPage> {
         await showUpdateDialog(context, release: latest);
         await _loadReleaseLog();
       } else {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Text('当前已是最新版本 v${info.version}')));
+        AppNotify.show('当前已是最新版本 v${info.version}');
       }
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('检查更新失败：$e')));
+      AppNotify.show('检查更新失败：$e');
     } finally {
       if (mounted) setState(() => _checkingUpdate = false);
     }
@@ -424,8 +422,7 @@ class _GithubProjectPageState extends State<GithubProjectPage> {
     final bool ok = await PlatformActions.openUrl(url);
     if (!mounted) return;
     if (!ok) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('无法打开浏览器')));
+      AppNotify.show('无法打开浏览器');
     }
   }
 }

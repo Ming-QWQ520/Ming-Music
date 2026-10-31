@@ -8,6 +8,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/api/netease_api.dart';
 import '../../../core/api/netease_models.dart';
 import '../../../core/storage/prefs_keys.dart';
+import '../../auth/providers/auth_providers.dart' show authProvider, AuthState;
 import '../../settings/providers/settings_providers.dart'
     show sharedPreferencesProvider;
 import 'netease_repository.dart';
@@ -46,6 +47,42 @@ final FutureProvider<List<Song>> topNewSongsProvider =
     FutureProvider<List<Song>>(
   (Ref ref) => ref.read(neteaseRepositoryProvider).topSongs(type: 0, limit: 20),
 );
+
+/// 需求（第二十四批）发现页扩充：热门歌手（/top/artists，游客可用）
+final FutureProvider<List<SearchArtist>> topArtistsProvider =
+    FutureProvider<List<SearchArtist>>(
+  (Ref ref) => ref.read(neteaseRepositoryProvider).topArtists(limit: 20),
+);
+
+/// 需求（第二十四批）发现页扩充：最近常听（/record/recent/song，登录
+/// 可用；游客/接口异常 → 空列表，板块整体隐藏不留空位）
+final FutureProvider<List<PlayRecordSong>> recentListenedProvider =
+    FutureProvider<List<PlayRecordSong>>((Ref ref) async {
+  try {
+    return await ref.read(neteaseRepositoryProvider).recentSongs(limit: 30);
+  } catch (_) {
+    return const <PlayRecordSong>[];
+  }
+});
+
+/// 需求（第二十四批）发现页扩充：你的红心歌曲推荐（登录且喜欢列表
+/// 非空 → 取前 30 首详情；未登录/空/失败 → 空列表隐藏板块）。
+/// select 监听 likedIds/loggedIn，避免等级/听歌时长等无关字段刷新
+/// 触发整列详情重拉。
+final FutureProvider<List<Song>> likedRailProvider =
+    FutureProvider<List<Song>>((Ref ref) async {
+  final bool loggedIn =
+      ref.watch(authProvider.select((AuthState a) => a.loggedIn));
+  final Set<int> likedIds =
+      ref.watch(authProvider.select((AuthState a) => a.likedIds));
+  if (!loggedIn || likedIds.isEmpty) return const <Song>[];
+  try {
+    final List<int> ids = likedIds.take(30).toList(growable: false);
+    return await ref.read(neteaseRepositoryProvider).songDetails(ids);
+  } catch (_) {
+    return const <Song>[];
+  }
+});
 
 /// 榜单精选预览（需求：榜单卡片下直接展示可点；第十七批：搜索页榜单 top20）
 final FutureProviderFamily<List<Song>, int> toplistPreviewProvider =

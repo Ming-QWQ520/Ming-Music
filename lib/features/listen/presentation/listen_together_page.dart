@@ -30,6 +30,7 @@ import '../../library/domain/track.dart';
 import '../../player/providers/player_providers.dart';
 import '../services/listen_together_service.dart';
 
+import '../../../core/widgets/app_notify.dart';
 /// 全局唯一同步服务实例（复用网易云 API 客户端与登录 cookie）
 final Provider<ListenTogetherService> listenServiceProvider =
     Provider<ListenTogetherService>(
@@ -406,8 +407,7 @@ class _ListenTogetherPageState extends ConsumerState<ListenTogetherPage> {
   // ---------------------------------------------------------- build
 
   void _toast(String msg) {
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(msg), duration: const Duration(milliseconds: 1800)));
+    AppNotify.show(msg);
   }
 
   @override

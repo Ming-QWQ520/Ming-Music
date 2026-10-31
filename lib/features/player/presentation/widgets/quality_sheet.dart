@@ -11,6 +11,7 @@ import '../../providers/player_providers.dart';
 import '../../../../core/widgets/sheet_host.dart'
     show GlassSheet, showMingSheet;
 
+import '../../../../core/widgets/app_notify.dart';
 /// 弹出音质选择
 Future<void> showQualitySheet(BuildContext context, AudioQuality current) {
   return showMingSheet<void>(
@@ -89,9 +90,7 @@ class _QualitySheetState extends ConsumerState<_QualitySheet> {
                                 if (!context.mounted) return;
                                 Navigator.of(context).pop();
                                 if (error != null) {
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                      SnackBar(
-                                          content: Text('切换失败：$error')));
+                                  AppNotify.show('切换失败：$error');
                                 }
                               },
                       ),

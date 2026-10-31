@@ -15,6 +15,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/api/netease_api.dart';
 import '../../../core/utils/platform_actions.dart';
+import '../../../core/widgets/app_notify.dart';
 import '../../discover/data/netease_providers.dart' show neteaseApiProvider;
 import '../../settings/providers/settings_providers.dart'
     show PrefsKeys, sharedPreferencesProvider;
@@ -248,12 +249,11 @@ class AuthNotifier extends Notifier<AuthState> {
       clearStatusCheckFailed: true,
     );
     _cacheProfile(profile);
-    // 需求：每次登录成功后弹出系统通知「欢迎回来-用户名称」
-    // （独立轻量通道，与媒体通知互不干扰；Android 13+ 权限在启动时申请）
-    unawaited(PlatformActions.postStatusNotice(
-      title: 'MingMusic',
-      text: '欢迎回来-${profile.nickname}',
-    ));
+    // 需求（第二十四批）：登录欢迎语改 APP 界面内 —— 移除系统通知栏
+    // 推送（postStatusNotice 通道不再用于欢迎语），改为应用内顶部浮层
+    // AppNotify（无 BuildContext 依赖，Provider 内可直接调用；欢迎
+    // 通知与媒体通知彻底解耦，不占用通知栏）。
+    AppNotify.success('欢迎回来，${profile.nickname}');
     unawaited(_loadExtras(profile.userId));
   }
 

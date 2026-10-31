@@ -37,6 +37,7 @@ import 'widgets/song_actions_sheet.dart';
 import 'widgets/song_tile.dart' show VipBadge;
 import '../../../core/widgets/sheet_host.dart' show showMingSheet;
 
+import '../../../core/widgets/app_notify.dart';
 class PlaylistDetailPage extends ConsumerStatefulWidget {
   const PlaylistDetailPage._({
     required this.playlistId,
@@ -300,9 +301,7 @@ class _DetailBodyState extends ConsumerState<_DetailBody> {
     if (_subBusy) return;
     final AuthState auth = ref.read(authProvider);
     if (!auth.loggedIn) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('登录后即可收藏歌单')),
-      );
+      AppNotify.show('登录后即可收藏歌单');
       return;
     }
     setState(() => _subBusy = true);
@@ -315,14 +314,11 @@ class _DetailBodyState extends ConsumerState<_DetailBody> {
         _subscribed = !_subscribed;
         _subBusy = false;
       });
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(_subscribed ? '已收藏歌单' : '已取消收藏')),
-      );
+      AppNotify.show(_subscribed ? '已收藏歌单' : '已取消收藏');
     } catch (e) {
       if (!mounted) return;
       setState(() => _subBusy = false);
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('操作失败：$e')));
+      AppNotify.show('操作失败：$e');
     }
   }
 
@@ -349,13 +345,11 @@ class _DetailBodyState extends ConsumerState<_DetailBody> {
     try {
       await ref.read(neteaseRepositoryProvider).playlistDelete(widget.meta.id);
       if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('歌单已删除')));
+      AppNotify.show('歌单已删除');
       Navigator.of(context).pop();
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('删除失败：$e')));
+      AppNotify.show('删除失败：$e');
     }
   }
 
@@ -374,11 +368,7 @@ class _DetailBodyState extends ConsumerState<_DetailBody> {
     }
     if (!mounted) return;
     setState(() => _downloading = false);
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-          content: Text(
-              '下载完成：$okCount/${widget.tracks.length} 首，已保存到 Music/MingMusic')),
-    );
+    AppNotify.show('下载完成：$okCount/${widget.tracks.length} 首，已保存到 Music/MingMusic');
   }
 
   void _showMoreMenu() {
@@ -753,9 +743,7 @@ class _DetailBodyState extends ConsumerState<_DetailBody> {
                       .read(playerProvider.notifier)
                       .insertNext(s.toTrack());
                   if (!context.mounted) return;
-                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                    content: Text(err ?? '已添加至下一首播放：${s.name}'),
-                  ));
+                  AppNotify.show(err ?? '已添加至下一首播放：${s.name}');
                 },
               );
             },

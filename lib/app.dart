@@ -11,6 +11,7 @@ import 'package:go_router/go_router.dart' show RouteMatchBase;
 
 import 'core/router.dart';
 import 'core/theme/app_theme.dart';
+import 'core/widgets/app_notify.dart';
 import 'features/auth/providers/auth_providers.dart';
 import 'features/discover/data/netease_providers.dart' show cloudDriveProvider;
 import 'features/player/presentation/widgets/mini_player.dart';
@@ -60,8 +61,10 @@ class MingMusicApp extends ConsumerWidget {
       // 需求「Mini 播放条始终在各个界面显示」：全局宿主包裹 Navigator，
       // 除主骨架（自带导航栏内嵌 Mini 条）与全屏播放页（本身就是播放器）
       // 之外的所有页面都悬浮显示 Mini 播放条。
+      // 需求（第二十四批）：AppNotifyHost 挂在最顶层 —— 应用内通知
+      // 覆盖 Navigator 与全部弹层/播放条，替代 Flutter 原生 SnackBar。
       builder: (BuildContext context, Widget? child) =>
-          _GlobalMiniBarHost(child: child),
+          AppNotifyHost(child: _GlobalMiniBarHost(child: child)),
     );
   }
 }

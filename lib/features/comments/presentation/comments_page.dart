@@ -17,13 +17,12 @@ import '../../library/domain/track.dart';
 import '../data/comments_repository.dart';
 import '../providers/comments_providers.dart';
 
+import '../../../core/widgets/app_notify.dart';
 /// 从播放页进入评论页
 Future<void> showCommentsPage(BuildContext context, Track track) {
   final int? songId = track.neteaseId;
   if (songId == null || songId == 0) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('该歌曲不支持评论（非网易云曲目）')),
-    );
+    AppNotify.show('该歌曲不支持评论（非网易云曲目）');
     return Future<void>.value();
   }
   return GoRouter.of(context).push<void>(
@@ -121,7 +120,7 @@ class _CommentsBodyState extends ConsumerState<_CommentsBody> {
 
   void _showError(String error) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error)));
+    AppNotify.show(error);
     if (error.contains('登录')) showLoginSheet(context);
   }
 

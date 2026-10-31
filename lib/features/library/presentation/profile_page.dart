@@ -30,6 +30,7 @@ import '../../discover/data/netease_repository.dart';
 import '../../library/domain/track.dart';
 import '../../player/providers/player_providers.dart';
 
+import '../../../core/widgets/app_notify.dart';
 class ProfilePage extends ConsumerStatefulWidget {
   const ProfilePage({super.key});
 
@@ -113,9 +114,7 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
     }
     if (!mounted) return;
     setState(() => _signing = false);
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(msgs.join(' · '))),
-    );
+    AppNotify.show(msgs.join(' · '));
     unawaitedRefresh();
   }
 

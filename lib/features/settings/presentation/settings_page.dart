@@ -33,6 +33,7 @@ import '../providers/settings_providers.dart';
 import '../../../core/widgets/sheet_host.dart';
 import 'project_detail_page.dart';
 
+import '../../../core/widgets/app_notify.dart';
 class SettingsPage extends ConsumerWidget {
   const SettingsPage({super.key});
 
@@ -254,9 +255,7 @@ class SettingsPage extends ConsumerWidget {
                     if (!context.mounted) return;
                     if (cfg.imagePath == null &&
                         !ref.read(appBackgroundProvider).enabled) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('请选择一张背景图以启用')),
-                      );
+                      AppNotify.show('请选择一张背景图以启用');
                     }
                   } else {
                     ref.read(appBackgroundProvider.notifier).setEnabled(true);
@@ -398,9 +397,7 @@ class SettingsPage extends ConsumerWidget {
                       await PlatformActions.openUrl(AppConstants.repoUrl);
                   if (!context.mounted) return;
                   if (!ok) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('无法打开浏览器')),
-                    );
+                    AppNotify.show('无法打开浏览器');
                   }
                 },
               ),
@@ -508,8 +505,7 @@ class _CacheGroupState extends ConsumerState<_CacheGroup> {
     await widget.songCache.clearAll();
     _refreshSize();
     if (!mounted) return;
-    ScaffoldMessenger.of(context)
-        .showSnackBar(const SnackBar(content: Text('歌曲缓存已清理')));
+    AppNotify.show('歌曲缓存已清理');
   }
 
   @override

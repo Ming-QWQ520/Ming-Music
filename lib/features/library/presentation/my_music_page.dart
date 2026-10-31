@@ -35,6 +35,7 @@ import '../../player/presentation/cache_songs_page.dart';
 import '../../player/providers/player_providers.dart';
 import '../../../core/utils/platform_actions.dart';
 
+import '../../../core/widgets/app_notify.dart';
 class MyMusicPage extends ConsumerStatefulWidget {
   const MyMusicPage({super.key});
 
@@ -214,16 +215,14 @@ class _MyMusicPageState extends ConsumerState<MyMusicPage> {
       final int id =
           await ref.read(neteaseRepositoryProvider).playlistCreate(name);
       if (!context.mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('已创建歌单「$name」')));
+      AppNotify.show('已创建歌单「$name」');
       _loadPlaylists();
       if (id > 0) {
         context.push('/playlist/$id?name=${Uri.encodeComponent(name)}');
       }
     } catch (e) {
       if (!context.mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('创建失败：$e')));
+      AppNotify.show('创建失败：$e');
     }
   }
 

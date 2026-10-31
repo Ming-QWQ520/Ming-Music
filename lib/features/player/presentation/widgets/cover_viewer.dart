@@ -13,6 +13,7 @@ import 'package:permission_handler/permission_handler.dart';
 
 import '../../../../core/widgets/cover_image.dart';
 
+import '../../../../core/widgets/app_notify.dart';
 const MethodChannel _mediaChannel = MethodChannel('com.ming.music/media');
 
 /// 打开封面全屏查看器
@@ -80,9 +81,7 @@ class _CoverViewerPageState extends State<CoverViewerPage> {
       if (sdk != null && sdk < 29) {
         final PermissionStatus status = await Permission.storage.request();
         if (!status.isGranted && mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('存储权限被拒绝，无法保存')),
-          );
+          AppNotify.show('存储权限被拒绝，无法保存');
           return;
         }
       }
@@ -103,15 +102,10 @@ class _CoverViewerPageState extends State<CoverViewerPage> {
         <String, Object>{'bytes': _bytes!, 'name': name, 'mime': mime},
       );
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-            content: Text(ok == true ? '已保存到相册 Pictures/MingMusic' : '保存失败')),
-      );
+      AppNotify.show(ok == true ? '已保存到相册 Pictures/MingMusic' : '保存失败');
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('保存失败：$e')),
-        );
+        AppNotify.show('保存失败：$e');
       }
     } finally {
       if (mounted) setState(() => _saving = false);

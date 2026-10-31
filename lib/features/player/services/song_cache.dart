@@ -158,17 +158,26 @@ class SongCacheService {
     }
   }
 
+  /// 需求（第二十四批）：原子化写入 —— 旧实现直接覆写 meta.json，
+  /// 并发写（播放缓存 + 预加载 + 列表页回填同时发生）或写入中途被杀
+  /// 会留下半截 JSON，下次解析失败即整表清零（歌名/封面全部丢失的
+  /// 隐性根因之一）。先写临时文件再 rename，rename 同目录内原子生效。
   Future<void> _writeMeta(
       Directory dir, Map<String, Map<String, Object?>> meta) async {
     try {
       final File f = File(_metaPath(dir));
-      await f.writeAsString(jsonEncode(meta), flush: true);
+      final File tmp = File('${_metaPath(dir)}.tmp');
+      await tmp.writeAsString(jsonEncode(meta), flush: true);
+      await tmp.rename(f.path);
     } catch (_) {
       // 元信息写失败不影响音频缓存
     }
   }
 
-  /// 记录/更新一条缓存元信息（下载完成时调用）
+  /// 记录/更新一条缓存元信息（下载完成时调用）。
+  ///
+  /// 需求（第二十四批）字段合并保护：新旧值取非空者优先 —— 并发写
+  /// （回填 vs 下载完成回写）时，后写方不得用空值抹掉已有歌名/歌手/封面。
   Future<void> saveEntryMeta(
     int songId,
     String level, {
@@ -181,12 +190,17 @@ class SongCacheService {
       final String key = keyFor(songId, level);
       final Map<String, Map<String, Object?>> meta = await _readMeta(dir);
       final Map<String, Object?> old = meta[key] ?? const <String, Object?>{};
+      String pick(String fresh, String oldKey) {
+        if (fresh.isNotEmpty) return fresh;
+        return (old[oldKey] as String?) ?? '';
+      }
+
       meta[key] = <String, Object?>{
         'id': songId,
         'level': level,
-        'title': title,
-        'artist': artist,
-        'cover': cover,
+        'title': pick(title, 'title'),
+        'artist': pick(artist, 'artist'),
+        'cover': pick(cover, 'cover'),
         'at': (old['at'] as num?)?.toInt() ??
             DateTime.now().millisecondsSinceEpoch,
       };

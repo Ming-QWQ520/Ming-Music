@@ -21,6 +21,7 @@ import '../../discover/presentation/widgets/song_tile.dart';
 import '../../library/domain/track.dart';
 import '../../player/providers/player_providers.dart';
 
+import '../../../core/widgets/app_notify.dart';
 class LikedSongsPage extends ConsumerStatefulWidget {
   const LikedSongsPage({super.key});
 
@@ -62,15 +63,11 @@ class _LikedSongsPageState extends ConsumerState<LikedSongsPage> {
       if (!mounted) return;
       if (cached != null && cached.isNotEmpty) {
         setState(() => _songs = cached);
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('当前离线，展示上次缓存的歌曲列表')),
-        );
+        AppNotify.show('当前离线，展示上次缓存的歌曲列表');
         return;
       }
       setState(() => _songs = const <Song>[]);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('喜欢列表加载失败：$e')),
-      );
+      AppNotify.show('喜欢列表加载失败：$e');
     }
   }
 

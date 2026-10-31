@@ -18,6 +18,7 @@ import '../../settings/providers/settings_providers.dart'
 import '../providers/player_providers.dart';
 import '../services/song_cache.dart';
 
+import '../../../core/widgets/app_notify.dart';
 class CacheSongsPage extends ConsumerWidget {
   const CacheSongsPage({super.key});
 
@@ -167,8 +168,7 @@ class CacheSongsPage extends ConsumerWidget {
     ref.invalidate(cacheEntriesProvider);
     ref.invalidate(cachedSongIdsProvider);
     if (!context.mounted) return;
-    ScaffoldMessenger.of(context)
-        .showSnackBar(const SnackBar(content: Text('缓存已清空')));
+    AppNotify.show('缓存已清空');
   }
 
   static String _fmtSize(int b) {

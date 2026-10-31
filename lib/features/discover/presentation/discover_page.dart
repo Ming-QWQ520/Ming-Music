@@ -22,6 +22,7 @@ import '../data/netease_providers.dart';
 import '../data/netease_repository.dart' show kToplists, ToplistConf;
 import 'package:go_router/go_router.dart';
 
+import '../../../core/widgets/app_notify.dart';
 class DiscoverPage extends ConsumerWidget {
   const DiscoverPage({super.key});
 
@@ -51,8 +52,13 @@ class DiscoverPage extends ConsumerWidget {
           // 需求：顶部圆形快捷入口（Zephyr-Music 首页样式）
           const SliverToBoxAdapter(child: _QuickEntries()),
           const SliverToBoxAdapter(child: _PersonalizedSection()),
+          // 需求（第二十四批）发现页扩充（对齐网易云首页板块排布）：
+          // 红心推荐 / 最近常听 / 推荐新音乐 / 新歌速递 / 热门歌手
+          const SliverToBoxAdapter(child: _LikedRailSection()),
+          const SliverToBoxAdapter(child: _RecentRailSection()),
           const SliverToBoxAdapter(child: _SongRailSection.music()),
           const SliverToBoxAdapter(child: _SongRailSection.newSong()),
+          const SliverToBoxAdapter(child: _TopArtistsSection()),
           const SliverToBoxAdapter(child: _HotWordsSection()),
           const SliverToBoxAdapter(child: _ToplistCustomSection()),
           // 需求：主骨架 extendBody（导航栏/Mini 条液态玻璃透出内容）——
@@ -90,7 +96,7 @@ class _QuickEntries extends ConsumerWidget {
   const _QuickEntries();
 
   Future<void> _toast(BuildContext context, String msg) {
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+    AppNotify.show(msg);
     return Future<void>.value();
   }
 
@@ -1099,6 +1105,131 @@ class _SongRailCard extends ConsumerWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------- 发现页扩充（第二十四批）
+
+/// 横向歌曲卡列（红心推荐 / 最近常听共用骨架；复用 _SongRailCard
+/// —— 点击整组入队从该首播放）
+class _SongRail extends StatelessWidget {
+  const _SongRail({required this.songs, required this.title});
+
+  final List<Song> songs;
+  final String title;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: 172,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 20),
+        itemCount: songs.length,
+        separatorBuilder: (_, __) => const SizedBox(width: 12),
+        itemBuilder: (BuildContext context, int index) =>
+            _SongRailCard(songs: songs, index: index, title: title),
+      ),
+    );
+  }
+}
+
+/// 你的红心歌曲和相似推荐（对齐网易云首页板块；登录且红心非空才
+/// 渲染 —— 未登录/无红心/加载中/失败整体隐藏，不留空板块）
+class _LikedRailSection extends ConsumerWidget {
+  const _LikedRailSection();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return ref.watch(likedRailProvider).when(
+      loading: () => const SizedBox.shrink(),
+      error: (Object e, StackTrace st) => const SizedBox.shrink(),
+      data: (List<Song> list) {
+        if (list.isEmpty) return const SizedBox.shrink();
+        return _SectionScaffold(
+          title: '你的红心歌曲和相似推荐',
+          child: _SongRail(songs: list, title: '你的红心歌曲'),
+        );
+      },
+    );
+  }
+}
+
+/// 最近常听（对齐网易云首页板块；/record/recent/song 登录可用，
+/// 游客/失败隐藏板块）
+class _RecentRailSection extends ConsumerWidget {
+  const _RecentRailSection();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return ref.watch(recentListenedProvider).when(
+      loading: () => const SizedBox.shrink(),
+      error: (Object e, StackTrace st) => const SizedBox.shrink(),
+      data: (List<PlayRecordSong> list) {
+        final List<Song> songs = <Song>[
+          for (final PlayRecordSong r in list) r.song,
+        ];
+        if (songs.isEmpty) return const SizedBox.shrink();
+        return _SectionScaffold(
+          title: '最近常听',
+          child: _SongRail(songs: songs, title: '最近常听'),
+        );
+      },
+    );
+  }
+}
+
+/// 热门歌手（对齐网易云首页「艺人热门金曲」入口观感：圆形头像横滑，
+/// 点击进歌手页；游客可用，失败隐藏板块）
+class _TopArtistsSection extends ConsumerWidget {
+  const _TopArtistsSection();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return ref.watch(topArtistsProvider).when(
+      loading: () => const _SectionLoading(),
+      error: (Object e, StackTrace st) => const SizedBox.shrink(),
+      data: (List<SearchArtist> list) {
+        if (list.isEmpty) return const SizedBox.shrink();
+        return _SectionScaffold(
+          title: '热门歌手',
+          child: SizedBox(
+            height: 122,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              itemCount: list.length,
+              separatorBuilder: (_, __) => const SizedBox(width: 16),
+              itemBuilder: (BuildContext context, int index) {
+                final SearchArtist a = list[index];
+                return GestureDetector(
+                  onTap: () => context
+                      .push('/artist/${a.id}?name=${Uri.encodeComponent(a.name)}'),
+                  child: SizedBox(
+                    width: 76,
+                    child: Column(
+                      children: <Widget>[
+                        CoverImage(src: a.picUrl, size: 76, radius: 38),
+                        const SizedBox(height: 6),
+                        Text(
+                          a.name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: Theme.of(context).colorScheme.onSurface,
+                            fontSize: 12,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+        );
+      },
     );
   }
 }

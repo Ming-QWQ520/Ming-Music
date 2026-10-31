@@ -330,6 +330,10 @@ class PlayerNotifier extends Notifier<PlayerState> {
       _syncNotificationLike();
       // 需求「只需播放一首缓存一首」：仅在实际开播的曲目上后台落盘
       unawaited(_cacheCurrentTrack());
+      // 需求（第二十四批）「歌词出现延迟」根治：曲目切换瞬间即预取
+      // 当前曲 + 队列下一曲的歌词（此前歌词在打开播放页/歌词视图时才
+      // 首次请求，网络往返全部暴露给用户 —— 现在切歌即拉，打开秒显）
+      unawaited(_prefetchLyrics());
       // 需求：私人漫游临近队尾自动补歌（对齐 Zephyr-Music）
       unawaited(_maybeReplenishFm());
     });
@@ -422,6 +426,30 @@ class PlayerNotifier extends Notifier<PlayerState> {
           // 需求第二十一批：数据缓存列表封面统一 200x200 参数
           cover: SongCacheService.normalizeCover200(track.cover),
         ));
+  }
+
+  // ------------------------------------------------------------ 歌词预取
+
+  /// 需求（第二十四批）「歌词出现延迟」：切歌瞬间预取当前曲 + 队列
+  /// 下一曲的歌词。lyricDataProvider 是 FutureProvider.family，结果
+  /// 自动按歌曲 id 缓存 —— 打开播放页/歌词视图时命中缓存零等待。
+  /// 失败静默（打开页面时会自然重试）。
+  Future<void> _prefetchLyrics() async {
+    final PlayerState s = state;
+    final List<int> ids = <int>[
+      if (s.currentTrack?.neteaseId case final int cur when cur > 0) cur,
+      // 下一曲也一并预取：连续听歌时歌词始终先于用户到达
+      if (s.index + 1 < s.queue.length)
+        if (s.queue[s.index + 1].neteaseId case final int next when next > 0)
+          next,
+    ];
+    for (final int id in ids) {
+      try {
+        await ref.read(lyricDataProvider(id).future);
+      } catch (_) {
+        // 预取失败不阻断：UI 打开时 provider 会重新请求
+      }
+    }
   }
 
   Future<void> _cacheCurrentTrack() async {

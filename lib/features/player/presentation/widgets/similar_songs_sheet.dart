@@ -15,6 +15,7 @@ import '../../../library/domain/track.dart';
 import '../../providers/player_providers.dart';
 import '../../../../core/widgets/sheet_host.dart' show showMingSheet;
 
+import '../../../../core/widgets/app_notify.dart';
 /// 打开相似歌曲弹窗
 Future<void> showSimilarSongsSheet(BuildContext context, Track current) {
   return showMingSheet<void>(
@@ -65,10 +66,7 @@ class _SimilarSongsSheetState extends ConsumerState<_SimilarSongsSheet> {
     if (error == null && mounted) {
       // 插播成功：关闭弹窗回到播放页
       Navigator.of(context).pop();
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text('正在播放相似歌曲「${song.name}」'),
-        duration: const Duration(seconds: 2),
-      ));
+      AppNotify.show('正在播放相似歌曲「${song.name}」');
     }
   }
 

@@ -20,6 +20,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../../core/constants/app_constants.dart';
 import '../../../core/utils/platform_actions.dart';
+import '../../../core/widgets/app_notify.dart';
 import '../../../core/widgets/cover_image.dart';
 import '../../auth/providers/auth_providers.dart';
 import '../../discover/data/netease_providers.dart';
@@ -59,9 +60,9 @@ class _PlayerMoreSheetState extends ConsumerState<_PlayerMoreSheet> {
   int? _artistId;
   bool _artistLoading = false;
 
-  /// 底部弹窗 pop 后自身 context 失效：提前持有全局 router 与 messenger
+  /// 底部弹窗 pop 后自身 context 失效：提前持有全局 router
+  /// （第二十四批：通知改 AppNotify 全局单例，无需再持有 messenger）
   GoRouter? _router;
-  ScaffoldMessengerState? _messenger;
 
   @override
   void initState() {
@@ -69,7 +70,6 @@ class _PlayerMoreSheetState extends ConsumerState<_PlayerMoreSheet> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       _router = GoRouter.of(context);
-      _messenger = ScaffoldMessenger.of(context);
     });
   }
 
@@ -77,7 +77,8 @@ class _PlayerMoreSheetState extends ConsumerState<_PlayerMoreSheet> {
       ref.read(playerProvider.select((PlayerState s) => s.currentTrack));
 
   void _toast(String msg) {
-    _messenger?.showSnackBar(SnackBar(content: Text(msg)));
+    // 需求（第二十四批）：应用内通知全局可用（弹窗 pop 后仍可弹）
+    AppNotify.show(msg);
   }
 
   /// 关闭本弹窗并执行后续动作（使用提前持有的 router，避免 context 失效）

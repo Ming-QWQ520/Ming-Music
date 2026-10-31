@@ -364,6 +364,19 @@ class MingAudioHandler extends BaseAudioHandler with SeekHandler {
     }
   }
 
+  /// 需求（第二十四批）「通知栏控制栏清除后无法自动出现」根治：
+  /// 用户划掉通知栏媒体控制 → **暂停播放**（audio_service 0.18 默认
+  /// 路由到 stop() —— 内核整队停转、会话关闭，App 内再点播放也无法
+  /// 恢复，通知栏控制栏从此不再出现）。
+  /// 改为仅暂停：队列/会话完整保留，App 内恢复播放时状态重新广播，
+  /// 通知栏控制栏自动重现。已暂停时划通知（Android 12+ 允许）为无操作，
+  /// 不再重复广播，允许通知保持清除态。
+  @override
+  Future<void> onNotificationDeleted() async {
+    if (!_player.playing) return;
+    await pause();
+  }
+
   // ---------------------------------------------------------------- broadcast
 
   /// 将 just_audio 事件映射为 audio_service 的 PlaybackState。

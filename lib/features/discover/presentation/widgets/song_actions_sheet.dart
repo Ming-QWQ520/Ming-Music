@@ -11,6 +11,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../../../core/constants/app_constants.dart';
 import '../../../../core/utils/platform_actions.dart';
+import '../../../../core/widgets/app_notify.dart';
 import '../../../../core/widgets/cover_image.dart';
 import '../../../auth/providers/auth_providers.dart';
 import '../../../comments/providers/comments_providers.dart'
@@ -61,22 +62,11 @@ class _SongActionsSheetState extends ConsumerState<_SongActionsSheet> {
   bool _downloading = false;
   bool _removing = false;
 
-  /// 底部弹窗 pop 后自身 context 失效：提前持有 messenger
-  ScaffoldMessengerState? _messenger;
-
-  @override
-  void initState() {
-    super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      _messenger = ScaffoldMessenger.of(context);
-    });
-  }
-
   bool get _isNetease => (widget.track.neteaseId ?? 0) > 0;
 
   void _toast(String msg) {
-    _messenger?.showSnackBar(SnackBar(content: Text(msg)));
+    // 需求（第二十四批）：应用内通知全局可用，无需 context/messenger
+    AppNotify.show(msg);
   }
 
   Future<void> _toggleLike() async {

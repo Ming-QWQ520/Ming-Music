@@ -19,6 +19,7 @@ import '../../settings/providers/settings_providers.dart'
     show PrefsKeys, sharedPreferencesProvider;
 import '../../../core/widgets/sheet_host.dart' show showMingSheet;
 
+import '../../../core/widgets/app_notify.dart';
 /// 打开「添加至歌单」弹窗。返回操作结果（关闭弹窗后 toast）。
 Future<void> showAddToPlaylistSheet(
   BuildContext context,
@@ -27,16 +28,12 @@ Future<void> showAddToPlaylistSheet(
 ) async {
   final AuthState auth = ref.read(authProvider);
   if (!auth.loggedIn) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('登录后即可添加到歌单')),
-    );
+    AppNotify.show('登录后即可添加到歌单');
     await showLoginSheet(context);
     return;
   }
   if (trackIds.isEmpty || trackIds.any((int id) => id <= 0)) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('该歌曲暂不支持添加到歌单')),
-    );
+    AppNotify.show('该歌曲暂不支持添加到歌单');
     return;
   }
   await showMingSheet<void>(
@@ -66,16 +63,9 @@ class _AddToPlaylistSheetState extends ConsumerState<_AddToPlaylistSheet> {
   /// （本次打开时置顶展示；仅改本地显示顺序，不改云端真实排序）
   int _lastUsedId = 0;
 
-  /// 弹窗 pop 后自身 context 失效：提前持有 messenger
-  ScaffoldMessengerState? _messenger;
-
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      _messenger = ScaffoldMessenger.of(context);
-    });
     _load();
   }
 
@@ -119,14 +109,13 @@ class _AddToPlaylistSheetState extends ConsumerState<_AddToPlaylistSheet> {
       await ref
           .read(sharedPreferencesProvider)
           .setInt(PrefsKeys.addToPlaylistLast, playlistId);
-      _messenger?.showSnackBar(
-        SnackBar(content: Text('已添加到「$name」')),
-      );
+      // 需求第二十四批：弹窗 pop 后仍可用 —— AppNotify 无需 context
+      AppNotify.success('已添加到「$name」');
       if (mounted) Navigator.of(context).pop();
     } catch (e) {
       if (!mounted) return;
       setState(() => _busyId = null);
-      _messenger?.showSnackBar(SnackBar(content: Text('$e')));
+      AppNotify.error('$e');
     }
   }
 
@@ -167,7 +156,7 @@ class _AddToPlaylistSheetState extends ConsumerState<_AddToPlaylistSheet> {
       await _addTo(id, name);
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+      AppNotify.show('$e');
     } finally {
       if (mounted) setState(() => _creating = false);
     }

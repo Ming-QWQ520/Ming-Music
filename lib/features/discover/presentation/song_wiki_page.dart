@@ -24,6 +24,7 @@ import '../../player/providers/player_providers.dart';
 import '../data/netease_providers.dart' show neteaseRepositoryProvider;
 import 'mv_player_page.dart';
 
+import '../../../core/widgets/app_notify.dart';
 class SongWikiPage extends ConsumerWidget {
   const SongWikiPage({
     super.key,
@@ -679,8 +680,7 @@ class _SimiSongsCardState extends ConsumerState<_SimiSongsCard> {
     if (error == null) {
       Navigator.of(context).pop();
     } else {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text(error)));
+      AppNotify.show(error);
     }
   }
 }
