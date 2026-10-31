@@ -133,8 +133,7 @@ class QueuePersistence {
 
       final int v = (decoded['v'] as num?)?.toInt() ?? 0;
       final bool hasItemsKey = v == 2 || v == 3;
-      final Object? raw =
-          hasItemsKey ? decoded['items'] : decoded['queue'];
+      final Object? raw = hasItemsKey ? decoded['items'] : decoded['queue'];
       if (raw is! List<Object?>) return null;
 
       final List<Track> tracks = <Track>[];

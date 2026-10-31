@@ -38,6 +38,21 @@ class _MessagesPageState extends ConsumerState<MessagesPage> {
         title: const Text('私信',
             style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700)),
         actions: <Widget>[
+          // 需求（第二十九批）：一键已读 —— 有未读时展示，点击全部会话
+          // 红点清零（本地遮罩，服务端拉回的旧未读不再复现）。
+          if (loggedIn && st.unreadTotal > 0)
+            TextButton.icon(
+              onPressed: () =>
+                  ref.read(conversationsProvider.notifier).markAllRead(),
+              icon: const Icon(Icons.done_all_rounded, size: 17),
+              label: const Text('一键已读',
+                  style:
+                      TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600)),
+              style: TextButton.styleFrom(
+                foregroundColor: AppConstants.brandColor,
+                padding: const EdgeInsets.symmetric(horizontal: 10),
+              ),
+            ),
           IconButton(
             tooltip: '刷新',
             onPressed: () =>
@@ -125,10 +140,10 @@ class _MessagesPageState extends ConsumerState<MessagesPage> {
     return ListView.separated(
       physics: const AlwaysScrollableScrollPhysics(),
       padding: const EdgeInsets.fromLTRB(16, 10, 16, 32),
-      itemCount: st.items.length + (st.more ? 1 : 0),
+      itemCount: st.maskedItems.length + (st.more ? 1 : 0),
       separatorBuilder: (_, __) => const SizedBox(height: 4),
       itemBuilder: (BuildContext context, int index) {
-        if (index >= st.items.length) {
+        if (index >= st.maskedItems.length) {
           return const Padding(
             padding: EdgeInsets.symmetric(vertical: 14),
             child: Center(
@@ -140,25 +155,28 @@ class _MessagesPageState extends ConsumerState<MessagesPage> {
             ),
           );
         }
-        return _ConversationTile(c: st.items[index]);
+        return _ConversationTile(c: st.maskedItems[index]);
       },
     );
   }
 }
 
-class _ConversationTile extends StatelessWidget {
+class _ConversationTile extends ConsumerWidget {
   const _ConversationTile({required this.c});
 
   final Conversation c;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final ThemeData theme = Theme.of(context);
     return Material(
       color: Colors.transparent,
       child: InkWell(
         borderRadius: BorderRadius.circular(12),
         onTap: () {
+          // 需求（第二十九批）：点开联系人页面后消除红点 —— 本地遮罩
+          // 立即置零（磁贴角标同步减少），再进聊天页。
+          ref.read(conversationsProvider.notifier).clearUnread(c.userId);
           context.push('/messages/${c.userId}'
               '?name=${Uri.encodeComponent(avatarDisplayName(c.nickname, c.userId))}'
               '&avatar=${Uri.encodeComponent(c.avatarUrl)}');

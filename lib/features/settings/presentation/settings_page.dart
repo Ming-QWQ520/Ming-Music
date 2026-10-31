@@ -34,6 +34,7 @@ import '../../../core/widgets/sheet_host.dart';
 import 'project_detail_page.dart';
 
 import '../../../core/widgets/app_notify.dart';
+
 class SettingsPage extends ConsumerWidget {
   const SettingsPage({super.key});
 
@@ -347,35 +348,8 @@ class SettingsPage extends ConsumerWidget {
 
           const SizedBox(height: 16),
 
-          // ---------------- 数据源 ----------------
-          _GroupCard(
-            title: '数据源',
-            children: <Widget>[
-              ListTile(
-                contentPadding:
-                    const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
-                title: const Text('网易云音乐 API'),
-                subtitle: const Text(AppConstants.apiBaseUrl),
-                trailing: Icon(
-                  Icons.check_circle_rounded,
-                  color: theme.colorScheme.primary,
-                  size: 20,
-                ),
-              ),
-              const Padding(
-                padding: EdgeInsets.fromLTRB(16, 0, 16, 14),
-                child: Text(
-                  '数据来自第三方公开 API，VIP 专属歌曲在未登录状态下仅可试听或不可播放；'
-                  '本应用仅供学习交流，请支持正版音乐。',
-                  style: TextStyle(fontSize: 12.5, height: 1.5),
-                ),
-              ),
-            ],
-          ),
-
-          const SizedBox(height: 16),
-
           // ---------------- 关于 ----------------
+          // （第二十九批：移除「数据源」分组 —— 用户需求）
           _GroupCard(
             title: '关于',
             children: <Widget>[
@@ -547,21 +521,25 @@ class _CacheGroupState extends ConsumerState<_CacheGroup> {
               ref.read(listenCacheProvider.notifier).set(true);
               return;
             }
+            // 需求（第二十九批）：①「关闭/算了」背景互换 —— 算了改填充主按钮
+            // （保留颜文字），关闭改素色文字键；②点击弹窗外部背景不可关闭
+            //（barrierDismissible: false，防误触直接关掉）。
             final bool? confirm = await showDialog<bool>(
               context: context,
+              barrierDismissible: false,
               builder: (BuildContext ctx) => AlertDialog(
                 title: const Text('关闭边听边缓存'),
                 content: const Text('关闭后没网不能听歌了哦(๑`^´๑)，真的要关吗'),
                 actions: <Widget>[
                   TextButton(
-                    onPressed: () => Navigator.of(ctx).pop(false),
-                    child: const Text("算了(●'◡'●)"),
+                    onPressed: () => Navigator.of(ctx).pop(true),
+                    child: const Text('关闭╥_╥'),
                   ),
                   FilledButton(
                     style: FilledButton.styleFrom(
                         backgroundColor: AppConstants.brandColor),
-                    onPressed: () => Navigator.of(ctx).pop(true),
-                    child: const Text('关闭╥_╥'),
+                    onPressed: () => Navigator.of(ctx).pop(false),
+                    child: const Text("算了(●'◡'●)"),
                   ),
                 ],
               ),
@@ -721,9 +699,8 @@ class _RadioRow<T extends Object> extends StatelessWidget {
                           color: g.$1 == value
                               ? AppConstants.brandColor
                               : Colors.white.withValues(alpha: 0.88),
-                          fontWeight: g.$1 == value
-                              ? FontWeight.w700
-                              : FontWeight.w400,
+                          fontWeight:
+                              g.$1 == value ? FontWeight.w700 : FontWeight.w400,
                           fontSize: 14.5,
                         ),
                       ),

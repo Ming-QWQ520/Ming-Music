@@ -418,9 +418,10 @@ const double _kRowHPadding = 28;
 ///  - 模糊（lyricBlur）保留为统一额外模糊，默认 0 = 关闭；
 ///  - 当前播放行永不受影响（active 时直通）。
 /// RepaintBoundary 隔离模糊层，避免滚动时全列表重绘。
-/// 需求（第二十四批）：歌词切行平滑曲线 —— 活动行⇄非活跃行的
-/// 淡出/模糊过渡改为 320ms easeOutCubic 动画（旧实现瞬时跳变，
-/// 切行瞬间亮度/模糊阶梯式突变；现新行缓缓点亮、旧行缓缓淡出）。
+/// 需求（第二十四批）：歌词切行平滑曲线 —— 活动行⇄非活跃行的**亮度**
+/// 过渡为 320ms easeOutCubic 动画（透明度渐变，消除瞬时跳变）。
+/// 需求（第二十九批）：模糊改为静态施加（仅对过渡完全结束的非活跃行）——
+/// 模糊动画化会让字形视觉尺寸随过渡胀缩（用户观感「切行时抖动变小」）。
 ///
 /// 实现说明：TweenAnimationBuilder 以 `end = active ? 0 : 1` 驱动动画值
 /// t；[edgeT]（滚动边界接近度）仍随滚动逐帧变化 —— 父组件重建时
@@ -442,11 +443,16 @@ Widget _applyInactiveEffect(
       final Widget content = cached ?? child;
       if (t <= 0.01) return content; // 活动行：全亮、无模糊
       final double fadeV = fade.clamp(0.0, 1.0);
-      // 边界扩散模糊（淡出主体，滑杆唯一作用点）+ 统一额外模糊（设置项，
-      // 默认 0）；需求：非活跃行模糊最高 1.5px，整体随动画值 t 渐入
+      // 需求修复（第二十九批「逐字歌词变成当前播放行时抖动变小」）：
+      // 模糊不再随 320ms 过渡渐变 —— ImageFiltered 模糊会让字形视觉
+      // 尺寸胀缩（sigma 1.5px ≈ 字形视觉加粗 5%），动画化模糊时新当前行
+      // 由糊变清的字形收缩观感就是「抖动变小」。现在模糊只作为
+      // **完全非活跃行（过渡已结束）**的静态属性瞬间施加/摘除：
+      // 摘除发生在行处于最暗淡（alpha 0.40）的起点，几乎不可感知；
+      // 亮度淡入淡出（alpha）仍保留 320ms easeOutCubic 平滑曲线。
       final double edgeSigma = edgeT.clamp(0.0, 1.0) * 1.5 * fadeV;
       final double sigma =
-          ((blur.clamp(0.0, 1.5) + edgeSigma) * t).clamp(0.0, 1.5);
+          t >= 0.999 ? (blur.clamp(0.0, 1.5) + edgeSigma).clamp(0.0, 1.5) : 0.0;
       Widget result = content;
       if (sigma > 0.02) {
         result = RepaintBoundary(

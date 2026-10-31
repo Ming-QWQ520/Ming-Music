@@ -387,8 +387,7 @@ class NpPlayerSettings {
           ? map['showMvBadge']! as bool
           : defaults.showMvBadge,
       // v5 迁移：始终亮屏默认开启；v5 新档保留用户显式关闭态
-      playerKeepScreenOn:
-          migrateToV5 || map['playerKeepScreenOn'] == true,
+      playerKeepScreenOn: migrateToV5 || map['playerKeepScreenOn'] == true,
       miniStyle: MiniPlayerStyle.values.firstWhere(
         (MiniPlayerStyle s) => s.name == map['miniStyle'],
         orElse: () => defaults.miniStyle,

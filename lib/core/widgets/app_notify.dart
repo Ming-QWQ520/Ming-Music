@@ -48,8 +48,8 @@ class AppNotify {
 
   /// 弹出一条应用内通知（替代 ScaffoldMessenger SnackBar）
   static void show(String message, {IconData? icon}) {
-    instance._push(message, icon ?? Icons.info_outline_rounded,
-        AppConstants.brandColor);
+    instance._push(
+        message, icon ?? Icons.info_outline_rounded, AppConstants.brandColor);
   }
 
   /// 成功语义（绿色对勾）
@@ -59,8 +59,8 @@ class AppNotify {
 
   /// 错误语义（品牌红感叹号）
   static void error(String message) {
-    instance._push(message, Icons.error_outline_rounded,
-        AppConstants.brandColor);
+    instance._push(
+        message, Icons.error_outline_rounded, AppConstants.brandColor);
   }
 
   void _push(String message, IconData icon, Color tint) {

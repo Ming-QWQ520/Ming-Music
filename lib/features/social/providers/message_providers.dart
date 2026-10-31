@@ -22,12 +22,18 @@ class ConversationsState {
     this.loading = false,
     this.error = '',
     this.more = false,
+    this.clearedUserIds = const <int>{},
   });
 
   final List<Conversation> items;
   final bool loading;
   final String error;
   final bool more;
+
+  /// 本会话周期内已读过的联系人（需求第二十九批：点开联系人页即消除
+  /// 红点；网易没有已读回执接口，服务端可能仍报未读 —— 加载时按这里
+  /// 遮罩归零，会话周期内不再复现红点）
+  final Set<int> clearedUserIds;
 
   /// 未读总数（磁贴角标）
   int get unreadTotal =>
@@ -38,14 +44,32 @@ class ConversationsState {
     bool? loading,
     String? error,
     bool? more,
+    Set<int>? clearedUserIds,
   }) {
     return ConversationsState(
       items: items ?? this.items,
       loading: loading ?? this.loading,
       error: error ?? this.error,
       more: more ?? this.more,
+      clearedUserIds: clearedUserIds ?? this.clearedUserIds,
     );
   }
+
+  /// 按已读遮罩归零后的会话列表（加载/点开/一键已读统一出口）
+  List<Conversation> get maskedItems => <Conversation>[
+        for (final Conversation c in items)
+          if (clearedUserIds.contains(c.userId) && c.newMsgCount != 0)
+            Conversation(
+              userId: c.userId,
+              nickname: c.nickname,
+              avatarUrl: c.avatarUrl,
+              lastMsg: c.lastMsg,
+              lastMsgTime: c.lastMsgTime,
+              newMsgCount: 0,
+            )
+          else
+            c,
+      ];
 }
 
 class ConversationsNotifier extends Notifier<ConversationsState> {
@@ -70,6 +94,25 @@ class ConversationsNotifier extends Notifier<ConversationsState> {
     } catch (e) {
       state = state.copyWith(loading: false, error: '$e');
     }
+  }
+
+  /// 需求（第二十九批）：点击联系人进入聊天后消除红点 —— 本地立即置零
+  /// 并记入已读遮罩（后续 load/loadMore 拉回的旧未读数不再复现）。
+  void clearUnread(int userId) {
+    if (userId <= 0) return;
+    state = state.copyWith(
+      clearedUserIds: <int>{...state.clearedUserIds, userId},
+    );
+  }
+
+  /// 需求（第二十九批）：私信页「一键已读」—— 全部会话红点清零。
+  void markAllRead() {
+    state = state.copyWith(
+      clearedUserIds: <int>{
+        ...state.clearedUserIds,
+        for (final Conversation c in state.items) c.userId,
+      },
+    );
   }
 
   Future<void> loadMore() async {

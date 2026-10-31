@@ -77,9 +77,7 @@ class _PlayerProgressBarState extends ConsumerState<PlayerProgressBar> {
       _previewMs = null;
     });
     if (v != null) {
-      ref
-          .read(playerProvider.notifier)
-          .seek(Duration(milliseconds: v.round()));
+      ref.read(playerProvider.notifier).seek(Duration(milliseconds: v.round()));
     }
   }
 
@@ -98,8 +96,8 @@ class _PlayerProgressBarState extends ConsumerState<PlayerProgressBar> {
     // 需求修复（进度条 bug）：切歌瞬间复位预览态 —— 切歌时旧预览值
     // /加粗态若残留，显示与真实进度脱节且手势状态错乱（「刚切换歌曲时」
     // 复现的主路径；拖动中不受影响：仅复位非拖动残留）
-    final Object? trackKey = ref.watch(
-        playerProvider.select((PlayerState s) => s.currentTrack?.id));
+    final Object? trackKey =
+        ref.watch(playerProvider.select((PlayerState s) => s.currentTrack?.id));
     if (trackKey != _lastTrackKey) {
       _lastTrackKey = trackKey;
       _previewMs = null;
@@ -314,8 +312,7 @@ class _PlayerProgressBarState extends ConsumerState<PlayerProgressBar> {
                       color: _dragging
                           ? Colors.white
                           : Colors.white.withValues(alpha: 0.62),
-                      fontWeight:
-                          _dragging ? FontWeight.w700 : FontWeight.w400,
+                      fontWeight: _dragging ? FontWeight.w700 : FontWeight.w400,
                       shadows: _dragging
                           ? <Shadow>[
                               Shadow(

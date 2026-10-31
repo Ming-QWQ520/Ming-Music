@@ -23,8 +23,7 @@ void main() {
           '{"id":1969519579,"url":"http://m801.music.126.net/x.mp3",'
           '"br":320000,"size":8798445,"type":"mp3","fee":8,'
           '"level":"exhigh","sr":48000}';
-      final SongUrlInfo info =
-          SongUrlInfo.fromJson(parseJsonMap(payload));
+      final SongUrlInfo info = SongUrlInfo.fromJson(parseJsonMap(payload));
       expect(info.level, 'exhigh');
       expect(info.sr, 48000);
       expect(info.br, 320000);
@@ -34,8 +33,7 @@ void main() {
     test('缺失 level/sr 的旧结构不崩（字段可空）', () {
       const String payload =
           '{"id":123,"url":"https://m7.music.126.net/y.flac","br":995000}';
-      final SongUrlInfo info =
-          SongUrlInfo.fromJson(parseJsonMap(payload));
+      final SongUrlInfo info = SongUrlInfo.fromJson(parseJsonMap(payload));
       expect(info.level, isNull);
       expect(info.sr, isNull);
     });

@@ -37,8 +37,10 @@ import '../../listen/providers/listen_room_provider.dart';
 import '../../social/providers/message_providers.dart'
     show ConversationsState, conversationsProvider;
 import '../../../core/utils/platform_actions.dart';
+import '../../../core/widgets/sheet_host.dart' show GlassSheet, showMingSheet;
 
 import '../../../core/widgets/app_notify.dart';
+
 class MyMusicPage extends ConsumerStatefulWidget {
   const MyMusicPage({super.key});
 
@@ -98,8 +100,7 @@ class _MyMusicPageState extends ConsumerState<MyMusicPage> {
         AuthState? prev,
         AuthState next,
       ) {
-        final bool becameLoggedIn =
-            next.loggedIn && !(prev?.loggedIn ?? false);
+        final bool becameLoggedIn = next.loggedIn && !(prev?.loggedIn ?? false);
         // 主动登出（登录→未登录）：清空页内列表（持久层缓存已在
         // AuthNotifier.logout 同步清除），避免退出后仍直显旧账号歌单
         final bool becameLoggedOut =
@@ -119,10 +120,9 @@ class _MyMusicPageState extends ConsumerState<MyMusicPage> {
 
   /// 读取歌单缓存（登录前/离线时直显；脏数据静默丢弃）
   List<NeteaseUserPlaylist>? _readCachedPlaylists() {
-    final String? raw =
-        ref.read(sharedPreferencesProvider).getString(
-              PrefsKeys.libraryUserPlaylistsCache,
-            );
+    final String? raw = ref.read(sharedPreferencesProvider).getString(
+          PrefsKeys.libraryUserPlaylistsCache,
+        );
     if (raw == null || raw.isEmpty) return null;
     try {
       final Object? decoded = jsonDecode(raw);
@@ -140,12 +140,11 @@ class _MyMusicPageState extends ConsumerState<MyMusicPage> {
 
   void _cachePlaylists(List<NeteaseUserPlaylist> list, int uid) {
     try {
-      ref
-          .read(sharedPreferencesProvider)
-          .setString(PrefsKeys.libraryUserPlaylistsCache,
-              jsonEncode(<Object?>[
-                for (final NeteaseUserPlaylist p in list) p.toCacheMap(),
-              ]));
+      ref.read(sharedPreferencesProvider).setString(
+          PrefsKeys.libraryUserPlaylistsCache,
+          jsonEncode(<Object?>[
+            for (final NeteaseUserPlaylist p in list) p.toCacheMap(),
+          ]));
       // 需求修复（离线直显）：同时记录当前用户 id —— 离线时 profile
       // 校验失败为 null，_createdList/_collectedList 需要用它拆分创建/收藏
       ref.read(sharedPreferencesProvider).setInt(PrefsKeys.lastUserId, uid);
@@ -532,11 +531,9 @@ class _ProfileHeader extends ConsumerWidget {
               avatar,
               const SizedBox(width: 14),
               nameCol,
-              if (loggedIn && likesCount != null)
-                Text('$likesCount首喜欢',
-                    style: TextStyle(
-                        fontSize: 11.5,
-                        color: theme.colorScheme.onSurfaceVariant)),
+              // 需求（第二十九批）：好友/一起听/私信三入口合并为一项，
+              // 放置在名称右侧原「x首喜欢」处；宫格区的三个磁贴移除。
+              if (loggedIn) const _SocialTriad(),
               const SizedBox(width: 6),
               Icon(
                 loggedIn ? Icons.chevron_right_rounded : Icons.login_rounded,
@@ -578,8 +575,6 @@ class _QuickGrid extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final AuthState auth = ref.watch(authProvider);
-    // 需求（第二十五批）：一起听磁贴副标题随房间状态变化
-    final ListenRoomState listenRoom = ref.watch(listenRoomProvider);
     final String likeSub =
         auth.loggedIn ? '${auth.likedIds.length} 首' : '登录后可用';
     // 第十五批需求：本地音乐授权扫描后在我的页显示歌曲总数
@@ -650,42 +645,8 @@ class _QuickGrid extends ConsumerWidget {
             ],
           ),
           const SizedBox(height: 10),
-          // 需求（第二十五批）：为支持一起听新增「好友」项，
-          // 与「一起听」磁贴同排
-          Row(
-            children: <Widget>[
-              Expanded(
-                child: _QuickHubTile(
-                  icon: Icons.group_rounded,
-                  gradient: _gradients[4],
-                  title: '好友',
-                  subtitle: '邀请好友一起听',
-                  onTap: () => context.push('/friends'),
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: _QuickHubTile(
-                  icon: Icons.headset_mic_rounded,
-                  gradient: _gradients[5],
-                  title: '一起听',
-                  subtitle: listenRoom.inRoom
-                      ? '${listenRoom.users.length} 人房间进行中'
-                      : '开房同步听歌',
-                  onTap: () => context.push('/listen'),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          // 需求（第二十六批）：私信磁贴 —— 副标题展示未读总数
-          Row(
-            children: <Widget>[
-              const Expanded(child: _MessagesTile()),
-              const SizedBox(width: 10),
-              const Expanded(child: SizedBox.shrink()),
-            ],
-          ),
+          // 需求（第二十九批）：好友/一起听/私信三磁贴合并为资料头部
+          // 右侧三合一入口（_SocialTriad），宫格区不再单独占两行。
         ],
       ),
     )
@@ -725,29 +686,314 @@ class _CloudDriveTile extends ConsumerWidget {
   }
 }
 
-/// 私信宫格 tile（需求第二十六批）：天蓝渐变图标块 + 未读总数副标题，
-/// 未读数来自全局会话列表（conversationsProvider，启动即拉 + 私信页刷新）。
-/// 点击进私信会话列表。
-class _MessagesTile extends ConsumerWidget {
-  const _MessagesTile();
+/// 社交三合一入口（需求第二十九批）：好友/一起听/私信合并为一项，
+/// 放置在资料头部名称右侧（原「x首喜欢」处）。三个渐变小圆叠加 +
+/// 私信未读角标；点击弹底部面板列出三项（含未读红点与一起听状态）。
+/// 宫格区原有的三个磁贴已移除（好友/一起听/私信都从这进入）。
+class _SocialTriad extends ConsumerWidget {
+  const _SocialTriad();
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final AuthState auth = ref.watch(authProvider);
-    String subtitle = '登录后可用';
-    if (auth.loggedIn) {
-      final ConversationsState st = ref.watch(conversationsProvider);
-      final int unread = st.unreadTotal;
-      subtitle = unread > 0
-          ? '$unread 条未读消息'
-          : (st.items.isEmpty ? '与好友聊聊歌' : '暂无新消息');
-    }
-    return _QuickHubTile(
-      icon: Icons.chat_bubble_rounded,
-      gradient: const <Color>[Color(0xFF8FD6FF), Color(0xFF3AA0FF)],
-      title: '私信',
-      subtitle: subtitle,
-      onTap: () => context.push('/messages'),
+    final int unread = ref.watch(conversationsProvider).unreadTotal;
+    final bool inRoom = ref.watch(listenRoomProvider).inRoom;
+    const List<(IconData, List<Color>)> items = <(IconData, List<Color>)>[
+      (Icons.group_rounded, <Color>[Color(0xFFC3A5FF), Color(0xFF7C4DFF)]),
+      (
+        Icons.headset_mic_rounded,
+        <Color>[Color(0xFFFFB56B), Color(0xFFFF7A3D)]
+      ),
+      (
+        Icons.chat_bubble_rounded,
+        <Color>[Color(0xFF8FD6FF), Color(0xFF3AA0FF)]
+      ),
+    ];
+    return InkWell(
+      borderRadius: BorderRadius.circular(20),
+      onTap: () {
+        unawaited(showMingSheet<void>(
+          context,
+          builder: (BuildContext ctx) => const _SocialSheet(),
+        ));
+      },
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            for (int i = 0; i < items.length; i++)
+              Transform.translate(
+                offset: Offset(-6.0 * i, 0),
+                child: Stack(
+                  clipBehavior: Clip.none,
+                  children: <Widget>[
+                    Container(
+                      width: 27,
+                      height: 27,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        gradient: LinearGradient(
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                          colors: items[i].$2,
+                        ),
+                        border: Border.all(
+                            color: Theme.of(context)
+                                .colorScheme
+                                .surfaceContainerHighest,
+                            width: 1.6),
+                      ),
+                      child: Icon(items[i].$1, size: 14.5, color: Colors.white),
+                    ),
+                    // 私信未读角标（第三个圆 = 私信）
+                    if (i == 2 && unread > 0)
+                      Positioned(
+                        top: -3,
+                        right: -3,
+                        child: Container(
+                          constraints: const BoxConstraints(minWidth: 15),
+                          height: 15,
+                          padding: const EdgeInsets.symmetric(horizontal: 4),
+                          alignment: Alignment.center,
+                          decoration: BoxDecoration(
+                            color: AppConstants.brandColor,
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(
+                                color: Theme.of(context)
+                                    .colorScheme
+                                    .surfaceContainerHighest,
+                                width: 1.4),
+                          ),
+                          child: Text(
+                            unread > 99 ? '99+' : '$unread',
+                            style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 8.5,
+                                fontWeight: FontWeight.w800),
+                          ),
+                        ),
+                      ),
+                    if (i == 1 && inRoom)
+                      const Positioned(
+                        top: -2,
+                        right: -2,
+                        child: _LiveDot(),
+                      ),
+                  ],
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// 三合一入口的在房绿点（一起听圆右上角）
+class _LiveDot extends StatelessWidget {
+  const _LiveDot();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 9,
+      height: 9,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        color: const Color(0xFF4ADE80),
+        border: Border.all(
+            color: Theme.of(context).colorScheme.surfaceContainerHighest,
+            width: 1.4),
+      ),
+    );
+  }
+}
+
+/// 社交三合一底部面板（需求第二十九批）：好友 / 一起听 / 私信 三行，
+/// 副标题带实时状态（房间人数/未读数），未读行尾红点角标。
+class _SocialSheet extends ConsumerWidget {
+  const _SocialSheet();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final ThemeData theme = Theme.of(context);
+    final ListenRoomState listenRoom = ref.watch(listenRoomProvider);
+    final ConversationsState conversations = ref.watch(conversationsProvider);
+    final int unread = conversations.unreadTotal;
+    return GlassSheet(
+      borderRadius: 24,
+      child: SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 10, 20, 18),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Center(
+                child: Container(
+                  width: 36,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.2),
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 14),
+              const Text('社交',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
+              const SizedBox(height: 4),
+              Text('好友、一起听与私信都在这里',
+                  style: TextStyle(
+                      fontSize: 12, color: theme.colorScheme.onSurfaceVariant)),
+              const SizedBox(height: 14),
+              _SocialSheetTile(
+                icon: Icons.group_rounded,
+                gradient: const <Color>[Color(0xFFC3A5FF), Color(0xFF7C4DFF)],
+                title: '好友',
+                subtitle: '邀请好友一起听',
+                onTap: () {
+                  Navigator.of(context).pop();
+                  context.push('/friends');
+                },
+              ),
+              _SocialSheetTile(
+                icon: Icons.headset_mic_rounded,
+                gradient: const <Color>[Color(0xFFFFB56B), Color(0xFFFF7A3D)],
+                title: '一起听',
+                subtitle: listenRoom.inRoom
+                    ? '${listenRoom.users.length} 人房间进行中'
+                    : '开房同步听歌',
+                trailing: listenRoom.inRoom
+                    ? Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 7, vertical: 2.5),
+                        decoration: BoxDecoration(
+                          color:
+                              const Color(0xFF4ADE80).withValues(alpha: 0.16),
+                          borderRadius: BorderRadius.circular(9),
+                        ),
+                        child: const Text('进行中',
+                            style: TextStyle(
+                                fontSize: 10,
+                                fontWeight: FontWeight.w700,
+                                color: Color(0xFF4ADE80))),
+                      )
+                    : null,
+                onTap: () {
+                  Navigator.of(context).pop();
+                  context.push('/listen');
+                },
+              ),
+              _SocialSheetTile(
+                icon: Icons.chat_bubble_rounded,
+                gradient: const <Color>[Color(0xFF8FD6FF), Color(0xFF3AA0FF)],
+                title: '私信',
+                subtitle: unread > 0
+                    ? '$unread 条未读消息'
+                    : (conversations.items.isEmpty ? '与好友聊聊歌' : '暂无新消息'),
+                trailing: unread > 0
+                    ? Container(
+                        constraints: const BoxConstraints(minWidth: 18),
+                        height: 18,
+                        padding: const EdgeInsets.symmetric(horizontal: 5),
+                        alignment: Alignment.center,
+                        decoration: BoxDecoration(
+                          color: AppConstants.brandColor,
+                          borderRadius: BorderRadius.circular(9),
+                        ),
+                        child: Text(
+                          unread > 99 ? '99+' : '$unread',
+                          style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 10,
+                              fontWeight: FontWeight.w800),
+                        ),
+                      )
+                    : null,
+                onTap: () {
+                  Navigator.of(context).pop();
+                  context.push('/messages');
+                },
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// 社交面板行（渐变圆图标 + 标题 + 副标题 + 可选尾部角标）
+class _SocialSheetTile extends StatelessWidget {
+  const _SocialSheetTile({
+    required this.icon,
+    required this.gradient,
+    required this.title,
+    required this.subtitle,
+    required this.onTap,
+    this.trailing,
+  });
+
+  final IconData icon;
+  final List<Color> gradient;
+  final String title;
+  final String subtitle;
+  final VoidCallback onTap;
+  final Widget? trailing;
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 4),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(14),
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+            child: Row(
+              children: <Widget>[
+                Container(
+                  width: 40,
+                  height: 40,
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(13),
+                    gradient: LinearGradient(
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                      colors: gradient,
+                    ),
+                  ),
+                  child: Icon(icon, size: 20, color: Colors.white),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: <Widget>[
+                      Text(title,
+                          style: const TextStyle(
+                              fontSize: 14.5, fontWeight: FontWeight.w700)),
+                      const SizedBox(height: 2),
+                      Text(subtitle,
+                          style: TextStyle(
+                              fontSize: 11.5,
+                              color: theme.colorScheme.onSurfaceVariant)),
+                    ],
+                  ),
+                ),
+                if (trailing != null) trailing!,
+                Icon(Icons.chevron_right_rounded,
+                    size: 20, color: theme.colorScheme.onSurfaceVariant),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
 }
@@ -937,8 +1183,7 @@ class _PlaylistGridSection extends StatelessWidget {
                       splashRadius: 20,
                       padding: EdgeInsets.zero,
                       icon: Icon(Icons.add_rounded,
-                          size: 24,
-                          color: theme.colorScheme.onSurfaceVariant),
+                          size: 24, color: theme.colorScheme.onSurfaceVariant),
                     ),
                   ),
               ],

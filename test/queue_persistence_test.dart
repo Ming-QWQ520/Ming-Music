@@ -174,8 +174,8 @@ void main() {
       expect(snap.currentIndex, 2);
 
       // 旧档无 currentIndex 字段 → 默认 0
-      await prefs.setString(PrefsKeys.queueHistory,
-          '[{"title":"B","tracks":[],"savedAt":123}]');
+      await prefs.setString(
+          PrefsKeys.queueHistory, '[{"title":"B","tracks":[],"savedAt":123}]');
       expect(persistence.loadHistory().first.currentIndex, 0);
 
       // currentIndex 越界 → clamp 到曲目范围内

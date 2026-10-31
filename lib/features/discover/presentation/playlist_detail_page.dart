@@ -30,6 +30,8 @@ import '../../comments/providers/comments_providers.dart' show CommentsSubject;
 import '../../library/data/download_service.dart';
 import '../../library/domain/track.dart';
 import '../../library/presentation/add_to_playlist_sheet.dart';
+import '../../social/presentation/share_to_friend_sheet.dart'
+    show showShareToFriendSheet;
 import '../../player/providers/cache_providers.dart';
 import '../../player/providers/player_providers.dart';
 import '../data/netease_providers.dart';
@@ -38,6 +40,7 @@ import 'widgets/song_tile.dart' show VipBadge;
 import '../../../core/widgets/sheet_host.dart' show showMingSheet;
 
 import '../../../core/widgets/app_notify.dart';
+
 class PlaylistDetailPage extends ConsumerStatefulWidget {
   const PlaylistDetailPage._({
     required this.playlistId,
@@ -368,7 +371,8 @@ class _DetailBodyState extends ConsumerState<_DetailBody> {
     }
     if (!mounted) return;
     setState(() => _downloading = false);
-    AppNotify.show('下载完成：$okCount/${widget.tracks.length} 首，已保存到 Music/MingMusic');
+    AppNotify.show(
+        '下载完成：$okCount/${widget.tracks.length} 首，已保存到 Music/MingMusic');
   }
 
   void _showMoreMenu() {
@@ -407,6 +411,18 @@ class _DetailBodyState extends ConsumerState<_DetailBody> {
                   );
                 },
               ),
+              // 需求（第二十九批）：私信分享歌单给好友
+              //（POST /send/playlist，文档「发送私信(带歌单)」接入）
+              if (widget.meta.id > 0)
+                ListTile(
+                  leading: const Icon(Icons.mail_outline_rounded, size: 22),
+                  title: const Text('私信分享给好友', style: TextStyle(fontSize: 15)),
+                  onTap: () {
+                    Navigator.of(ctx).pop();
+                    showShareToFriendSheet(context, ref,
+                        kind: 'playlist', id: widget.meta.id, name: _title);
+                  },
+                ),
               // 每日推荐虚拟歌单：无真实 id，不提供收藏/移除操作
               if (widget.meta.id > 0)
                 ListTile(

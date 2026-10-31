@@ -169,8 +169,20 @@ class _FluidBackgroundState extends State<_FluidBackground>
   late final AnimationController _controller;
 
   /// 光斑配置：颜色 / 基准位置（Alignment） / 漂移幅度 / 速度与相位
-  static const List<({Color color, Alignment base, Offset drift, double speed, double phase})>
-      _blobs = <({Color color, Alignment base, Offset drift, double speed, double phase})>[
+  static const List<
+      ({
+        Color color,
+        Alignment base,
+        Offset drift,
+        double speed,
+        double phase
+      })> _blobs = <({
+    Color color,
+    Alignment base,
+    Offset drift,
+    double speed,
+    double phase
+  })>[
     (
       color: Color(0xFFE2483D), // 品牌红
       base: Alignment(-0.55, -0.55),
@@ -250,10 +262,14 @@ class _FluidBackgroundState extends State<_FluidBackground>
                 alignment: Alignment(
                   _blobs[i].base.x +
                       _blobs[i].drift.dx *
-                          math.sin(2 * math.pi * (t * _blobs[i].speed + _blobs[i].phase)),
+                          math.sin(2 *
+                              math.pi *
+                              (t * _blobs[i].speed + _blobs[i].phase)),
                   _blobs[i].base.y +
                       _blobs[i].drift.dy *
-                          math.cos(2 * math.pi * (t * _blobs[i].speed * 0.83 + _blobs[i].phase)),
+                          math.cos(2 *
+                              math.pi *
+                              (t * _blobs[i].speed * 0.83 + _blobs[i].phase)),
                 ),
                 child: _FluidBlob(
                   size: base * (0.62 + 0.10 * i),

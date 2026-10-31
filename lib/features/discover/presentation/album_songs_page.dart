@@ -9,6 +9,8 @@ import '../../../core/constants/app_constants.dart';
 import '../../../core/widgets/cover_image.dart';
 import '../../library/domain/track.dart';
 import '../../player/providers/player_providers.dart';
+import '../../social/presentation/share_to_friend_sheet.dart'
+    show showShareToFriendSheet;
 import '../data/netease_providers.dart';
 import 'widgets/song_actions_sheet.dart';
 import 'widgets/song_tile.dart';
@@ -153,6 +155,21 @@ class _AlbumBody extends ConsumerWidget {
                 Text('播放全部 (${tracks.length})',
                     style: const TextStyle(
                         fontSize: 15, fontWeight: FontWeight.w700)),
+                const Spacer(),
+                // 需求（第二十九批）：私信分享专辑
+                //（POST /send/album，文档「发送私信(带专辑)」接入）
+                TextButton.icon(
+                  onPressed: () => showShareToFriendSheet(context, ref,
+                      kind: 'album',
+                      id: detail.meta.id,
+                      name: detail.meta.name),
+                  icon: const Icon(Icons.mail_outline_rounded, size: 17),
+                  label: const Text('私信分享', style: TextStyle(fontSize: 12.5)),
+                  style: TextButton.styleFrom(
+                    foregroundColor: AppConstants.brandColor,
+                    padding: const EdgeInsets.symmetric(horizontal: 10),
+                  ),
+                ),
               ],
             ),
           ),

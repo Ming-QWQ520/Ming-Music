@@ -15,11 +15,16 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../core/constants/app_constants.dart';
+import '../../../core/api/netease_models.dart' show Song;
 import '../../../core/widgets/app_notify.dart';
 import '../../../core/widgets/user_avatar.dart';
 import '../../auth/providers/auth_providers.dart' show AuthState, authProvider;
+import '../../discover/data/netease_providers.dart'
+    show neteaseRepositoryProvider;
+import '../../library/domain/track.dart';
 import '../../listen/providers/listen_room_provider.dart'
     show ListenInvite, listenRoomProvider;
+import '../../player/providers/player_providers.dart' show playerProvider;
 import '../data/message_repository.dart';
 import '../providers/message_providers.dart' show messageRepositoryProvider;
 
@@ -323,6 +328,8 @@ class _Bubble extends StatelessWidget {
                     self: self,
                     onJoin: () => onJoin(msg.invite!),
                   )
+                else if (msg.share != null)
+                  _ShareCard(share: msg.share!, self: self)
                 else
                   Container(
                     constraints: BoxConstraints(
@@ -550,3 +557,130 @@ String _fmt(int ms) {
   final String mm = d.minute.toString().padLeft(2, '0');
   return '${d.month}/${d.day} $hh:$mm';
 }
+
+/// 私信分享卡（需求第二十九批：带歌曲/专辑/歌单的私信）：
+/// 歌曲卡点击即播；专辑/歌单卡点击进入对应详情页。
+class _ShareCard extends ConsumerWidget {
+  const _ShareCard({required this.share, required this.self});
+
+  final MsgShare share;
+  final bool self;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final ThemeData theme = Theme.of(context);
+    final (IconData icon, String label, List<Color> colors) =
+        switch (share.kind) {
+      'album' => (
+          Icons.album_rounded,
+          '专辑',
+          const <Color>[Color(0xFFFFB56B), Color(0xFFFF7A3D)]
+        ),
+      'playlist' => (
+          Icons.queue_music_rounded,
+          '歌单',
+          const <Color>[Color(0xFF8FD6FF), Color(0xFF3AA0FF)]
+        ),
+      _ => (
+          Icons.music_note_rounded,
+          '歌曲',
+          const <Color>[Color(0xFFFF85A1), Color(0xFFFF3366)]
+        ),
+    };
+    final String name = share.name.isNotEmpty
+        ? share.name
+        : '未知名${_shareKindLabel(share.kind)}';
+    return InkWell(
+      borderRadius: BorderRadius.circular(14),
+      onTap: () => _onTap(context, ref),
+      child: Container(
+        width: MediaQuery.of(context).size.width * 0.6,
+        padding: const EdgeInsets.all(11),
+        decoration: BoxDecoration(
+          color:
+              theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.6),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(
+            color: AppConstants.brandColor.withValues(alpha: 0.35),
+          ),
+        ),
+        child: Row(
+          children: <Widget>[
+            Container(
+              width: 42,
+              height: 42,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(11),
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: colors,
+                ),
+              ),
+              child: Icon(icon, size: 22, color: Colors.white),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Text(
+                    name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                        fontSize: 13, fontWeight: FontWeight.w700),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    share.hint.isNotEmpty
+                        ? share.hint
+                        : '$label分享 · 点击${share.kind == 'song' ? '播放' : '查看'}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                        fontSize: 10.5,
+                        color: theme.colorScheme.onSurfaceVariant),
+                  ),
+                ],
+              ),
+            ),
+            Icon(Icons.chevron_right_rounded,
+                size: 18, color: theme.colorScheme.onSurfaceVariant),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _onTap(BuildContext context, WidgetRef ref) async {
+    switch (share.kind) {
+      case 'song':
+        try {
+          final List<Song> songs = await ref
+              .read(neteaseRepositoryProvider)
+              .songDetails(<int>[share.id]);
+          if (songs.isEmpty || !context.mounted) {
+            AppNotify.show('歌曲加载失败');
+            return;
+          }
+          await ref.read(playerProvider.notifier).playSongs(
+            <Track>[songs.first.toTrack()],
+            queueTitle: '私信分享',
+          );
+        } catch (_) {
+          AppNotify.show('歌曲加载失败');
+        }
+      case 'playlist':
+        context.push('/playlist/${share.id}');
+      case 'album':
+        context.push('/album/${share.id}');
+    }
+  }
+}
+
+String _shareKindLabel(String kind) => switch (kind) {
+      'album' => '专辑',
+      'playlist' => '歌单',
+      _ => '歌曲',
+    };

@@ -141,6 +141,14 @@ class ListenTogetherService {
   /// 已应用命令的元组标识（第二十六批：替代不可靠的 serverSeq 判重）
   String _lastAppliedIdentity = '';
 
+  /// 最近一次读到的房间队列签名（空→非空/变化时回调 onRoomPlaylist）
+  String _lastRoomPlaylistKey = '';
+
+  /// 房间队列变化回调（轮询读到 displayList 变化时触发）。
+  /// 上层（provider）据此把对方公布的队列采纳到本机 ——「切换歌单/
+  /// 添加歌曲立即同步」的接收侧（第二十九批重补，二十八批丢失）。
+  void Function(List<int> songIds)? onRoomPlaylist;
+
   /// 防回环窗口截止时刻：应用对方命令后短时间内不上报本机状态
   DateTime _suppressReportUntil = DateTime.fromMillisecondsSinceEpoch(0);
 
@@ -227,8 +235,13 @@ class ListenTogetherService {
   /// 状态已丢而服务端会话仍在时）再调 create，服务端会把**当前所在的
   /// 好友房间**原样返回，本地就会把自己误置为房主（isCreator=true），
   /// 还会把访客的队列 REPLACE 覆盖房主队列（房间被访客篡改）。
-  /// 因此本端硬性防护：service 已持房时拒绝重复创建；上层 Notifier
-  /// 另有「创建前 status 前置检查 + 服务端房间恢复」双保险。
+  ///
+  /// ⚠️ 第二十九批「创建房间是概率事件」根治：清场（end）后服务端
+  /// 会话残留偶发未过期，create 会把旧房间原样返回 → 旧版直接报错
+  /// 「请等几秒后再创建」（用户视角=创建失败）。现在自动 **end 旧房
+  /// → 等待 → 重试**（最多 3 次）；并用响应里的 creatorId 做**权威
+  /// 复核**——返回他人房间（creatorId≠我，含 restart 后清场登记丢失
+  /// 的场景）一律拒绝认领，绝不误置 isCreator=true。
   Future<String?> createRoom() async {
     // 本地持房检查放最前（无需登录/网络即可判定的硬防护）
     if (_roomId != null) {
@@ -236,21 +249,92 @@ class ListenTogetherService {
     }
     final String? loginErr = await ensureLogin();
     if (loginErr != null) return loginErr;
+    for (int attempt = 1; attempt <= 3; attempt++) {
+      try {
+        _ltLog('room/create 请求中(#$attempt)...');
+        // 模块源码实证：refer 由 api-enhanced 模块内部硬编码
+        //（songplay_more），客户端不传
+        final Map<String, Object?> res = await _api
+            .get('/listentogether/room/create', const <String, String>{});
+        final Map<String, Object?> data = apiPayload(res);
+        final Map<String, Object?>? roomInfo =
+            (data['roomInfo'] ?? res['roomInfo']) as Map<String, Object?>?;
+        final String? id = roomInfo?['roomId'] as String?;
+        if (id == null || id.isEmpty) {
+          _ltLog('room/create 响应缺房间号: ${res.keys.toList()}');
+          return '创建房间失败：响应缺少房间号';
+        }
+        // 旧房间回显（清场残留）：end 掉再重试，用户无感
+        if (_vacatedRoomIds.contains(id)) {
+          _ltLog('room/create 返回旧房间 $id（清场残留），end 后重试');
+          await endRoomById(id);
+          if (attempt < 3) {
+            await Future<void>.delayed(const Duration(milliseconds: 900));
+            continue;
+          }
+          return '创建房间失败：旧房间仍在生效中，请几秒后再试';
+        }
+        // creatorId 权威复核：返回他人房间一律拒绝（「房主却是我」防线
+        // 的最后一道，覆盖 restart 后清场登记丢失的场景）
+        final int? creatorId =
+            _toInt(roomInfo?['creatorId'] ?? roomInfo?['createUserId']);
+        if (creatorId != null && creatorId > 0 && creatorId != _myUserId) {
+          _ltLog('room/create 返回他人房间 creatorId=$creatorId '
+              'me=$_myUserId，拒绝认领');
+          return '创建房间失败：你的账号还在别人的房间中，请先退出再创建';
+        }
+        _ltLog('room/create 成功 roomId=$id');
+        _roomId = id;
+        _isCreator = true;
+        _inviterId = _myUserId;
+        _lastAppliedIdentity = '';
+        _vacatedRoomIds.remove(id);
+        return null;
+      } catch (e) {
+        _ltLog('room/create 失败(#$attempt): $e');
+        if (attempt >= 3) return '创建房间失败：${_short(e)}';
+        await Future<void>.delayed(const Duration(milliseconds: 600));
+      }
+    }
+    return '创建房间失败：请稍后再试';
+  }
+
+  /// 已清场/退出过的房间号登记（第二十九批，沿袭二十八批设计）：
+  /// room/create 对在房账号会把旧房间原样返回 —— 响应若命中这里
+  /// 登记的房间号，绝不误置 isCreator=true（「房主却是我」变体的防线）。
+  final List<String> _vacatedRoomIds = <String>[];
+
+  /// 登记「已清场/退出」的房间号（createRoom 旧房间回显防线）
+  void markVacatedRoom(String roomId) {
+    if (roomId.isEmpty) return;
+    _vacatedRoomIds.add(roomId);
+    if (_vacatedRoomIds.length > 5) {
+      _vacatedRoomIds.removeAt(0);
+    }
+  }
+
+  /// 对指定房间号调用 /listentogether/end（清场用：创建新房间前，
+  /// 若服务端仍指认我在某房间且我是房主，先关掉旧房间）。
+  Future<void> endRoomById(String roomId) async {
+    if (roomId.isEmpty) return;
+    bool ended = false;
     try {
-      final Map<String, Object?> res = await _api
-          .get('/listentogether/room/create', const <String, String>{});
-      final Map<String, Object?> data = apiPayload(res);
-      final Map<String, Object?>? roomInfo =
-          (data['roomInfo'] ?? res['roomInfo']) as Map<String, Object?>?;
-      final String? id = roomInfo?['roomId'] as String?;
-      if (id == null || id.isEmpty) return '创建房间失败：响应缺少房间号';
-      _roomId = id;
-      _isCreator = true;
-      _inviterId = _myUserId;
-      _lastAppliedIdentity = '';
-      return null;
+      final Map<String, Object?> res = await _api.post(
+          '/listentogether/end', <String, String>{'roomId': roomId},
+          throwOnCode: false);
+      final int code = (res['code'] as num?)?.toInt() ?? 0;
+      ended = code == 200;
+      _ltLog('end($roomId) => code=${res['code']} '
+          'success=${apiPayload(res)['success']} ended=$ended');
     } catch (e) {
-      return '创建房间失败：${_short(e)}';
+      _ltLog('end($roomId) 失败: $e');
+    }
+    if (ended) {
+      // 已确认关闭：解除旧房登记 —— 网易可能复用房间号，登记会误拦
+      // 后续创建返回的同一房间号（「清场后永远创建不了」变体）
+      _vacatedRoomIds.remove(roomId);
+    } else {
+      markVacatedRoom(roomId);
     }
   }
 
@@ -369,6 +453,8 @@ class ListenTogetherService {
     _isCreator = false;
     _inviterId = 0;
     _lastAppliedIdentity = '';
+    if (rid != null) markVacatedRoom(rid);
+    _ltLog('leave(end=$end) rid=$rid');
     if (end && rid != null) {
       try {
         final Map<String, Object?> res = await _api.post(
@@ -462,15 +548,28 @@ class ListenTogetherService {
       );
       final int code = (res['code'] as num?)?.toInt() ?? 0;
       if (code != 200) {
-        return '同步失败（${(res['message'] ?? 'code $code')}）';
+        _ltLog('play/command($commandType song=$targetSongId) 失败 '
+            'code=$code msg=${res['message'] ?? res['msg']}');
+        return '同步失败（${(res['message'] ?? res['msg'] ?? 'code $code')}）';
       }
+      _ltLog('play/command $commandType song=$targetSongId '
+          'progress=${progressMs.clamp(0, 1 << 31)} status=$playStatus ok');
       return null;
     } catch (e) {
+      _ltLog('play/command($commandType) 异常: $e');
       return '同步失败：${_short(e)}';
     }
   }
 
   /// 队列公布（REPLACE 当前播放列表，加入者可取到整个列表）。返回错误文案或 null。
+  ///
+  /// ⚠️ 参数形态（第二十九批线上实证）：api-enhanced 模块源码是**服务端**
+  /// 把平铺字段包装成 playlistParam JSON 串 —— 客户端必须发送**平铺参数**
+  /// （commandType/userId/version/randomList CSV/displayList CSV）。二十八批
+  /// 误改为客户端自带 playlistParam JSON —— 模块读不到 query.randomList →
+  /// `undefined.split()` 抛错 → 线上实测 `code=404 msg=null`（队列从未公布
+  /// 成功，成员 playlist/get 恒空 →「完全各听各的」的直接根因）。本版回归
+  /// 平铺参数并补诊断日志。
   Future<String?> syncList(List<int> songIds) async {
     final String? rid = _roomId;
     if (rid == null) return '当前不在房间内';
@@ -491,15 +590,23 @@ class ListenTogetherService {
       );
       final int code = (res['code'] as num?)?.toInt() ?? 0;
       if (code != 200) {
-        return '队列同步失败（${(res['message'] ?? 'code $code')}）';
+        _ltLog('sync/list(REPLACE n=${songIds.length}) 失败 '
+            'code=$code msg=${res['message'] ?? res['msg']}');
+        return '队列同步失败（${(res['message'] ?? res['msg'] ?? 'code $code')}）';
       }
+      _ltLog('sync/list REPLACE n=${songIds.length} ok');
       return null;
     } catch (e) {
+      _ltLog('sync/list 异常: $e');
       return '队列同步失败：${_short(e)}';
     }
   }
 
-  /// 读取房间队列（sync/playlist/get → displayList.result，加入后同步本地列表）
+  /// 读取房间队列（sync/playlist/get → displayList，加入后同步本地列表）。
+  ///
+  /// 第二十九批字段宽容升级（沿袭二十八批）：响应结构在不同部署/版本间
+  /// 差异大，改为深度递归搜索 displayList（任意层级、数组/CSV字符串/
+  /// 对象元素均兼容），并同步登记队列签名（避免轮询重复回调）。
   Future<List<int>> fetchRoomPlaylist() async {
     final String? rid = _roomId;
     if (rid == null) return const <int>[];
@@ -509,20 +616,22 @@ class ListenTogetherService {
         <String, String>{'roomId': rid},
         throwOnCode: false,
       );
-      final Map<String, Object?> data = apiPayload(res);
-      final Object? playlist = data['playlist'];
-      final Object? display =
-          playlist is Map<String, Object?> ? playlist['displayList'] : null;
-      final Object? result =
-          display is Map<String, Object?> ? display['result'] : null;
-      if (result is List<Object?>) {
-        return <int>[
-          for (final Object? v in result)
-            if (v is num) v.toInt() else if (v is String) int.tryParse(v) ?? 0,
-        ]..removeWhere((int v) => v <= 0);
+      final int code = (res['code'] as num?)?.toInt() ?? 0;
+      if (code != 200) {
+        _ltLog('playlist/get 失败 code=$code');
+        return const <int>[];
       }
+      final Map<String, Object?> data = apiPayload(res);
+      final List<int> ids = extractSongIds(data);
+      if (ids.isNotEmpty) {
+        _lastRoomPlaylistKey = ids.join(',');
+        _ltLog('playlist/get => ${ids.length} 首');
+        return ids;
+      }
+      _ltLog('playlist/get 无队列字段 keys=${data.keys.toList()}');
       return const <int>[];
-    } catch (_) {
+    } catch (e) {
+      _ltLog('playlist/get 异常: $e');
       return const <int>[];
     }
   }
@@ -548,7 +657,7 @@ class ListenTogetherService {
     _heartbeatTimer = null;
   }
 
-  /// 轮询读通路：sync/playlist/get → playCommand（房内最新命令）
+  /// 轮询读通路：sync/playlist/get → 房间队列变化 + playCommand（房内最新命令）
   Future<void> _poll() async {
     if (!_polling || _roomId == null) return;
     try {
@@ -560,12 +669,37 @@ class ListenTogetherService {
       final int code = (res['code'] as num?)?.toInt() ?? 0;
       if (code == 488) {
         // 房间会话已死亡：停止轮询并通知上层重建/退出
+        _ltLog('poll => 488 房间失效');
         onRoomExpired?.call();
         return;
       }
-      if (code != 200) return; // 抖动静默，下一轮再试
-      final ListenPlayCommand? cmd = _extractCommand(apiPayload(res));
-      if (cmd == null) return;
+      if (code != 200) {
+        // 抖动静默，下一轮再试（偶发 code 记录一下便于诊断）
+        if (code != 0) _ltLog('poll => code=$code（静默重试）');
+        return;
+      }
+      final Map<String, Object?> payload = apiPayload(res);
+      // 房间队列变化（对方 REPLACE 公布）→ 通知上层采纳
+      //（「切换歌单/添加歌曲立即同步」的接收侧，第二十九批重补）
+      final List<int> roomIds = extractSongIds(payload);
+      if (roomIds.isNotEmpty) {
+        final String key = roomIds.join(',');
+        if (key != _lastRoomPlaylistKey) {
+          _lastRoomPlaylistKey = key;
+          _ltLog('poll 房间队列变化 => ${roomIds.length} 首');
+          onRoomPlaylist?.call(roomIds);
+        }
+      }
+      final ListenPlayCommand? cmd = extractPlayCommand(payload);
+      if (cmd == null) {
+        _lastEmptyPoll = true;
+        return;
+      }
+      if (_lastEmptyPoll) {
+        _lastEmptyPoll = false;
+        _ltLog('poll 收到首条命令: type=${cmd.commandType} '
+            'song=${cmd.targetSongId} from=${cmd.userId} me=$_myUserId');
+      }
       // 幂等判重：同一命令元组重复读到时丢弃（serverSeq 随读取变化，
       // 不能用作新旧判定 —— 实测同一命令两次读 serverSeq 不同）
       if (cmd.identity == _lastAppliedIdentity) return;
@@ -574,40 +708,172 @@ class ListenTogetherService {
         // 官方语义：读到带自己 userId 的命令通常是本机命令回显；
         // 例外：clientSeq==0 的初始命令是 accept 后服务端为
         // 新成员合成的「加入对齐」（指向房间当前歌），要应用。
-        if (!(cmd.clientSeq == 0 && cmd.targetSongId > 0)) return;
+        if (!(cmd.clientSeq == 0 && cmd.targetSongId > 0)) {
+          _ltLog('poll 跳过本机回显: type=${cmd.commandType} '
+              'song=${cmd.targetSongId} seq=${cmd.clientSeq}');
+          return;
+        }
+        _ltLog('poll 应用加入对齐命令: song=${cmd.targetSongId}');
+      } else {
+        _ltLog('poll 应用对方命令: type=${cmd.commandType} '
+            'song=${cmd.targetSongId} progress=${cmd.progressMs} '
+            'status=${cmd.playStatus} from=${cmd.userId}');
       }
       onCommand?.call(cmd);
-    } catch (_) {
-      // 静默：网络抖动下一轮重试
+    } catch (e) {
+      _ltLog('poll 异常: $e');
     }
   }
 
-  /// 宽容解析 playCommand：兼容顶层 / playlist 包裹两种结构
-  ListenPlayCommand? _extractCommand(Map<String, Object?> data) {
-    Map<String, Object?>? raw =
-        (data['playCommand'] ?? data['play_command']) as Map<String, Object?>?;
-    if (raw == null) {
-      final Object? playlist = data['playlist'];
-      if (playlist is Map<String, Object?>) {
-        raw = (playlist['playCommand'] ?? playlist['play_command'])
-            as Map<String, Object?>?;
-      }
+  /// 上一次轮询是否为空（只在 空→非空 边界打日志，避免每 2s 刷屏）
+  bool _lastEmptyPoll = true;
+
+  /// 宽容解析 playCommand（第二十九批升级，公开静态供单测）：深度递归
+  /// 找任意带 commandType 的 map —— 顶层 playCommand / playList 内嵌 /
+  /// commandHead+commandInfo 分层结构均兼容。字段合并顺序：命中层 →
+  /// 命中层自带的 commandInfo/commandHead 子层 → 命中层为 commandInfo
+  /// 时的**兄弟层** commandHead（网易真实结构 playCommand{commandHead:
+  /// {userId,serverSeq}, commandInfo:{commandType,...}}）与父层兑底字段。
+  /// 优先取「播放型」命令，全无时回退第一条（REPLACE 等队列型命令无害：
+  /// 上层按 targetSongId=0 忽略）。
+  static ListenPlayCommand? extractPlayCommand(Map<String, Object?> data) {
+    ({
+      Map<String, Object?> map,
+      Map<String, Object?>? parent,
+      Object? key
+    })? hit = _findCommandMap(data, true);
+    hit ??= _findCommandMap(data, false);
+    if (hit == null) return null;
+    final Map<String, Object?> merged = Map<String, Object?>.of(hit.map);
+    for (final String k in const <String>[
+      'commandInfo',
+      'command_info',
+      'commandHead',
+      'command_head',
+    ]) {
+      final Object? layer = hit.map[k];
+      if (layer is Map<String, Object?>) merged.addAll(layer);
     }
-    if (raw == null) return null;
-    final Object? seq = raw['serverSeq'] ?? raw['server_seq'];
-    final Object? type = raw['commandType'] ?? raw['command_type'];
-    if (seq == null || type == null) return null;
-    final Object? song = raw['targetSongId'] ?? raw['songId'] ?? raw['songId'];
+    final String hitKey = '${hit.key}';
+    if (hitKey == 'commandInfo' || hitKey == 'command_info') {
+      // 兄弟层 commandHead 携带 userId/serverSeq（不在 commandInfo 内）
+      for (final String k in const <String>['commandHead', 'command_head']) {
+        final Object? layer = hit.parent?[k];
+        if (layer is Map<String, Object?>) merged.addAll(layer);
+      }
+      // 父层兑底：仅填补缺失键（不覆盖命中层已提取的值）
+      hit.parent?.forEach((Object? k, Object? v) {
+        if (k is String && merged[k] == null) merged[k] = v;
+      });
+    }
+    final Object? type = merged['commandType'] ?? merged['command_type'];
+    if (type == null) return null;
+    final Object? seq = merged['serverSeq'] ?? merged['server_seq'];
+    final Object? song =
+        merged['targetSongId'] ?? merged['target_song_id'] ?? merged['songId'];
     return ListenPlayCommand(
-      userId: (raw['userId'] as num?)?.toInt() ?? 0,
+      userId: _toInt(merged['userId']) ?? 0,
       commandType: '$type',
-      targetSongId: (song as num?)?.toInt() ?? int.tryParse('$song') ?? 0,
-      progressMs: (raw['progress'] as num?)?.toInt() ?? 0,
-      playStatus: (raw['playStatus'] as String?) ?? '',
-      serverSeq: (seq as num?)?.toInt() ?? 0,
-      clientSeq: (raw['clientSeq'] as num?)?.toInt() ?? 0,
+      targetSongId: _toInt(song) ?? 0,
+      progressMs: _toInt(merged['progress']) ?? 0,
+      playStatus: '${merged['playStatus'] ?? merged['play_status'] ?? ''}',
+      serverSeq: _toInt(seq) ?? 0,
+      clientSeq: _toInt(merged['clientSeq'] ?? merged['client_seq']) ?? 0,
       receivedAt: DateTime.now(),
     );
+  }
+
+  /// 深度递归找带 commandType 的 map（记录父 map 与在父层中的键名，
+  /// 供 commandInfo 兄弟层 commandHead 合并）。playOnly=true 时跳过
+  /// REPLACE/ADD 队列型命令。
+  static ({
+    Map<String, Object?> map,
+    Map<String, Object?>? parent,
+    Object? key
+  })? _findCommandMap(
+    Object? node,
+    bool playOnly, {
+    Map<String, Object?>? parent,
+    Object? key,
+  }) {
+    if (node is Map<String, Object?>) {
+      final Object? t = node['commandType'] ?? node['command_type'];
+      if (t != null) {
+        final String ts = '$t';
+        if (!playOnly || (ts != 'REPLACE' && ts != 'ADD')) {
+          return (map: node, parent: parent, key: key);
+        }
+      }
+      for (final MapEntry<String, Object?> e in node.entries) {
+        final ({
+          Map<String, Object?> map,
+          Map<String, Object?>? parent,
+          Object? key
+        })? r = _findCommandMap(e.value, playOnly, parent: node, key: e.key);
+        if (r != null) return r;
+      }
+    } else if (node is List<Object?>) {
+      for (final Object? child in node) {
+        final ({
+          Map<String, Object?> map,
+          Map<String, Object?>? parent,
+          Object? key
+        })? r = _findCommandMap(child, playOnly, parent: parent, key: key);
+        if (r != null) return r;
+      }
+    }
+    return null;
+  }
+
+  /// 深度优先在任意嵌套结构中找 key 对应的值（响应结构在不同部署/
+  /// 版本间差异大：playList/playlist、任意包裹层均兼容）。
+  static Object? _findDeep(Object? node, String key) {
+    if (node is Map<String, Object?>) {
+      final Object? v = node[key];
+      if (v != null) return v;
+      for (final Object? child in node.values) {
+        final Object? r = _findDeep(child, key);
+        if (r != null) return r;
+      }
+    } else if (node is List<Object?>) {
+      for (final Object? child in node) {
+        final Object? r = _findDeep(child, key);
+        if (r != null) return r;
+      }
+    }
+    return null;
+  }
+
+  /// 从任意响应负载中提取房间队列 id 列表（深度搜索 displayList，
+  /// 回退 randomList；元素兼容 num/字符串 CSV/对象 {id, songId} 三形态）
+  static List<int> extractSongIds(Object? payload) {
+    final Object? raw =
+        _findDeep(payload, 'displayList') ?? _findDeep(payload, 'randomList');
+    final List<Object?>? items = raw is List<Object?>
+        ? raw
+        : raw is String && raw.isNotEmpty
+            ? raw.split(',')
+            : null;
+    if (items == null) return const <int>[];
+    return <int>[
+      for (final Object? v in items)
+        if (v is num)
+          v.toInt()
+        else if (v is String)
+          int.tryParse(v.trim()) ?? 0
+        else if (v is Map<String, Object?>)
+          (v['id'] as num?)?.toInt() ??
+              (v['songId'] as num?)?.toInt() ??
+              int.tryParse('${v['id'] ?? v['songId']}') ??
+              0,
+    ]..removeWhere((int v) => v <= 0);
+  }
+
+  /// 数字宽容转换（num/字符串均可；解析失败返回 null）
+  static int? _toInt(Object? v) {
+    if (v is num) return v.toInt();
+    if (v is String) return int.tryParse(v);
+    return null;
   }
 
   /// 心跳保活（携带本机当前播放状态）。
@@ -648,6 +914,14 @@ class ListenTogetherService {
 /// 调试输出开关（release 静默）
 void debugListenLog(String message) {
   if (kDebugMode) debugPrint('[listen-together] $message');
+}
+
+/// 一起听诊断日志（`[listen]` 前缀 + 时间戳，release 也可输出 ——
+/// 用户可直接导出 logcat 取证同步链路；二十九批重补，二十八批丢失）
+void _ltLog(String message) {
+  final String ts = DateTime.now().toString();
+  debugPrint(
+      '[listen] ${ts.length >= 23 ? ts.substring(11, 23) : ts} $message');
 }
 
 /// 宽容提取房主 userId：不同部署/版本字段名不定，逐个候选键匹配。

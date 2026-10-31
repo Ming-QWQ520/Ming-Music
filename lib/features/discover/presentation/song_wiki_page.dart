@@ -25,6 +25,7 @@ import '../data/netease_providers.dart' show neteaseRepositoryProvider;
 import 'mv_player_page.dart';
 
 import '../../../core/widgets/app_notify.dart';
+
 class SongWikiPage extends ConsumerWidget {
   const SongWikiPage({
     super.key,

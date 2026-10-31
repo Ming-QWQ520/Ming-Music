@@ -36,6 +36,7 @@ import '../../settings/presentation/widgets/update_dialog.dart';
 import '../../settings/services/app_update_service.dart';
 
 import '../../../core/widgets/app_notify.dart';
+
 /// 当前 Tab
 final NotifierProvider<TabNotifier, int> selectedTabProvider =
     NotifierProvider<TabNotifier, int>(TabNotifier.new);

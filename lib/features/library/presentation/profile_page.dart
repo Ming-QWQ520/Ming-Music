@@ -31,6 +31,7 @@ import '../../library/domain/track.dart';
 import '../../player/providers/player_providers.dart';
 
 import '../../../core/widgets/app_notify.dart';
+
 class ProfilePage extends ConsumerStatefulWidget {
   const ProfilePage({super.key});
 

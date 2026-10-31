@@ -364,7 +364,8 @@ class LyricData {
 
 /// 热搜词（/search/hot/detail）
 class HotWord {
-  const HotWord({required this.word, this.iconUrl, this.score = 0, this.iconType = 0});
+  const HotWord(
+      {required this.word, this.iconUrl, this.score = 0, this.iconType = 0});
 
   final String word;
   final String? iconUrl;
@@ -1030,7 +1031,8 @@ class KeywordSuggest {
     Song? hitSong;
     SearchArtist? hitArtist;
     final List<SuggestWord> rows = <SuggestWord>[];
-    final List<Object?> order = (r['order'] as List<Object?>?) ?? const <Object?>[];
+    final List<Object?> order =
+        (r['order'] as List<Object?>?) ?? const <Object?>[];
     for (final Object? g in order) {
       if (g is! String) continue;
       final List<Object?>? items = r[g] as List<Object?>?;
@@ -1065,7 +1067,9 @@ class KeywordSuggest {
     }
     return KeywordSuggest(
       songs: hitSong == null ? const <Song>[] : <Song>[hitSong],
-      artists: hitArtist == null ? const <SearchArtist>[] : <SearchArtist>[hitArtist],
+      artists: hitArtist == null
+          ? const <SearchArtist>[]
+          : <SearchArtist>[hitArtist],
       words: rows,
       recTitle: '相关搜索',
       recs: const <String>[],

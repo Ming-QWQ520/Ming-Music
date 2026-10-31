@@ -72,6 +72,25 @@ class MingAudioHandler extends BaseAudioHandler with SeekHandler {
     _onPreviousRequest = onPrevious;
   }
 
+  /// 内核播放错误回调（第二十九批「播完不下一首/搜过的歌播不出」
+  /// 兕底）：playbackEvent 流报错且**已不在播放**（加载失败停摆，
+  /// 而非播放中的抖动）时通知上层自愈。
+  Future<void> Function()? _onPlaybackError;
+
+  void setPlaybackErrorHandler(Future<void> Function() handler) {
+    _onPlaybackError = handler;
+  }
+
+  /// 在当前下标原位替换音源（不触碰当前播放曲目）。
+  /// 第二批「播完不下一首」根治用：临近结束时预刷新下一首的过期直链
+  ///（insert + remove 组合，just_audio 无 replaceAudioSource API）。
+  Future<void> replaceSourceAt(int index, Track t) async {
+    if (index < 0 || index >= _player.audioSources.length) return;
+    if (index == _player.currentIndex) return; // 绝不动当前音源
+    await _player.insertAudioSource(index, _sourceOf(t));
+    await _player.removeAudioSourceAt(index + 1);
+  }
+
   /// 通知栏红心点击 → 上层执行喜欢/取消喜欢（成功后回调 [setLiked]）
   void setLikeHandler(Future<void> Function()? handler) {
     _onToggleLike = handler;
@@ -87,8 +106,17 @@ class MingAudioHandler extends BaseAudioHandler with SeekHandler {
   void _bindEventStreams() {
     _player.playbackEventStream.listen(
       _broadcastState,
-      onError: (Object e, StackTrace st) =>
-          debugPrint('MingAudioHandler playbackEvent error: $e'),
+      onError: (Object e, StackTrace st) {
+        debugPrint('MingAudioHandler playbackEvent error: $e');
+        // 仅在「已不在播放」时上报自愈：加载失败（过期直链等）会让
+        // 播放直接停摆；播放中的抖动性错误内核会自行缓冲重试。
+        if (!_player.playing) {
+          final Future<void> Function()? cb = _onPlaybackError;
+          if (cb != null) {
+            Future<void>.microtask(() => cb());
+          }
+        }
+      },
     );
     // 装载完成后补执行挂起的 seek（需求修复：切歌瞬间拖动进度条丢失；
     // 15s TTL 防陈旧位置落到新曲目上）
@@ -316,8 +344,7 @@ class MingAudioHandler extends BaseAudioHandler with SeekHandler {
   Future<void> seek(Duration position) async {
     final ja.ProcessingState st = _player.processingState;
     // 装载期 seek 会被内核丢弃 → 挂起，ready 后补执行（15s TTL）
-    if (st == ja.ProcessingState.loading ||
-        st == ja.ProcessingState.idle) {
+    if (st == ja.ProcessingState.loading || st == ja.ProcessingState.idle) {
       final bool stale = _pendingSeekAt == null ||
           DateTime.now().difference(_pendingSeekAt!) >
               const Duration(seconds: 15);

@@ -35,6 +35,8 @@ import '../../settings/providers/settings_providers.dart'
 import '../domain/np_settings.dart';
 import '../providers/np_settings_providers.dart';
 import '../providers/player_providers.dart';
+import '../../social/presentation/share_to_friend_sheet.dart'
+    show showShareToFriendSheet;
 import 'np_settings_sheet.dart';
 import 'widgets/quality_sheet.dart';
 import '../../../core/widgets/sheet_host.dart' show GlassSheet, showMingSheet;
@@ -323,6 +325,23 @@ class _PlayerMoreSheetState extends ConsumerState<_PlayerMoreSheet> {
                         await PlatformActions.shareText(
                           '${track.title} - ${track.artist}'
                           '${id != null && id > 0 ? ' https://music.163.com/#/song?id=$id' : ''}',
+                        );
+                      },
+                    ),
+                    // 需求（第二十九批）：私信分享当前歌曲给好友
+                    //（POST /send/song，好友选择器复用私信分享面板）
+                    _QuickIcon(
+                      icon: Icons.mail_outline_rounded,
+                      label: '私信',
+                      onTap: () {
+                        final int id = track.neteaseId ?? 0;
+                        Navigator.of(context).pop();
+                        showShareToFriendSheet(
+                          context,
+                          ref,
+                          kind: 'song',
+                          id: id,
+                          name: '${track.title} - ${track.artist}',
                         );
                       },
                     ),

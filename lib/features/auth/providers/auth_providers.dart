@@ -259,12 +259,15 @@ class AuthNotifier extends Notifier<AuthState> {
 
   /// 便捷：读取本地资料缓存（离线恢复登录态）
   NeteaseProfile? _cachedProfile() {
-    final String? raw =
-        ref.read(sharedPreferencesProvider).getString(PrefsKeys.userProfileCache);
+    final String? raw = ref
+        .read(sharedPreferencesProvider)
+        .getString(PrefsKeys.userProfileCache);
     if (raw == null || raw.isEmpty) return null;
     try {
       final Object? decoded = jsonDecode(raw);
-      if (decoded is Map<String, Object?>) return NeteaseProfile.fromMap(decoded);
+      if (decoded is Map<String, Object?>) {
+        return NeteaseProfile.fromMap(decoded);
+      }
       if (decoded is Map) {
         return NeteaseProfile.fromMap(
           decoded.map<String, Object?>((k, v) => MapEntry(k.toString(), v)),

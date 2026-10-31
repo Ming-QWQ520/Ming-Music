@@ -72,6 +72,7 @@ class ChatMessage {
     required this.time,
     required this.isSelf,
     this.invite,
+    this.share,
   });
 
   final String id;
@@ -84,11 +85,16 @@ class ChatMessage {
   /// 非空 = 消息含一起听邀请（聊天页渲染成点击即加入的卡片）
   final ListenInvite? invite;
 
+  /// 非空 = 消息带歌曲/专辑/歌单分享（需求第二十九批：send/song、
+  /// send/album、send/playlist 的接收侧 —— 聊天页渲染成可点卡片）
+  final MsgShare? share;
+
   static ChatMessage fromJson(Map<String, Object?> j, int myId) {
     final Map<String, Object?>? from = j['fromUser'] as Map<String, Object?>?;
     final Map<String, Object?>? to = j['toUser'] as Map<String, Object?>?;
     final int fromId = (from?['userId'] as num?)?.toInt() ?? 0;
-    final String content = parseMsgField(j['msg']);
+    final Object? rawMsg = j['msg'];
+    final String content = parseMsgField(rawMsg);
     return ChatMessage(
       id: '${j['id'] ?? j['time'] ?? content.hashCode}',
       fromUserId: fromId,
@@ -97,7 +103,109 @@ class ChatMessage {
       time: (j['time'] as num?)?.toInt() ?? 0,
       isSelf: fromId == myId,
       invite: parseListenInvite(content),
+      share: parseMsgShare(rawMsg),
     );
+  }
+}
+
+/// 私信分享卡（带歌曲/专辑/歌单的私信）。网易 msg 字段是 JSON 串，
+/// 不同分享类型键名不一（id/songId/albumId/playlistId、嵌套
+/// song/album/playlist 对象、type 枚举），宽容深度解析。
+class MsgShare {
+  const MsgShare({
+    required this.kind,
+    required this.id,
+    this.name = '',
+    this.hint = '',
+  });
+
+  /// 'song' | 'album' | 'playlist'
+  final String kind;
+  final int id;
+  final String name;
+  final String hint;
+
+  static MsgShare? fromJson(Map<String, Object?> j) {
+    // 深度搜指定键（任意嵌套层）
+    Object? deep(List<String> keys) {
+      Object? walk(Object? node) {
+        if (node is Map<String, Object?>) {
+          for (final String k in keys) {
+            final Object? v = node[k];
+            if (v != null) return v;
+          }
+          for (final Object? child in node.values) {
+            final Object? r = walk(child);
+            if (r != null) return r;
+          }
+        } else if (node is List<Object?>) {
+          for (final Object? child in node) {
+            final Object? r = walk(child);
+            if (r != null) return r;
+          }
+        }
+        return null;
+      }
+
+      return walk(j);
+    }
+
+    int? toId(Object? v) {
+      if (v is num) return v.toInt();
+      if (v is String) {
+        final String t = v.trim();
+        if (t.isEmpty) return null;
+        return int.tryParse(t);
+      }
+      return null;
+    }
+
+    final Object? typeRaw = deep(<String>['type', 'shareType']);
+    final String type = typeRaw == null ? '' : '$typeRaw'.toLowerCase();
+    final int? playlistId = toId(deep(<String>['playlistId'])) ??
+        (type.contains('playlist') ? toId(deep(<String>['id'])) : null);
+    final int? albumId = toId(deep(<String>['albumId'])) ??
+        (type.contains('album') ? toId(deep(<String>['id'])) : null);
+    final int? songId = toId(deep(<String>['songId'])) ??
+        (type.contains('song') || type == 'music' || type == '0'
+            ? toId(deep(<String>['id']))
+            : null);
+    // 顶层 id 兼容：无显式 type 时按独有键归类
+    final int? topId = toId(deep(<String>['id']));
+    String kind = '';
+    int sid = 0;
+    if (playlistId != null && playlistId > 0) {
+      kind = 'playlist';
+      sid = playlistId;
+    } else if (albumId != null && albumId > 0) {
+      kind = 'album';
+      sid = albumId;
+    } else if (songId != null && songId > 0) {
+      kind = 'song';
+      sid = songId;
+    } else if (topId != null && topId > 0) {
+      // 仅顶层 id：若有 type 字样按 type，否则按歌处理（send/song 的
+      // 历史消息实测形态就是 {"msg":...,"id":...}）
+      kind = 'song';
+      sid = topId;
+    }
+    if (kind.isEmpty || sid <= 0) return null;
+    final String name = () {
+      final Object? v = deep(<String>[
+        'songName',
+        'albumName',
+        'playlistName',
+        'name',
+        'title',
+      ]);
+      return v == null ? '' : '$v';
+    }();
+    // 发送者留言（send/song|album|playlist 的 msg 参数会原样带回）
+    final String hint = () {
+      final Object? v = deep(<String>['shareMsg', 'reason', 'msg']);
+      return v == null ? '' : '$v';
+    }();
+    return MsgShare(kind: kind, id: sid, name: name, hint: hint);
   }
 }
 
@@ -129,6 +237,26 @@ String parseMsgField(Object? rawMsg) {
     return m == null ? '$rawMsg' : '$m';
   }
   return '$rawMsg';
+}
+
+/// 从 msg 字段解析分享卡（song/album/playlist）；无分享信息返回 null。
+/// （需求第二十九批：私信带歌曲/带专辑/带歌单 —— 文档
+/// /send/song、/send/album、/send/playlist 的接收侧渲染）
+MsgShare? parseMsgShare(Object? rawMsg) {
+  Object? parsed;
+  if (rawMsg is String) {
+    final String s = rawMsg.trim();
+    if (!s.startsWith('{')) return null;
+    try {
+      parsed = jsonDecode(s);
+    } catch (_) {
+      return null;
+    }
+  } else if (rawMsg is Map<String, Object?>) {
+    parsed = rawMsg;
+  }
+  if (parsed is! Map<String, Object?>) return null;
+  return MsgShare.fromJson(parsed);
 }
 
 // ---------------------------------------------------------------- 仓库
@@ -193,6 +321,60 @@ class MessageRepository {
       final Map<String, Object?> res = await _api.post(
         '/send/text',
         <String, String>{'user_ids': '$userId', 'msg': msg},
+        throwOnCode: false,
+      );
+      final int code = (res['code'] as num?)?.toInt() ?? 0;
+      if (code == 200) return null;
+      return '发送失败：${(res['message'] ?? res['msg'] ?? 'code $code')}';
+    } catch (e) {
+      return '发送失败：$e';
+    }
+  }
+
+  /// 发送带歌曲的私信（POST /send/song，需求第二十九批文档接入）。
+  Future<String?> sendSong(int userId, int songId, String msg) async {
+    return _sendWithId('/send/song', userId, '$songId', msg);
+  }
+
+  /// 发送带专辑的私信（POST /send/album，需求第二十九批文档接入）。
+  Future<String?> sendAlbum(int userId, int albumId, String msg) async {
+    return _sendWithId('/send/album', userId, '$albumId', msg);
+  }
+
+  /// 发送带歌单的私信（POST /send/playlist，需求第二十九批文档接入；
+  /// 注意该接口参数名是 playlist 而不是 id，且不能发送重复歌单）。
+  Future<String?> sendPlaylist(int userId, int playlistId, String msg) async {
+    if (msg.trim().isEmpty) return '留言不能为空';
+    try {
+      final Map<String, Object?> res = await _api.post(
+        '/send/playlist',
+        <String, String>{
+          'user_ids': '$userId',
+          'msg': msg,
+          'playlist': '$playlistId',
+        },
+        throwOnCode: false,
+      );
+      final int code = (res['code'] as num?)?.toInt() ?? 0;
+      if (code == 200) return null;
+      return '发送失败：${(res['message'] ?? res['msg'] ?? 'code $code')}';
+    } catch (e) {
+      return '发送失败：$e';
+    }
+  }
+
+  /// /send/song 与 /send/album 共用（参数同名 id）
+  Future<String?> _sendWithId(
+      String path, int userId, String id, String msg) async {
+    if (msg.trim().isEmpty) return '留言不能为空';
+    try {
+      final Map<String, Object?> res = await _api.post(
+        path,
+        <String, String>{
+          'user_ids': '$userId',
+          'id': id,
+          'msg': msg,
+        },
         throwOnCode: false,
       );
       final int code = (res['code'] as num?)?.toInt() ?? 0;
