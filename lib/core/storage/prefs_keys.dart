@@ -69,4 +69,10 @@ class PrefsKeys {
   /// 用户资料缓存（需求：无网进入不丢弃登录态 —— /login/status 网络校验
   /// 失败时从这里恢复已登录 UI，页面仅显示「当前无网络」提示；随登出清除）
   static const String userProfileCache = 'auth.userProfileCache';
+
+  /// 播放页自定义默认值重置标记（需求第二十一批：设置默认值版本一次性
+  /// 从 v6 回退 v1 —— 首次启动时把存量设置的存储版本降回 v1 重跑全部
+  /// 默认值迁移（淡出 40%/模糊上限 1.5px/居中/亮屏/封面歌词两行等），
+  /// 仅执行一次，避免每次启动覆盖用户后续手动调整）
+  static const String npDefaultsReset = 'np.defaultsReset';
 }

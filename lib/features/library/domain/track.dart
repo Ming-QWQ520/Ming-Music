@@ -61,9 +61,13 @@ class Track {
 
   bool get isVipOnly => fee == 1;
 
-  /// 是否需要解析播放直链（收藏恢复场景：有网易云 id 但无直链）
-  bool get needsUrlResolve =>
-      neteaseId != null && (source.isEmpty || !source.startsWith('http'));
+  /// 是否需要解析播放直链（恢复队列场景：有网易云 id 但无直链 ——
+  /// 落盘恢复时网易云曲目 source 置空，播放前需重新解析）。
+  /// 第二十一批修正：本地缓存文件路径（非空且非 http）视为**可直接
+  /// 播放**，不再误判为待解析 —— 旧语义把离线解析命中的缓存曲目也
+  /// 当成未解析，导致内核装载/降级子集被错误跳过（「有缓存却无法
+  /// 播放」的根因之一）。
+  bool get needsUrlResolve => neteaseId != null && source.isEmpty;
 
   Track copyWith({
     String? title,

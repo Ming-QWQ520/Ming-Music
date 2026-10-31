@@ -894,6 +894,11 @@ class _InfoSectionState extends ConsumerState<_InfoSection> {
     final int commentCount = songId == null || songId <= 0
         ? 0
         : ref.watch(songCommentCountProvider(songId)).value ?? 0;
+    // 需求（第二十一批）：红心数显示 —— /song/red/count，数字格式化后
+    // 显示在红心图标上（角标，与评论数同款样式）；失败/无数据不显示
+    final int redCount = songId == null || songId <= 0
+        ? 0
+        : ref.watch(songRedCountProvider(songId)).value ?? 0;
     final bool liked = (songId ?? 0) > 0 &&
         ref.watch(
             authProvider.select((AuthState s) => s.likedIds.contains(songId)));
@@ -978,13 +983,44 @@ class _InfoSectionState extends ConsumerState<_InfoSection> {
           ),
           const SizedBox(width: 10),
           // 喜欢（服务器红心，乐观更新；hover/按压反馈）
+          // 需求（第二十一批）：红心数以角标形式显示在红心图标上
           _PlayerIconButton(
             tooltip: liked ? '取消喜欢' : '喜欢',
             onTap: track == null ? null : () => _toggleLike(track),
-            child: Icon(
-              liked ? Icons.favorite_rounded : Icons.favorite_border_rounded,
-              size: 22,
-              color: liked ? AppConstants.brandColor : tint,
+            child: Stack(
+              clipBehavior: Clip.none,
+              alignment: Alignment.center,
+              children: <Widget>[
+                Icon(
+                  liked
+                      ? Icons.favorite_rounded
+                      : Icons.favorite_border_rounded,
+                  size: 22,
+                  color: liked ? AppConstants.brandColor : tint,
+                ),
+                if (redCount > 0)
+                  Positioned(
+                    bottom: -5,
+                    right: -10,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 3.5, vertical: 0.5),
+                      decoration: BoxDecoration(
+                        color: Colors.black.withValues(alpha: 0.30),
+                        borderRadius: BorderRadius.circular(7),
+                      ),
+                      child: Text(
+                        _formatWan(redCount),
+                        style: const TextStyle(
+                          fontSize: 9.5,
+                          height: 1.25,
+                          fontWeight: FontWeight.w600,
+                          color: Colors.white,
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
             ),
           ),
           const SizedBox(width: 10),
@@ -1144,8 +1180,7 @@ class _CoverLyricsPreview extends ConsumerWidget {
   ///  - 原文（主行）有逐字歌词（yrc）时主行走逐字播放动画（[_KaraokeText]），
   ///    无逐字（LRC / 元数据行 / 空行）回退进度同步滚动（[_SyncScrollText]）。
   ({YrcLine? karaoke, String main, String sub, int mainTime, int mainEnd})
-      _resolve(ParsedLyrics lyrics, Duration position,
-          {int? durationMs}) {
+      _resolve(ParsedLyrics lyrics, Duration position, {int? durationMs}) {
     if (lyrics.hasYrc) {
       final int idx = activeYrcIndex(lyrics.yrcLines, position);
       if (idx < 0) {

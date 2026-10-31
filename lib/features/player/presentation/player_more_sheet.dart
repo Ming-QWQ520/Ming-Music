@@ -36,7 +36,7 @@ import '../providers/np_settings_providers.dart';
 import '../providers/player_providers.dart';
 import 'np_settings_sheet.dart';
 import 'widgets/quality_sheet.dart';
-import '../../../core/widgets/sheet_host.dart' show showMingSheet;
+import '../../../core/widgets/sheet_host.dart' show GlassSheet, showMingSheet;
 
 /// 弹出播放页自定义底部菜单
 Future<void> showPlayerMoreSheet(BuildContext context) {
@@ -162,13 +162,12 @@ class _PlayerMoreSheetState extends ConsumerState<_PlayerMoreSheet> {
       scheduleMicrotask(() => _resolveArtist(track!.artist));
     }
 
-    return Container(
-      constraints:
-          BoxConstraints(maxHeight: MediaQuery.sizeOf(context).height * 0.86),
-      decoration: const BoxDecoration(
-        color: AppConstants.darkSurface,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-      ),
+    // 需求（第二十一批）：设置键弹出的底部抽屉也统一 50% 透明度 ——
+    // 改用全应用统一弹窗底板 GlassSheet（玻璃态深色 alpha 0x80 + 模糊，
+    // 低端机/关闭玻璃自动降级同为 50% 透明）
+    return GlassSheet(
+      borderRadius: 24,
+      maxHeight: MediaQuery.sizeOf(context).height * 0.86,
       child: SafeArea(
         top: false,
         child: Column(
@@ -557,11 +556,8 @@ class _PlayerMoreSheetState extends ConsumerState<_PlayerMoreSheet> {
   void _showStylePicker(NpPlayerSettings cfg) {
     showMingSheet<void>(
       context,
-      builder: (BuildContext ctx) => Container(
-        decoration: const BoxDecoration(
-          color: AppConstants.darkSurface,
-          borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
-        ),
+      builder: (BuildContext ctx) => GlassSheet(
+        borderRadius: 22,
         child: SafeArea(
           top: false,
           child: Column(
@@ -594,11 +590,8 @@ class _PlayerMoreSheetState extends ConsumerState<_PlayerMoreSheet> {
   void _showSleepTimerPicker(bool active) {
     showMingSheet<void>(
       context,
-      builder: (BuildContext ctx) => Container(
-        decoration: const BoxDecoration(
-          color: AppConstants.darkSurface,
-          borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
-        ),
+      builder: (BuildContext ctx) => GlassSheet(
+        borderRadius: 22,
         child: SafeArea(
           top: false,
           child: Column(
@@ -644,11 +637,8 @@ class _PlayerMoreSheetState extends ConsumerState<_PlayerMoreSheet> {
         ref.read(playerProvider.select((PlayerState s) => s.speed));
     showMingSheet<void>(
       context,
-      builder: (BuildContext ctx) => Container(
-        decoration: const BoxDecoration(
-          color: AppConstants.darkSurface,
-          borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
-        ),
+      builder: (BuildContext ctx) => GlassSheet(
+        borderRadius: 22,
         child: SafeArea(
           top: false,
           child: Column(
@@ -729,11 +719,8 @@ class _PlayerMoreSheetState extends ConsumerState<_PlayerMoreSheet> {
               order.insert(insertAt, id);
             }
 
-            return Container(
-              decoration: const BoxDecoration(
-                color: AppConstants.darkSurface,
-                borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
-              ),
+            return GlassSheet(
+              borderRadius: 22,
               child: SafeArea(
                 top: false,
                 child: SingleChildScrollView(

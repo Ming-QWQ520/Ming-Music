@@ -37,6 +37,9 @@ import '../../settings/providers/settings_providers.dart'
 import '../domain/player_state.dart';
 import '../services/ming_audio_handler.dart';
 import 'cache_providers.dart' show refreshCacheProviders;
+import '../../comments/providers/comments_providers.dart'
+    show songCommentCountProvider;
+import 'lyrics_providers.dart' show lyricDataProvider;
 import '../services/queue_persistence.dart';
 import '../services/song_cache.dart';
 
@@ -96,7 +99,8 @@ class QueueHistoryNotifier extends Notifier<List<QueueSnapshot>> {
     return persistence.loadHistory();
   }
 
-  Future<void> push(String title, List<Track> tracks, {int currentIndex = 0}) async {
+  Future<void> push(String title, List<Track> tracks,
+      {int currentIndex = 0}) async {
     state = await ref
         .read(queuePersistenceProvider)
         .pushHistory(title, tracks, currentIndex: currentIndex);
@@ -205,6 +209,17 @@ final Provider<int?> currentChorusStartProvider = Provider<int?>((Ref ref) {
   return ref.watch(chorusStartProvider(songId)).valueOrNull;
 });
 
+/// 歌曲红心数（需求第二十一批：/song/red/count?id=，数字显示在红心
+/// 图标角标上；格式化在 UI 层完成；失败返回 0 不显示角标）
+final FutureProviderFamily<int, int> songRedCountProvider =
+    FutureProvider.family<int, int>((Ref ref, int songId) async {
+  try {
+    return await ref.read(neteaseRepositoryProvider).songRedCount(songId);
+  } catch (_) {
+    return 0;
+  }
+});
+
 /// 曲目真实音质元数据（neteaseId → 最近一次 /song/url/v1 响应元数据：
 /// level 实际下发档位 / br 实际码率 / sr 实际采样率）。
 ///
@@ -279,6 +294,11 @@ class PlayerNotifier extends Notifier<PlayerState> {
   /// 无网播放失败标记：置位后网络恢复事件到达时自动刷新直链并接续播放
   /// （需求：无网播放再连接网络时无法正常播放）
   bool _networkResumePending = false;
+
+  /// 离线降级前的完整队列（需求第二十一批：无网部分命中时内核只装
+  /// 可播子集，完整队列记忆在此，联网恢复后还原并整体重解析 ——
+  /// 防止「无网播过一次后队列被永久裁短」）
+  List<Track>? _offlineFullQueue;
 
   /// 网络恢复事件订阅（原生 ConnectivityManager，离线→在线发一次）
   StreamSubscription<dynamic>? _netSub;
@@ -407,7 +427,8 @@ class PlayerNotifier extends Notifier<PlayerState> {
           level,
           title: track.title,
           artist: track.artist,
-          cover: track.cover ?? '',
+          // 需求第二十一批：数据缓存列表封面统一 200x200 参数
+          cover: SongCacheService.normalizeCover200(track.cover),
         ));
         // 缓存列表/歌名着色刷新
         refreshCacheProviders(ref);
@@ -425,6 +446,19 @@ class PlayerNotifier extends Notifier<PlayerState> {
     _persistDebounce = Timer(const Duration(milliseconds: 500), () {
       final PlayerState s = state;
       if (!s.loaded) return;
+      final List<Track>? full = _offlineFullQueue;
+      if (full != null) {
+        // 离线降级态：落盘完整队列（按当前播放曲目对齐下标），
+        // 避免子集队列被持久化导致联网后曲目丢失
+        final Track? cur = s.currentTrack;
+        int idx =
+            cur == null ? 0 : full.indexWhere((Track t) => t.id == cur.id);
+        if (idx < 0) idx = 0;
+        ref
+            .read(queuePersistenceProvider)
+            .saveQueueState(full, idx, s.queueTitle);
+        return;
+      }
       ref
           .read(queuePersistenceProvider)
           .saveQueueState(s.queue, s.index, s.queueTitle);
@@ -461,43 +495,8 @@ class PlayerNotifier extends Notifier<PlayerState> {
       return;
     }
 
-    // ---- 1) 批量补全元数据（离线时保留落盘/占位，播放时经 requeue 重试）
-    final NeteaseRepository repo = ref.read(neteaseRepositoryProvider);
-    final List<int> ids = <int>[
-      for (final Track t in initial)
-        if (t.neteaseId != null && t.neteaseId! > 0) t.neteaseId!,
-    ];
-    if (ids.isNotEmpty) {
-      try {
-        final Map<int, Song> detailById = <int, Song>{};
-        const int chunkSize = 200;
-        for (int i = 0; i < ids.length; i += chunkSize) {
-          final List<int> chunk =
-              ids.sublist(i, (i + chunkSize).clamp(0, ids.length));
-          for (final Song s in await repo.songDetails(chunk)) {
-            detailById[s.id] = s;
-          }
-        }
-        if (detailById.isNotEmpty) {
-          // 按占位标记合并（而非整体替换）：期间用户可能已装载新队列，
-          // 仅把仍处于「加载中…」占位的曲目补全，其余不动。
-          final List<Track> current = state.queue;
-          final List<Track> merged = <Track>[
-            for (final Track t in current)
-              (t.neteaseId != null && t.title == '加载中…'
-                      ? detailById[t.neteaseId]?.toTrack()
-                      : null) ??
-                  t,
-          ];
-          state = state.copyWith(
-            queue: merged,
-            index: state.index.clamp(0, merged.length - 1),
-          );
-        }
-      } catch (e) {
-        debugPrint('restoreQueue: 补全元数据失败（离线？）：$e');
-      }
-    }
+    // ---- 1) 批量补全元数据（离线时保留落盘/占位，联网恢复后自动重拉）
+    await _backfillQueueMetadata();
 
     // ---- 2) 自动刷新直链（需求核心）：静默批量重新解析（含缓存命中）
     try {
@@ -528,6 +527,48 @@ class PlayerNotifier extends Notifier<PlayerState> {
     _schedulePreload();
   }
 
+  /// 队列占位元数据补全（/song/detail 批量，200/批）：仅替换仍处于
+  /// 「加载中…」占位的曲目，其余不动。启动恢复与网络恢复共用
+  ///（需求第二十一批：无网进入恢复队列后，联网自动补齐歌名/封面，
+  /// 无需用户手动交互）。
+  Future<void> _backfillQueueMetadata() async {
+    final List<int> ids = <int>[
+      for (final Track t in state.queue)
+        if (t.neteaseId != null && t.neteaseId! > 0 && t.title == '加载中…')
+          t.neteaseId!,
+    ];
+    if (ids.isEmpty) return;
+    try {
+      final NeteaseRepository repo = ref.read(neteaseRepositoryProvider);
+      final Map<int, Song> detailById = <int, Song>{};
+      const int chunkSize = 200;
+      for (int i = 0; i < ids.length; i += chunkSize) {
+        final List<int> chunk =
+            ids.sublist(i, (i + chunkSize).clamp(0, ids.length));
+        for (final Song s in await repo.songDetails(chunk)) {
+          detailById[s.id] = s;
+        }
+      }
+      if (detailById.isEmpty) return;
+      // 按占位标记合并（而非整体替换）：期间用户可能已装载新队列，
+      // 仅把仍处于「加载中…」占位的曲目补全，其余不动。
+      final List<Track> current = state.queue;
+      final List<Track> merged = <Track>[
+        for (final Track t in current)
+          (t.neteaseId != null && t.title == '加载中…'
+                  ? detailById[t.neteaseId]?.toTrack()
+                  : null) ??
+              t,
+      ];
+      state = state.copyWith(
+        queue: merged,
+        index: state.index.clamp(0, merged.length - 1),
+      );
+    } catch (e) {
+      debugPrint('补全队列元数据失败（离线？）：$e');
+    }
+  }
+
   /// 内核空闲（无音源）时静默装载队列：仅当每首曲目直链就绪才装载
   /// （空 source 的曲目会被内核当 asset 路径解析，必须先过滤/重解析）。
   /// 不触发播放，只回填 MediaItem/PlaybackState → 通知栏/锁屏立即可见。
@@ -536,7 +577,8 @@ class PlayerNotifier extends Notifier<PlayerState> {
     if (_handler.player.audioSources.isNotEmpty) return;
     if (queue.any((Track t) => t.needsUrlResolve)) return; // 播放时再解析
     try {
-      await _handler.loadQueue(queue, initialIndex: index.clamp(0, queue.length - 1));
+      await _handler.loadQueue(queue,
+          initialIndex: index.clamp(0, queue.length - 1));
       _syncNotificationLike();
     } catch (e) {
       debugPrint('restoreQueue: 内核装载失败（播放时会重试）：$e');
@@ -545,26 +587,55 @@ class PlayerNotifier extends Notifier<PlayerState> {
 
   // ------------------------------------------------------------ 网络接续
 
-  /// 网络恢复：自动接续无网期间失败的播放（需求）。
+  /// 网络恢复：自动接续无网期间失败的播放 + 自动重取元数据（需求）。
   ///
-  /// 触发动作（避免打扰用户手动暂停的场景）：
+  /// 触发动作：
+  ///  - 元数据（歌词/红心数/评论数/高潮点）自动 invalidate 重取 ——
+  ///    需求第二十一批：无网播放恢复连接时自动获取封面和歌词等信息，
+  ///    不等用户手动交互（封面重试由 CoverImage 自身订阅同一事件）；
   ///  - 存在未解析曲目（无网进入恢复队列场景）→ 静默刷新直链，
   ///    保留进度，不自动播放；
   ///  - 曾因离线播放失败（[_networkResumePending]）→ 刷新直链后
   ///    自动恢复播放；
+  ///  - 离线降级队列（[_offlineFullQueue]）→ 还原完整队列整体重解析；
   ///  - 直链存在但内核报错卡死（无网时 URL 失效）→ 刷新当前曲目
   ///    直链重建内核，再接续播放。
   Future<void> _onNetworkRestored() async {
-    if (state.queue.isEmpty || state.playing) return;
     final bool offline = !(await PlatformActions.isNetworkAvailable());
     if (offline) return; // 事件抖动：实际仍未联网
+    // 1) 元数据自动重取（播放中也刷新：无网时打开的歌词/红心数补拉）
+    _refreshCurrentMetadata();
+    if (state.queue.isEmpty && _offlineFullQueue == null) return;
+    if (state.playing) return; // 正常播放中：只补元数据，不打扰
     final bool pending = _networkResumePending;
     _networkResumePending = false;
+    final List<Track>? degraded = _offlineFullQueue;
+    _offlineFullQueue = null;
+    // 2) 离线降级队列还原：完整队列回填 state，按当前曲目对齐下标
+    if (degraded != null) {
+      final Track? cur = state.currentTrack;
+      int idx = cur == null
+          ? state.index
+          : degraded.indexWhere((Track t) => t.id == cur.id);
+      if (idx < 0) idx = state.index.clamp(0, degraded.length - 1);
+      state = state.copyWith(queue: degraded, index: idx);
+    }
     final bool hasUnresolved = state.queue.any((Track t) => t.needsUrlResolve);
-    if (!pending && !hasUnresolved) return;
+    final bool kernelEmpty = _handler.player.audioSources.isEmpty;
+    if (!pending && !hasUnresolved && !kernelEmpty && degraded == null) return;
     try {
       final Duration pos = _handler.player.position;
-      await requeueIfNeeded(); // 内含直链刷新 + 内核重装
+      // 3) 无网期间留下的占位元数据（歌名/封面）一并补齐
+      await _backfillQueueMetadata();
+      // 4) 直链刷新 + 内核重装（全部就绪才装载；requeueIfNeeded 内含）
+      if (hasUnresolved || degraded != null) {
+        await requeueIfNeeded();
+      }
+      // 5) 全量解析仍不齐（部分灰曲/仍无网）：降级装载可播子集
+      if (_handler.player.audioSources.isEmpty &&
+          state.queue.any((Track t) => !t.needsUrlResolve)) {
+        await _degradeToPlayableSubset();
+      }
       if (!state.playing && pending) {
         await _handler.play();
       } else if (!state.playing && pos > Duration.zero) {
@@ -574,6 +645,18 @@ class PlayerNotifier extends Notifier<PlayerState> {
     } catch (e) {
       debugPrint('网络恢复接续失败：$e');
     }
+  }
+
+  /// 当前曲目元数据自动重取（需求第二十一批：恢复连接后歌词、红心数、
+  /// 评论数、高潮点自动重拉，无需用户手动交互；封面由 CoverImage
+  /// 订阅同一事件自行重试）
+  void _refreshCurrentMetadata() {
+    final int? songId = state.currentTrack?.neteaseId;
+    if (songId == null || songId <= 0) return;
+    ref.invalidate(lyricDataProvider(songId));
+    ref.invalidate(songRedCountProvider(songId));
+    ref.invalidate(songCommentCountProvider(songId));
+    ref.invalidate(chorusStartProvider(songId));
   }
 
   // ------------------------------------------------------------ 播放统计
@@ -703,10 +786,9 @@ class PlayerNotifier extends Notifier<PlayerState> {
       // 装载新队列前：旧队列入历史快照（去重，最多 3 个；
       // 记录当前播放位置供「继续播放」显示与恢复）
       if (state.loaded && state.hasQueue) {
-        unawaited(ref
-            .read(queueHistoryProvider.notifier)
-            .push(state.queueTitle ?? '播放列表', state.queue,
-                currentIndex: state.index));
+        unawaited(ref.read(queueHistoryProvider.notifier).push(
+            state.queueTitle ?? '播放列表', state.queue,
+            currentIndex: state.index));
       }
       state = state.copyWith(
         queue: resolved,
@@ -814,6 +896,11 @@ class PlayerNotifier extends Notifier<PlayerState> {
       List<Track> resolved = await resolveTracks(<Track>[track]);
       if (resolved.isEmpty) resolved = <Track>[track]; // 离线也允许入队，播放时再解析
       final Track target = resolved.first;
+      // 离线降级态：内核只保留可播音源，未解析曲目不允许插进内核
+      //（空源会被内核当 asset 解析报错），仅提示待联网
+      if (_offlineFullQueue != null && target.needsUrlResolve) {
+        return '该歌曲离线且未缓存，联网后可播';
+      }
       final List<Track> q = List<Track>.of(state.queue);
       final int existing = q.indexWhere((Track t) => t.id == target.id);
       int index = state.index;
@@ -828,6 +915,15 @@ class PlayerNotifier extends Notifier<PlayerState> {
       q.insert((index + 1).clamp(0, q.length), target);
       state = state.copyWith(queue: q, index: index);
       await _handler.insertTrackNext(target, atIndex: index + 1);
+      // 离线降级态：插队同步写入记忆中的完整队列，联网还原后不丢歌
+      final List<Track>? full = _offlineFullQueue;
+      if (full != null) {
+        final List<Track> full2 = List<Track>.of(full);
+        final int curAt =
+            full2.indexWhere((Track t) => t.id == state.currentTrack?.id);
+        full2.insert((curAt + 1).clamp(0, full2.length), target);
+        _offlineFullQueue = full2;
+      }
       _schedulePersist();
       _schedulePreload();
       return null;
@@ -876,8 +972,6 @@ class PlayerNotifier extends Notifier<PlayerState> {
   /// 直链批量请求失败（断网/接口异常）不再整体抛出：返回已命中的部分，
   /// 播放队列/离线场景保留可用曲目。
   Future<List<Track>> resolveTracks(List<Track> tracks) async {
-    final SongCacheService cache = ref.read(songCacheProvider);
-    final bool cacheOn = ref.read(listenCacheProvider);
     final String level = ref.read(audioQualityProvider).apiValue;
 
     final Map<int, Track> resolvedById = <int, Track>{};
@@ -896,17 +990,23 @@ class PlayerNotifier extends Notifier<PlayerState> {
       if (cached != null) {
         if (cached.playable) {
           resolvedById[nid] = await _withCacheSource(t, cached);
+          continue;
         }
-        continue; // 缓存命中但不可播：剔除（VIP 灰曲）
+        // 需求第二十一批：不可播（VIP 灰曲）不再直接剔除 —— 先查磁盘
+        // 缓存，有缓存仍可离线播（修复「有些有缓存的歌曲却无法正常播放」）
+        final String? path = await _cachedSourceAnyLevel(nid);
+        if (path != null && path.isNotEmpty) {
+          resolvedById[nid] = t.copyWith(source: path);
+        }
+        continue;
       }
-      if (cacheOn) {
-        try {
-          final String? path = await cache.cachedPathFor(nid, level);
-          if (path != null && path.isNotEmpty) {
-            resolvedById[nid] = t.copyWith(source: path);
-            continue;
-          }
-        } catch (_) {}
+      // 需求第二十一批：磁盘缓存查找不再受「边听边缓存」开关限制
+      //（已缓存文件始终可播，关开关只影响新增缓存）；当前档位未命中
+      // 时跨档位兜底（换过音质/请求档回落的历史缓存也能命中）
+      final String? path = await _cachedSourceAnyLevel(nid);
+      if (path != null && path.isNotEmpty) {
+        resolvedById[nid] = t.copyWith(source: path);
+        continue;
       }
       pending[nid] = t;
     }
@@ -947,17 +1047,31 @@ class PlayerNotifier extends Notifier<PlayerState> {
     return out;
   }
 
-  /// 缓存感知的播放源选择：
-  ///  - 边听边缓存开启：磁盘命中 → 本地文件（秒开）；
-  ///  - 未命中：网络 URL（落盘延后到开播时，见 _cacheCurrentTrack）；
-  ///  - 关闭：直接用网络 URL。
-  Future<Track> _withCacheSource(Track t, SongUrlInfo u) async {
-    final int id = t.neteaseId!;
-    if (!ref.read(listenCacheProvider)) return t.copyWith(source: u.url);
+  /// 磁盘缓存查找：当前音质档位优先，未命中跨档位兜底（最近使用优先）。
+  /// 需求第二十一批：修复「有些有缓存的歌曲却无法正常播放」——
+  /// 历史缓存可能落在其它音质档（换过音质/请求档回落），仅按当前
+  /// 档位查会导致离线时明明有缓存却解析失败。
+  Future<String?> _cachedSourceAnyLevel(int nid) async {
     try {
       final SongCacheService cache = ref.read(songCacheProvider);
       final String level = ref.read(audioQualityProvider).apiValue;
-      final String? path = await cache.cachedPathFor(id, level);
+      final String? exact = await cache.cachedPathFor(nid, level);
+      if (exact != null && exact.isNotEmpty) return exact;
+      return await cache.cachedPathAnyLevel(nid);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// 缓存感知的播放源选择：
+  ///  - 磁盘命中（当前档位优先，跨档位兜底）→ 本地文件（秒开省流量）；
+  ///  - 未命中：网络 URL（落盘延后到开播时，见 _cacheCurrentTrack）。
+  /// 需求第二十一批：不再受「边听边缓存」开关限制 —— 已缓存文件
+  /// 始终优先本地播放（关开关只影响新增缓存，不废弃已有缓存）。
+  Future<Track> _withCacheSource(Track t, SongUrlInfo u) async {
+    final int id = t.neteaseId!;
+    try {
+      final String? path = await _cachedSourceAnyLevel(id);
       if (path != null && path.isNotEmpty) {
         return t.copyWith(source: path);
       }
@@ -1027,6 +1141,13 @@ class PlayerNotifier extends Notifier<PlayerState> {
   }
 
   /// 收藏列表/恢复场景：队列里存在未解析直链的曲目时，整体重新解析。
+  ///
+  /// 第二十一批修复（无网播放彻底修复）：
+  ///  - 合并不再有破坏性：解析失败的曲目保留原位（旧实现把队列整体
+  ///    替换为已解析子集，无网播放一次后队列被永久裁短，联网也回不来）；
+  ///  - 仅当全部曲目直链就绪才重装内核（含未解析曲目的队列不能直接
+  ///    装载，空源会被内核当 asset 报错；部分就绪场景由
+  ///    [_degradeToPlayableSubset] 降级装载可播子集）。
   Future<void> requeueIfNeeded() async {
     final bool needsResolve = state.queue.any((Track t) => t.needsUrlResolve);
     if (!needsResolve) return;
@@ -1037,10 +1158,59 @@ class PlayerNotifier extends Notifier<PlayerState> {
       state = state.copyWith(error: '播放链接已失效，且重新获取失败');
       return;
     }
-    int startIdx = state.index.clamp(0, resolved.length - 1);
-    if (startIdx >= resolved.length) startIdx = resolved.length - 1;
-    state = state.copyWith(queue: resolved, index: startIdx);
-    await _handler.loadQueue(resolved, initialIndex: startIdx);
+    final Map<int, Track> byId = <int, Track>{
+      for (final Track t in resolved)
+        if (t.neteaseId != null) t.neteaseId!: t,
+    };
+    // 非破坏性合并：解析失败的曲目保留原位，联网恢复后整体重试
+    final List<Track> merged = <Track>[
+      for (final Track t in state.queue) byId[t.neteaseId] ?? t,
+    ];
+    final Track? cur = state.currentTrack;
+    int startIdx = state.index.clamp(0, merged.length - 1);
+    if (cur != null) {
+      final int found = merged.indexWhere((Track t) => t.id == cur.id);
+      if (found >= 0) startIdx = found;
+    }
+    state = state.copyWith(queue: merged, index: startIdx);
+    if (merged.any((Track t) => t.needsUrlResolve)) {
+      // 仍有未解析曲目（离线部分命中）：不重装内核，标记待网络恢复接续；
+      // 内核为空时由调用方（playPause / _onNetworkRestored）降级装载子集
+      _networkResumePending = true;
+      return;
+    }
+    await _handler.loadQueue(merged, initialIndex: startIdx);
+  }
+
+  /// 离线降级装载（需求第二十一批：彻底修复无网播放）：
+  /// 队列中仅部分曲目直链/缓存就绪时，内核只装载可播子集（保持相对
+  /// 顺序），state.queue 同步收缩为子集以保持 index 对齐；完整队列
+  /// 存入 [_offlineFullQueue]，网络恢复后由 [_onNetworkRestored] 还原
+  /// 并整体重解析。返回是否执行了降级装载。
+  Future<bool> _degradeToPlayableSubset() async {
+    if (_offlineFullQueue != null) return false; // 已处于降级态
+    final List<Track> full = state.queue;
+    final List<Track> playable = <Track>[
+      for (final Track t in full)
+        if (!t.needsUrlResolve) t,
+    ];
+    if (playable.isEmpty || playable.length == full.length) return false;
+    final Track? current = state.currentTrack;
+    int idx = current == null
+        ? 0
+        : playable.indexWhere((Track t) => t.id == current.id);
+    if (idx < 0) {
+      // 当前曲目不可播：取原队列中当前曲目之后的首个可播曲目
+      final int start = state.index.clamp(0, full.length - 1);
+      for (int i = start; i < full.length && idx < 0; i++) {
+        idx = playable.indexWhere((Track t) => t.id == full[i].id);
+      }
+      if (idx < 0) idx = 0;
+    }
+    _offlineFullQueue = full;
+    state = state.copyWith(queue: playable, index: idx);
+    await _handler.loadQueue(playable, initialIndex: idx);
+    return true;
   }
 
   /// 队列内定位播放（播放列表弹窗点击）
@@ -1270,12 +1440,17 @@ class PlayerNotifier extends Notifier<PlayerState> {
           if (state.queue.any((Track t) => t.needsUrlResolve)) {
             await requeueIfNeeded();
           }
-          if (_handler.player.audioSources.isEmpty &&
-              !state.queue.any((Track t) => t.needsUrlResolve)) {
-            await _handler.loadQueue(
-              state.queue,
-              initialIndex: state.index.clamp(0, state.queue.length - 1),
-            );
+          if (_handler.player.audioSources.isEmpty) {
+            if (!state.queue.any((Track t) => t.needsUrlResolve)) {
+              await _handler.loadQueue(
+                state.queue,
+                initialIndex: state.index.clamp(0, state.queue.length - 1),
+              );
+            } else {
+              // 需求第二十一批：无网部分命中 —— 仅装载可播子集继续播放，
+              // 完整队列记忆下来，联网恢复后整体还原重解析
+              await _degradeToPlayableSubset();
+            }
           }
         } catch (e) {
           debugPrint('playPause: 内核兜底装载失败：$e');
@@ -1343,8 +1518,13 @@ class PlayerNotifier extends Notifier<PlayerState> {
         if (state.queue.any((Track t) => t.needsUrlResolve)) {
           await requeueIfNeeded();
           if (state.queue.any((Track t) => t.needsUrlResolve)) {
-            _networkResumePending = true;
-            return; // 仍解析不齐（离线）：等网络恢复自动接续
+            // 需求第二十一批：离线部分命中 —— 降级装载可播子集继续点播
+            //（完整队列已记忆，联网恢复后还原），不再直接放弃
+            final bool degraded = await _degradeToPlayableSubset();
+            if (!degraded) {
+              _networkResumePending = true;
+              return; // 全队列都解析不齐（离线且无缓存）：等网络恢复接续
+            }
           }
         } else {
           await _handler.loadQueue(
@@ -1356,10 +1536,14 @@ class PlayerNotifier extends Notifier<PlayerState> {
         debugPrint('_jumpTo: 内核兜底装载失败：$e');
       }
     }
-    // 解析/装载可能剔除灰曲致下标漂移：按曲目 id 重新定位
-    final Track target = state.queue[safe];
-    final int relocated = state.queue.indexWhere((Track t) => t.id == target.id);
-    final int safe2 = relocated >= 0 ? relocated : safe;
+    // 解析/装载/降级可能收缩队列致下标漂移：按曲目 id 重新定位
+    //（_degradeToPlayableSubset 后队列仅含可播子集，safe 可能越界）
+    final List<Track> q = state.queue;
+    if (q.isEmpty) return;
+    final Track target =
+        safe < q.length ? q[safe] : q[state.index.clamp(0, q.length - 1)];
+    final int relocated = q.indexWhere((Track t) => t.id == target.id);
+    final int safe2 = relocated >= 0 ? relocated : safe.clamp(0, q.length - 1);
     state = state.copyWith(index: safe2);
     await _handler.player.seek(Duration.zero, index: safe2);
     if (!state.playing) {

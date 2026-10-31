@@ -5,6 +5,7 @@ import 'dart:convert';
 import 'dart:ui' show Color;
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../settings/providers/settings_providers.dart';
 import '../domain/np_settings.dart'
@@ -25,12 +26,25 @@ final NotifierProvider<NpSettingsNotifier, NpPlayerSettings>
 class NpSettingsNotifier extends Notifier<NpPlayerSettings> {
   @override
   NpPlayerSettings build() {
-    final raw =
-        ref.watch(sharedPreferencesProvider).getString(PrefsKeys.npSettings);
+    final SharedPreferences prefs = ref.watch(sharedPreferencesProvider);
+    final raw = prefs.getString(PrefsKeys.npSettings);
     if (raw == null || raw.isEmpty) return NpPlayerSettings.defaults;
     try {
       final Object? decoded = jsonDecode(raw);
       if (decoded is Map<String, Object?>) {
+        // 需求（第二十一批）：设置默认值版本 v6 → v1 —— 存量设置的存储
+        // 版本一次性降回 v1，重跑 v2~v6 全部默认值迁移（非活跃行淡出
+        // 40%/模糊上限 1.5px/时刻保持居中/始终亮屏/封面歌词两行/方形
+        // 圆角等），修复「默认值未生效」的历史存量。仅执行一次：迁移
+        // 结果立即以 _v=6 回写，此后用户手动调整照常保留、不再被覆盖。
+        if (!(prefs.getBool(PrefsKeys.npDefaultsReset) ?? false)) {
+          prefs.setBool(PrefsKeys.npDefaultsReset, true);
+          final Map<String, Object?> forced = Map<String, Object?>.of(decoded)
+            ..['_v'] = 1;
+          final NpPlayerSettings migrated = NpPlayerSettings.fromMap(forced);
+          prefs.setString(PrefsKeys.npSettings, jsonEncode(migrated.toMap()));
+          return migrated;
+        }
         return NpPlayerSettings.fromMap(decoded);
       }
     } catch (_) {

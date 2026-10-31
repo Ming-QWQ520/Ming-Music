@@ -11,6 +11,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/constants/app_constants.dart';
 import '../../../core/widgets/cover_image.dart';
 import '../../library/domain/track.dart';
+import '../../settings/domain/settings_models.dart' show audioQualityLevelLabel;
 import '../providers/cache_providers.dart';
 import '../../settings/providers/settings_providers.dart'
     show listenCacheProvider, cacheLimitProvider;
@@ -260,17 +261,12 @@ class _CacheRow extends ConsumerWidget {
     );
   }
 
-  static String _levelName(String level) => switch (level) {
-        'standard' => '标准',
-        'higher' => '较高',
-        'exhigh' => '极高',
-        'lossless' => '无损',
-        'hires' => 'Hi-Res',
-        'jyeffect' => '高清环绕声',
-        'sky' => '沉浸环绕声',
-        'jymaster' => '超清母带',
-        _ => level,
-      };
+  // 需求第二十一批：音质档名与设置模型统一（audioQualityLevelLabel），
+  // 消除本页与设置页两份映射不一致（如 jyeffect 之前显示「高清环绕声」）
+  static String _levelName(String level) {
+    final String label = audioQualityLevelLabel(level);
+    return label.isEmpty ? level : label;
+  }
 
   static String _fmtSize(int b) {
     if (b <= 0) return '0 B';

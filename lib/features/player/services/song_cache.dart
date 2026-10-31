@@ -67,6 +67,15 @@ class CacheEntry {
 class SongCacheService {
   SongCacheService();
 
+  /// 封面 URL 归一为 200x200 缩略参数（需求第二十一批：数据缓存列表
+  /// 展示 200x200 封面，避免保存/展示原图浪费流量）。
+  /// 网易云封面支持 ?param=WxH；已有参数的替换，没有的追加。
+  static String normalizeCover200(String? url) {
+    if (url == null || url.isEmpty || !url.startsWith('http')) return '';
+    final String stripped = url.replaceFirst(RegExp(r'\?param=\d+y\d+.*$'), '');
+    return '$stripped?param=200y200';
+  }
+
   /// 缓存目录名（位于 applicationSupport 下，系统清缓存不触碰）
   static const String _dirName = 'media_cache';
 
@@ -194,6 +203,37 @@ class SongCacheService {
       // 触碰访问时间（LRU 依据）
       f.setLastModifiedSync(DateTime.now());
       return f.path;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// 跨音质档位查找已缓存文件（需求第二十一批修复「有些有缓存的歌曲
+  /// 却无法正常播放」：历史缓存可能落在其它音质档（用户换过音质/请求
+  /// 档位回落），按当前档位查不到时扫描该歌曲全部档位，取最近使用的
+  /// 一个 —— 离线可播优先于档位一致）。
+  Future<String?> cachedPathAnyLevel(int songId) async {
+    try {
+      final Directory dir = await _ensureDir();
+      final String prefix = '${songId}_';
+      File? best;
+      DateTime bestAt = DateTime.fromMillisecondsSinceEpoch(0);
+      await for (final FileSystemEntity e in dir.list()) {
+        if (e is! File) continue;
+        final String name = e.path.split(Platform.pathSeparator).last;
+        if (!name.startsWith(prefix) || !name.endsWith('.done')) continue;
+        try {
+          final DateTime at = e.lastModifiedSync();
+          if (best == null || at.isAfter(bestAt)) {
+            best = e;
+            bestAt = at;
+          }
+        } catch (_) {}
+      }
+      if (best == null) return null;
+      // 触碰访问时间（LRU 依据）
+      best.setLastModifiedSync(DateTime.now());
+      return best.path;
     } catch (_) {
       return null;
     }

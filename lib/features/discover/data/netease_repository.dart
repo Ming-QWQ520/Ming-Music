@@ -224,81 +224,30 @@ class NeteaseRepository {
     }
   }
 
-  /// 搜索建议（/search/suggest，type=mobile 返回 allMatch）。
-  /// 作为联想词新接口三层兜底的最后一层。
-  Future<SearchSuggest> searchSuggest(String keywords) async {
-    final Map<String, Object?> res = await _api.get('/search/suggest',
-        <String, String>{'keywords': keywords, 'type': 'mobile'});
-    final Object? result = res['result'];
-    if (result is! Map<String, Object?>) return const SearchSuggest();
-    return SearchSuggest.fromJson(result);
-  }
-
-  /// 联想词主接口可用性进程内记忆：
-  /// true = /search/suggest/mobile 可用，后续按键直达；false = 本进程降级旧接口。
-  static bool _suggestWrapperOk = true;
-
-  /// 搜索联想词（需求修复：上一版误用 POST /play/suggest，服务端实际
-  /// 部署的接口按文档《搜索联想词（App 移动端版）》为
-  /// GET /search/suggest/mobile，query 参数名必须是 keyword —— 传
-  /// keywords/s 会返回 HTTP 400 空体）。
+  /// 搜索联想词（需求第二十一批：只用文档《搜索联想词（App 移动端版）》
+  /// 的 GET /search/suggest/mobile，query 参数名必须是 keyword —— 传
+  /// keywords/s 会返回 HTTP 400 空体；不再并行补拉 /search，也不
+  /// 再降级旧 /search/suggest）。
   ///
-  /// 响应为官方联想接口 JSON：code + data.suggests —— 与现有
-  /// KeywordSuggest/SuggestWord 模型字段对齐；但实测 relatedResource
-  /// 恒为 null（无 entity_card 直 hit 卡），需求修复「联想词未显示
-  /// 歌曲或歌手卡片」：同时并行补拉结构化搜索（/search type=1018）
-  /// 取前几首歌曲/歌手生成卡片，与联想词同屏展示。
-  ///
-  /// 降级层保留旧 /search/suggest（type=mobile，无高亮分段，
-  /// 功能不缺席）。
+  /// 需要携带 cookie：统一请求层（_api.get）自动附加当前生效 cookie
+  /// （登录态 MUSIC_U 优先，游客 MUSIC_A 兜底）—— 匿名无 cookie 实测
+  /// 返回空 suggests，带 cookie 才返回联想词（含 highLightInfo 高亮
+  /// 分段）。响应为官方联想接口 JSON：code + data.suggests/recs，
+  /// 与 KeywordSuggest/SuggestWord 模型字段对齐；suggests 第 0 条若
+  /// 携带 entity_card（relatedResource.baseInfo.simpleSongData）则
+  /// 解析为直 hit 歌曲卡，由搜索页同屏渲染。
   Future<KeywordSuggest> searchKeywordSuggest(String keyword) async {
     final String kw = keyword.trim();
     if (kw.isEmpty) return const KeywordSuggest();
-    // 结构化补拉（歌曲/歌手卡片）：与联想词请求并行，失败静默降级为无卡
-    final Future<SearchResults> structured = searchByType(kw, 1018, limit: 10)
-        .catchError((Object _) => SearchResults(type: 1018));
-    // 主接口（失败形态：未部署 404 / 400 空体 / 网络异常 → 降级）
-    if (_suggestWrapperOk) {
-      try {
-        final KeywordSuggest parsed = _parseKeywordSuggest(await _api.get(
-          '/search/suggest/mobile',
-          <String, String>{'keyword': kw},
-        ));
-        final SearchResults extra = await structured;
-        // await：卡片补封面失败也走本层降级（_fillMissingCovers 内部已兜底）
-        return await _withCards(parsed, extra);
-      } catch (_) {
-        _suggestWrapperOk = false; // 本进程降级，后续按键不再试错
-      }
+    try {
+      return _parseKeywordSuggest(await _api.get(
+        '/search/suggest/mobile',
+        <String, String>{'keyword': kw},
+      ));
+    } catch (_) {
+      // 接口异常（网络/服务抖动）：本次按键返回空联想，不降级其他接口
+      return const KeywordSuggest();
     }
-    // 降级：旧联想接口（明文 GET，匿名可用）+ 结构化卡片
-    final SearchResults extra = await structured;
-    final SearchSuggest legacy = await searchSuggest(kw);
-    return _withCards(
-      KeywordSuggest(
-        words: <SuggestWord>[for (final String w in legacy.keywords) SuggestWord(keyword: w)],
-      ),
-      extra,
-    );
-  }
-
-  /// 联想词结果 + 结构化卡片聚合：前 3 首歌曲（/song/detail 补封面）/
-  /// 前 3 位歌手（同名歌手卡去重）
-  Future<KeywordSuggest> _withCards(KeywordSuggest s, SearchResults extra) async {
-    final String kwHead = s.directHit?.keyword ?? '';
-    final List<Song> songs =
-        await _fillMissingCovers(extra.songs.take(3).toList(growable: false));
-    return KeywordSuggest(
-      directHit: s.directHit,
-      words: s.words,
-      recTitle: s.recTitle,
-      recs: s.recs,
-      songs: songs,
-      artists: extra.artists
-          .where((SearchArtist a) => a.name != kwHead)
-          .take(3)
-          .toList(growable: false),
-    );
   }
 
   static KeywordSuggest _parseKeywordSuggest(Map<String, Object?> res) {
@@ -529,10 +478,13 @@ class NeteaseRepository {
     for (int i = 0; i < ids.length; i += chunkSize) {
       final List<int> chunk =
           ids.sublist(i, (i + chunkSize).clamp(0, ids.length));
-      final Map<String, Object?> res = await _api.get('/song/url/v1', <String, String>{
-        'id': chunk.join(','),
-        'level': level,
-      }, cookieKv: cookieKv);
+      final Map<String, Object?> res = await _api.get(
+          '/song/url/v1',
+          <String, String>{
+            'id': chunk.join(','),
+            'level': level,
+          },
+          cookieKv: cookieKv);
       final Object? data = res['data'];
       if (data is! List<Object?>) continue;
       out.addAll(data
@@ -574,6 +526,19 @@ class NeteaseRepository {
       if (start is num && start >= 0) return start.round();
     }
     return null;
+  }
+
+  /// 歌曲红心数（需求第二十一批：/song/red/count?id=，红心图标角标）：
+  /// 响应 {code, data:{count, countDesc}}，取 data.count（服务端给的
+  /// countDesc 形如「100w+」精度太粗，由上层自行格式化）。
+  Future<int> songRedCount(int id) async {
+    final Map<String, Object?> res =
+        await _api.get('/song/red/count', <String, String>{'id': '$id'});
+    final Map<String, Object?> payload = apiPayload(res);
+    final Object? count = payload['count'];
+    if (count is num) return count.round();
+    if (count is String) return int.tryParse(count) ?? 0;
+    return 0;
   }
 
   /// 听歌打卡（/scrobble）：登录后播放计次上报（对齐网易云听歌排行）
