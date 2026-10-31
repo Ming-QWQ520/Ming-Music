@@ -172,9 +172,8 @@ class _TabText extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final Color color = active
-        ? AppConstants.brandColor
-        : Colors.white.withValues(alpha: 0.62);
+    final Color color =
+        active ? AppConstants.brandColor : Colors.white.withValues(alpha: 0.62);
     final TextStyle style = TextStyle(
       fontSize: 14.5,
       fontWeight: active ? FontWeight.w800 : FontWeight.w500,
@@ -659,7 +658,8 @@ class _HistoryPane extends StatelessWidget {
             return InkWell(
               onTap: () => onPlayFrom(snap, i),
               child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 9),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 20, vertical: 9),
                 child: Row(
                   children: <Widget>[
                     // 编号（参考图「1.」）；继续播放首行用品牌色呼应
@@ -669,9 +669,8 @@ class _HistoryPane extends StatelessWidget {
                         '${i + 1}.',
                         style: TextStyle(
                           fontSize: 12.5,
-                          fontWeight: isContinue
-                              ? FontWeight.w700
-                              : FontWeight.w400,
+                          fontWeight:
+                              isContinue ? FontWeight.w700 : FontWeight.w400,
                           color: isContinue
                               ? AppConstants.brandColor
                               : Colors.white.withValues(alpha: 0.42),

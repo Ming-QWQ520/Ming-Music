@@ -76,8 +76,10 @@ void main() {
   group('buildListenShareText', () {
     test('分享文本同时包含深链与邀请串兜底', () {
       final String text = buildListenShareText('1873123456789', 36547588);
-      expect(text, contains('mingmusic://listen/join?roomId=1873123456789'
-          '&inviterId=36547588'));
+      expect(
+          text,
+          contains('mingmusic://listen/join?roomId=1873123456789'
+              '&inviterId=36547588'));
       expect(text, contains('1873123456789|36547588'));
       // 分享全文必须能被自己的解析器还原（闭环一致性）
       final ListenInvite? invite = parseListenInvite(text);

@@ -14,6 +14,7 @@ import 'package:permission_handler/permission_handler.dart';
 import '../../../../core/widgets/cover_image.dart';
 
 import '../../../../core/widgets/app_notify.dart';
+
 const MethodChannel _mediaChannel = MethodChannel('com.ming.music/media');
 
 /// 打开封面全屏查看器

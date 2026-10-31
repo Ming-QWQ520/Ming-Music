@@ -48,7 +48,8 @@ final FutureProvider<List<CacheEntry>> cacheEntriesProvider =
   List<CacheEntry> entries = await cache.listEntries();
 
   // 单段回填：sources 任一命中即写入；返回仍缺信息的 id 集合
-  Future<Set<int>> backfill(Set<int> ids, Future<List<Song>> Function(List<int>) fetch) async {
+  Future<Set<int>> backfill(
+      Set<int> ids, Future<List<Song>> Function(List<int>) fetch) async {
     final List<Song> songs = await fetch(ids.toList());
     final Set<int> unresolved = <int>{...ids};
     for (final Song s in songs) {
@@ -83,8 +84,10 @@ final FutureProvider<List<CacheEntry>> cacheEntriesProvider =
   if (missing.isNotEmpty) {
     Set<int> rest = missing;
     try {
-      rest = await backfill(missing,
-          (List<int> ids) => ref.read(neteaseRepositoryProvider).songDetails(ids));
+      rest = await backfill(
+          missing,
+          (List<int> ids) =>
+              ref.read(neteaseRepositoryProvider).songDetails(ids));
     } catch (_) {
       // 主源整体失败：全部交给备用源
     }
@@ -96,8 +99,9 @@ final FutureProvider<List<CacheEntry>> cacheEntriesProvider =
           for (int i = 0; i < ids.length; i += 50) {
             final List<int> chunk =
                 ids.sublist(i, (i + 50).clamp(0, ids.length));
-            out.addAll(
-                await ref.read(neteaseRepositoryProvider).songDetailsViaOfficial(chunk));
+            out.addAll(await ref
+                .read(neteaseRepositoryProvider)
+                .songDetailsViaOfficial(chunk));
           }
           return out;
         });

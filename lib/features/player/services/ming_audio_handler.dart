@@ -59,6 +59,16 @@ class MingAudioHandler extends BaseAudioHandler with SeekHandler {
   Future<void> Function()? _onToggleLike;
   bool _liked = false;
 
+  /// 音源加载失败恢复回调（上层注入，第二十八批）：内核自动前进到
+  /// 直链已过期/空源的曲目时报错停摆 —— 上层重解析当前曲目直链并
+  /// 原位续播，解析不出则跳下一首。
+  Future<void> Function()? _onSourceFailure;
+
+  /// 注入音源失败恢复回调（PlayerNotifier._recoverCurrentSource）
+  void setRecoveryHandler(Future<void> Function()? handler) {
+    _onSourceFailure = handler;
+  }
+
   /// 播放内核暴露给 UI 层（进度条等需要 select 精细监听的场景）
   ja.AudioPlayer get player => _player;
 
@@ -87,8 +97,13 @@ class MingAudioHandler extends BaseAudioHandler with SeekHandler {
   void _bindEventStreams() {
     _player.playbackEventStream.listen(
       _broadcastState,
-      onError: (Object e, StackTrace st) =>
-          debugPrint('MingAudioHandler playbackEvent error: $e'),
+      onError: (Object e, StackTrace st) {
+        debugPrint('MingAudioHandler playbackEvent error: $e');
+        // ⚠️ 音源加载失败自动恢复（第二十八批「播完歌不下一首/搜索
+        // 添加的歌无法播放」根治）：直链过期、离线空源到达播放点时
+        // 内核报错停摆，旧版只打日志不恢复 —— 听众视角就是卡死
+        _handleSourceError();
+      },
     );
     // 装载完成后补执行挂起的 seek（需求修复：切歌瞬间拖动进度条丢失；
     // 15s TTL 防陈旧位置落到新曲目上）
@@ -118,6 +133,40 @@ class MingAudioHandler extends BaseAudioHandler with SeekHandler {
         .listen((int i) {
       if (i >= 0) _notifyMediaItem(i);
     });
+  }
+
+  // ------------------------------------------------------ 音源失败恢复
+
+  /// 连续失败计数（1 分钟无错清零；超过 5 次熔断 —— 全队列灰曲/彻底
+  /// 断网时不再无限快进）
+  int _srcFailStreak = 0;
+  DateTime _lastSrcFailAt = DateTime.fromMillisecondsSinceEpoch(0);
+  DateTime _lastRecoveryAt = DateTime.fromMillisecondsSinceEpoch(0);
+
+  Future<void> _handleSourceError() async {
+    final Future<void> Function()? handler = _onSourceFailure;
+    if (handler == null) return;
+    final DateTime now = DateTime.now();
+    if (now.difference(_lastSrcFailAt) > const Duration(minutes: 1)) {
+      _srcFailStreak = 0;
+    }
+    _lastSrcFailAt = now;
+    _srcFailStreak++;
+    if (_srcFailStreak > 5) {
+      debugPrint('MingAudioHandler: 连续解析失败 $_srcFailStreak 次，熔断自动恢复');
+      return;
+    }
+    // 抖动防重：同一时间窗只触发一次恢复
+    if (now.difference(_lastRecoveryAt) < const Duration(milliseconds: 800)) {
+      return;
+    }
+    _lastRecoveryAt = now;
+    try {
+      await Future<void>.delayed(const Duration(milliseconds: 300));
+      await handler();
+    } catch (e) {
+      debugPrint('MingAudioHandler: 恢复回调异常 $e');
+    }
   }
 
   // ---------------------------------------------------------------- queue
@@ -316,8 +365,7 @@ class MingAudioHandler extends BaseAudioHandler with SeekHandler {
   Future<void> seek(Duration position) async {
     final ja.ProcessingState st = _player.processingState;
     // 装载期 seek 会被内核丢弃 → 挂起，ready 后补执行（15s TTL）
-    if (st == ja.ProcessingState.loading ||
-        st == ja.ProcessingState.idle) {
+    if (st == ja.ProcessingState.loading || st == ja.ProcessingState.idle) {
       final bool stale = _pendingSeekAt == null ||
           DateTime.now().difference(_pendingSeekAt!) >
               const Duration(seconds: 15);

@@ -24,6 +24,7 @@ import '../../../../core/widgets/sheet_host.dart'
     show GlassSheet, showMingSheet;
 
 import '../../../../core/widgets/app_notify.dart';
+
 /// 输出模式：auto = 跟随系统（连接蓝牙自动切蓝牙）；speaker = 强制扬声器；
 /// bluetooth = 强制蓝牙（deviceId 定位具体设备）。
 enum AudioOutputMode { auto, speaker, bluetooth }

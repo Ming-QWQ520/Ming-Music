@@ -48,8 +48,8 @@ class _UpdateDialogState extends State<_UpdateDialog> {
   Future<void> _startUpdate() async {
     setState(() => _error = null);
     try {
-      final AppReleaseAsset? asset = await AppUpdateService.pickAssetForDevice(
-          widget.release.assets);
+      final AppReleaseAsset? asset =
+          await AppUpdateService.pickAssetForDevice(widget.release.assets);
       if (!mounted) return;
       if (asset == null) {
         setState(() => _error = '该版本未提供可安装的 APK 附件');
@@ -85,8 +85,8 @@ class _UpdateDialogState extends State<_UpdateDialog> {
   Future<void> _skipThisVersion() async {
     try {
       final SharedPreferences prefs = await SharedPreferences.getInstance();
-      await prefs.setString(PrefsKeys.updaterSkippedVersion,
-          widget.release.tagName);
+      await prefs.setString(
+          PrefsKeys.updaterSkippedVersion, widget.release.tagName);
     } catch (_) {
       // 存储失败时仅当本次「跳过」处理
     }
@@ -141,24 +141,29 @@ class _UpdateDialogState extends State<_UpdateDialog> {
                   selectable: false,
                   styleSheet: MarkdownStyleSheet(
                     p: TextStyle(
-                        fontSize: 13, height: 1.55,
+                        fontSize: 13,
+                        height: 1.55,
                         color: theme.colorScheme.onSurface),
                     h1: TextStyle(
-                        fontSize: 16, fontWeight: FontWeight.w800,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w800,
                         color: theme.colorScheme.onSurface),
                     h2: TextStyle(
-                        fontSize: 15, fontWeight: FontWeight.w800,
+                        fontSize: 15,
+                        fontWeight: FontWeight.w800,
                         color: theme.colorScheme.onSurface),
                     h3: TextStyle(
-                        fontSize: 14, fontWeight: FontWeight.w700,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
                         color: theme.colorScheme.onSurface),
                     listBullet: TextStyle(
-                        fontSize: 13, height: 1.5,
+                        fontSize: 13,
+                        height: 1.5,
                         color: theme.colorScheme.onSurface),
                     code: TextStyle(
                         fontSize: 12,
-                        backgroundColor: theme
-                            .colorScheme.surfaceContainerHighest),
+                        backgroundColor:
+                            theme.colorScheme.surfaceContainerHighest),
                   ),
                 ),
               ),
@@ -173,8 +178,8 @@ class _UpdateDialogState extends State<_UpdateDialog> {
                       child: LinearProgressIndicator(
                         value: _progress,
                         minHeight: 6,
-                        backgroundColor: theme
-                            .colorScheme.surfaceContainerHighest,
+                        backgroundColor:
+                            theme.colorScheme.surfaceContainerHighest,
                         valueColor: const AlwaysStoppedAnimation<Color>(
                             AppConstants.brandColor),
                       ),
@@ -189,8 +194,7 @@ class _UpdateDialogState extends State<_UpdateDialog> {
               const SizedBox(height: 4),
               Text('正在下载适配本机的安装包…',
                   style: TextStyle(
-                      fontSize: 11,
-                      color: theme.colorScheme.onSurfaceVariant)),
+                      fontSize: 11, color: theme.colorScheme.onSurfaceVariant)),
             ],
             if (_installing)
               Padding(

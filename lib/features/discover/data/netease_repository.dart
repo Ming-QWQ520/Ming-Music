@@ -264,9 +264,7 @@ class NeteaseRepository {
     List<SuggestWord> words = mobile.words;
     // 词行首条与直 hit 歌曲同名 → 并入顶部卡片（官方 App 观感：
     // 「如果呢」成为卡片，词列表从「如果呢❤️/如果呢伴奏」等开始）
-    if (hit != null &&
-        words.isNotEmpty &&
-        words.first.keyword == hit.keyword) {
+    if (hit != null && words.isNotEmpty && words.first.keyword == hit.keyword) {
       words = words.sublist(1);
     }
     // mobile 也失败 → 退回 web 分组徽标词行（老观感），联想永远有内容

@@ -190,6 +190,36 @@ class ListenRoomNotifier extends Notifier<ListenRoomState> {
   int? _lastReportedSongId;
   bool? _lastReportedPlaying;
 
+  /// 上次上报的队列签名（变化才 REPLACE，第二十八批「添加歌曲/切换
+  /// 歌单立即同步」：房内任何一端队列变化都自动公布给房间）
+  String? _lastQueueKey;
+
+  /// 服务端房间队列视图（poll/fetch 读到的 displayList 签名，
+  /// 采纳侧基准：本机与服务端一致时不采纳、也不重发布）
+  String _roomQueueKey = '';
+
+  /// 队列 REPLACE 防抖（拖动添加多首时只发一次）
+  Timer? _queueSyncDebounce;
+
+  /// 队列自动同步禁止窗口（跟随对方换歌导致的本机队列变化不回传，
+  /// 否则加入方会把单曲队列 REPLACE 覆盖房主队列）
+  DateTime _suppressQueueSyncUntil = DateTime.fromMillisecondsSinceEpoch(0);
+
+  void _suppressQueueSyncFor(Duration duration) {
+    _suppressQueueSyncUntil = DateTime.now().add(duration);
+  }
+
+  bool get _queueSyncSuppressed =>
+      DateTime.now().isBefore(_suppressQueueSyncUntil);
+
+  /// 队列签名（仅取有效网易云 id；本地曲目不参与同步）
+  String _queueKeyOf(List<Track> queue) => <String>[
+        for (final Track t in queue)
+          if (t.neteaseId != null && t.neteaseId! > 0) '${t.neteaseId}',
+      ].join(',');
+
+  String _currentQueueKey() => _queueKeyOf(ref.read(playerProvider).queue);
+
   @override
   ListenRoomState build() {
     // 回调注册一次（Notifier keepAlive，生命周期=进程）
@@ -197,6 +227,7 @@ class ListenRoomNotifier extends Notifier<ListenRoomState> {
     _svc.onRoomChanged = _onRoomChanged;
     _svc.onRoomExpired = _onRoomExpired;
     _svc.onRoleCorrected = _onRoleCorrected;
+    _svc.onRoomPlaylist = _onRoomPlaylist;
     _svc.statusSupplier = () {
       final PlayerState ps = ref.read(playerProvider);
       return (
@@ -209,10 +240,13 @@ class ListenRoomNotifier extends Notifier<ListenRoomState> {
     // 本机播放状态变化 → 上报命令（全局生效：任何页面都闭环）
     ref.listen<PlayerState>(playerProvider, (_, PlayerState ps) {
       _reportLocalState(ps);
+      _reportQueueIfNeeded(ps);
     });
     ref.onDispose(() {
       _memberTimer?.cancel();
       _memberTimer = null;
+      _queueSyncDebounce?.cancel();
+      _queueSyncDebounce = null;
     });
     // 进程内恢复：service 已在房间（页面切换不销毁 Notifier，一般不触发；
     // 兜底处理热恢复）
@@ -266,6 +300,120 @@ class ListenRoomNotifier extends Notifier<ListenRoomState> {
     }
   }
 
+  /// 队列变化自动公布（第二十八批「添加歌曲/切换歌单立即同步」）：
+  /// 房内任一端把歌曲加入队列/播放新歌单 → 队列签名变化 → 防抖 800ms
+  /// 后 REPLACE 给房间，对端轮询读到 displayList 变化后采纳。
+  ///
+  /// 闭环与防乒乓：
+  ///  - 跟随对方命令引起的队列变化（单曲入队/采纳房间列表）：签名仍
+  ///    会钉进基线（[._lastQueueKey]），但不发布 —— 窗口过后不再误报；
+  ///  - 本机签名与 `_roomQueueKey`（服务端视图）一致时不重发布 ——
+  ///    对端采纳后签名与服务端一致，两边都不会再发，收敛无回环。
+  void _reportQueueIfNeeded(PlayerState ps) {
+    if (!state.inRoom) return;
+    final String key = _queueKeyOf(ps.queue);
+    final bool changed = key != _lastQueueKey;
+    _lastQueueKey = key; // 基线总是钉住：跟随/抑制期间的变化不回传
+    if (!changed || _following || _queueSyncSuppressed) return;
+    _queueSyncDebounce?.cancel();
+    _queueSyncDebounce = Timer(const Duration(milliseconds: 800), () {
+      if (!state.inRoom || _following || _queueSyncSuppressed) return;
+      // 防抖窗口内队列又变了（采纳房间列表/跟随换歌）：作废本次发布，
+      // 最新变化会走自己的发布流程，避免旧快照覆盖新状态
+      if (_currentQueueKey() != key) return;
+      unawaited(_svc
+          .syncList(<int>[
+        for (final String s in key.split(','))
+          if (s.isNotEmpty) int.tryParse(s) ?? 0,
+      ]..removeWhere((int v) => v <= 0))
+          .then((String? err) {
+        if (err == null) {
+          _roomQueueKey = key; // 发布成功：服务端视图即本机签名
+        } else {
+          _lastQueueKey = null; // 失败：下次变化重试发布
+        }
+      }));
+    });
+  }
+
+  /// 服务端房间队列变化（轮询读到 displayList 变化 / 加入后首次拉取）
+  /// → 把对方公布的队列采纳到本机（「切换歌单/添加歌曲立即同步」的
+  /// 接收侧）。
+  void _onRoomPlaylist(List<int> ids) {
+    if (!state.inRoom || ids.isEmpty) return;
+    final String key = ids.join(',');
+    // 自发布回声：服务端视图 == 我们刚 REPLACE 的内容（displayList 轮询
+    // 有延迟，期间用户可能又编辑了队列 —— 若照单全收会回滚用户刚加的歌）
+    final bool selfEcho = key == _roomQueueKey;
+    _roomQueueKey = key;
+    state = state.copyWith(roomSongIds: ids);
+    final PlayerState ps = ref.read(playerProvider);
+    if (selfEcho || _queueKeyOf(ps.queue) == key) {
+      _lastQueueKey = key; // 不采纳：自发布回声或本机已一致
+      return;
+    }
+    if (_following || _queueSyncSuppressed) return; // 跟随中不采纳，防打架
+    unawaited(_adoptRoomQueue(ids));
+  }
+
+  /// 把房间公布的队列采纳为本机队列：当前歌仍在列表内 → 定位到该歌
+  /// 并保持进度续播；不在 → 装载队列但不自动开播（等对方 GOTO/
+  /// 加入对齐命令选歌，避免抢播错歌）。
+  Future<void> _adoptRoomQueue(List<int> ids) async {
+    if (ids.isEmpty) return;
+    final PlayerState ps0 = ref.read(playerProvider);
+    final int currentId = ps0.currentTrack?.neteaseId ?? 0;
+    final Duration pos = ref.read(audioHandlerProvider).player.position;
+    final bool wasPlaying = ps0.playing;
+    try {
+      final List<Song> songs =
+          await ref.read(neteaseRepositoryProvider).songDetails(ids);
+      if (songs.isEmpty || !state.inRoom) return;
+      final Map<int, Song> byId = <int, Song>{
+        for (final Song s in songs) s.id: s,
+      };
+      final List<Track> tracks = <Track>[
+        for (final int id in ids)
+          if (byId[id] != null) byId[id]!.toTrack(),
+      ];
+      if (tracks.isEmpty) return;
+      int startIdx = 0;
+      for (int i = 0; i < tracks.length; i++) {
+        if (tracks[i].neteaseId == currentId) {
+          startIdx = i;
+          break;
+        }
+      }
+      final bool sameSong = ps0.loaded &&
+          currentId > 0 &&
+          tracks[startIdx].neteaseId == currentId;
+      _following = true;
+      try {
+        await ref.read(playerProvider.notifier).playSongs(
+              tracks,
+              startIndex: startIdx,
+              queueTitle: '一起听',
+              autoPlay: sameSong,
+            );
+        if (sameSong) {
+          if (pos > Duration.zero) {
+            await ref.read(playerProvider.notifier).seek(pos);
+          }
+          if (!wasPlaying) {
+            await ref.read(playerProvider.notifier).pause();
+          }
+        }
+      } finally {
+        _following = false;
+      }
+      // 防回环：采纳后的队列签名钉进基线（PlayerState 后续 emissions
+      // 不再把采纳结果反向 REPLACE 给房间）
+      _lastQueueKey = _currentQueueKey();
+    } catch (e) {
+      debugListenLog('adoptRoomQueue 失败: $e');
+    }
+  }
+
   /// 主动把当前播放状态广播一次（新成员加入时），
   /// 让对端（尤其后加入者）立刻对齐歌曲与进度。
   Future<void> broadcastCurrentState() async {
@@ -292,7 +440,12 @@ class ListenRoomNotifier extends Notifier<ListenRoomState> {
         if (t.neteaseId != null && t.neteaseId! > 0) t.neteaseId!,
     ];
     if (ids.isEmpty) return '当前队列没有可同步的歌曲';
-    return _svc.syncList(ids);
+    final String? err = await _svc.syncList(ids);
+    if (err == null) {
+      _lastQueueKey = ids.join(',');
+      _roomQueueKey = _lastQueueKey!; // 发布成功：服务端视图即本机队列
+    }
+    return err;
   }
 
   // ----------------------------------------------------------- 跟随对方
@@ -325,6 +478,7 @@ class ListenRoomNotifier extends Notifier<ListenRoomState> {
         : cmd.progressMs;
 
     _svc.suppressReportFor(const Duration(seconds: 3));
+    _suppressQueueSyncFor(const Duration(seconds: 8));
     state = state.copyWith(remoteSongId: cmd.targetSongId);
 
     // ① 换歌：GOTO 无条件跟随；PLAY/seek 且歌曲不同也先换
@@ -366,6 +520,9 @@ class ListenRoomNotifier extends Notifier<ListenRoomState> {
         AppNotify.show('一起听：已同步对方正在播放的歌曲');
       } finally {
         _following = false;
+        // 跟随刚结束：把影子队列签名钉进基线 —— 后续 emissions 不再
+        // 把单曲队列反向 REPLACE 覆盖对方列表（第二十八批根治）
+        _lastQueueKey = _currentQueueKey();
       }
       return;
     }
@@ -397,6 +554,8 @@ class ListenRoomNotifier extends Notifier<ListenRoomState> {
     _stopMemberLoop();
     _lastReportedSongId = null;
     _lastReportedPlaying = null;
+    _lastQueueKey = null;
+    _roomQueueKey = '';
     unawaited(_svc.leave());
     final String notice =
         wasCreator ? '一起听房间已失效，请重新创建房间并重新邀请好友' : '一起听房间已失效，请让好友重新发起邀请后再加入';
@@ -458,14 +617,28 @@ class ListenRoomNotifier extends Notifier<ListenRoomState> {
   Future<void> refreshLogin() => _ensureLogin();
 
   /// 服务端会话自愈（一起听页/面板打开时调用）：
-  /// 本地 idle 而服务端仍在好友房间（杀进程重开、状态清理不彻底）时，
-  /// 以访客姿态恢复房间连接，防止后续误创建房间被服务端「返回所在房间」
-  /// 而误置房主。已在房/请求中/未登录时不做任何事。
+  /// 本地 idle 而服务端仍在房间（杀进程重开、状态清理不彻底）时，
+  /// **仅当房间看起来还活着**（除我之外还有真实成员）才以恢复姿态
+  /// 回填连接；只有我一个人挂在里面的「僵尸房」绝不恢复 —— 否则本端
+  /// 心跳会把僵尸房持续保活，之后创建新房间永远被「已有房间」挡住
+  /// （第二十八批「无法创建房间→显示已有房间」死锁的根因）。
   Future<void> recoverIfServerRoomExists() async {
     if (state.inRoom || state.busy) return;
     if (!_svc.ensureLoginQuickCheck) return;
     final ListenServerRoom? server = await _svc.probeServerRoom();
     if (server == null || state.inRoom || state.busy) return;
+    final bool alive =
+        server.users.any((ListenRoomUser u) => u.userId != _svc.myUserId);
+    if (!alive) {
+      // 僵尸房：不恢复、不心跳（让它自然过期，创建流程会清场）。
+      // 房主态可以直接 /end 掉，给创建新房间腾路。
+      if (server.iAmHost) {
+        await _svc.endRoomById(server.roomId);
+      } else {
+        _svc.markVacatedRoom(server.roomId);
+      }
+      return;
+    }
     _svc.resumeRoom(
       roomId: server.roomId,
       inviterId: server.iAmHost ? _svc.myUserId : server.hostId ?? 0,
@@ -478,6 +651,8 @@ class ListenRoomNotifier extends Notifier<ListenRoomState> {
       users: server.users,
       notice: '',
     );
+    _lastQueueKey = null; // 重置队列签名：恢复后允许下次变化触发 REPLACE
+    _roomQueueKey = '';
     _startMemberLoop();
     _svc.startSync();
     AppNotify.show(
@@ -486,11 +661,14 @@ class ListenRoomNotifier extends Notifier<ListenRoomState> {
 
   /// 创建房间（官方语义：已有房间时返回已存在的房间）
   ///
-  /// ⚠️ 第二十七批「房主却是我」根治：网易 room/create 对已在房的账号
-  /// 会把当前所在房间原样返回 —— 访客误触创建/重启后服务端会话仍在时
-  /// 调创建，本地就会把自己误置为房主并覆盖房主队列。故创建前先做
-  /// 两道检查：①本地已在房 → 直接拒绝；②服务端会话仍在（本地状态
-  /// 已丢）→ 以访客姿态恢复房间连接，绝不创建新房间。
+  /// ⚠️ 第二十八批「无法创建房间→显示已有房间」死锁根治：旧版创建前
+  /// 探测到服务端残留会话就恢复连接并开始心跳 —— 僵尸房被本端持续
+  /// 保活，之后每次创建都被「已有房间」挡住，用户永远开不了新房间。
+  /// 现在的语义：用户点「创建」就是要一间新房间 ——
+  ///  ① 服务端残留的旧房间且我是房主 → 直接 /end 清场后创建；
+  ///  ② 残留的是好友的房间 → 登记清场（不心跳、不恢复）后创建；
+  ///  ③ create 响应返回旧房间号（会话残留回显）→ 拒绝认领，提示
+  ///     稍后再试，绝不误置 isCreator=true（「房主却是我」防线）。
   Future<String?> createRoom() async {
     if (state.busy) return null;
     if (state.inRoom) {
@@ -502,28 +680,17 @@ class ListenRoomNotifier extends Notifier<ListenRoomState> {
         state = state.copyWith(phase: ListenRoomPhase.idle);
         return '请先登录网易云账号';
       }
-      // 服务端残留会话检查（杀进程重开/清理不彻底时本地 idle 但服务端在房）
+      // 服务端残留会话清场：用户点创建 = 要新房间，旧房间一律让路
       final ListenServerRoom? server = await _svc.probeServerRoom();
       if (server != null) {
-        // 以访客姿态恢复服务端会话（宁可为访客，不可误判房主）；
-        // 只有服务端明确指认 hostId==我 才恢复为房主。
-        _svc.resumeRoom(
-          roomId: server.roomId,
-          inviterId: server.iAmHost ? _svc.myUserId : server.hostId ?? 0,
-          isCreator: server.iAmHost,
-        );
-        state = state.copyWith(
-          phase: server.iAmHost ? ListenRoomPhase.host : ListenRoomPhase.guest,
-          roomId: server.roomId,
-          inviterId: server.iAmHost ? _svc.myUserId : server.hostId ?? 0,
-          users: server.users,
-          notice: '',
-        );
-        _startMemberLoop();
-        _svc.startSync();
-        return server.iAmHost
-            ? '检测到你名下的房间仍在进行中，已恢复房间连接'
-            : '你正在好友的一起听房间中，已恢复连接（未创建新房间）';
+        if (server.iAmHost) {
+          // 我名下的旧房间：直接关闭（好友早已不在，房间无人使用）
+          await _svc.endRoomById(server.roomId);
+        } else {
+          // 好友的房间：不心跳不恢复，登记后等服务端自然过期；
+          // create 若回显该房间号会被 service 拦下
+          _svc.markVacatedRoom(server.roomId);
+        }
       }
       final String? err = await _svc.createRoom();
       if (err != null) {
@@ -536,6 +703,7 @@ class ListenRoomNotifier extends Notifier<ListenRoomState> {
         inviterId: _svc.inviterId,
         notice: '',
       );
+      _lastQueueKey = _currentQueueKey(); // 以当前队列为基线，避免陈旧队列误判变化
       _startMemberLoop();
       _svc.startSync();
       // 房主开房即公布当前队列（好友加入后可拉取整列表）
@@ -588,13 +756,17 @@ class ListenRoomNotifier extends Notifier<ListenRoomState> {
         roomSongIds: const <int>[],
         notice: '',
       );
+      _lastQueueKey = _currentQueueKey(); // 以本机队列现状为基线，加入后只有真变化才 REPLACE
       _startMemberLoop();
       _svc.startSync();
-      // 加入后立即拉房间公布列表（不知道房主放到哪首，等 GOTO 命令对齐；
-      // 房主端成员刷新循环 ≤10s 也会广播当前歌）
+      // 加入后立即拉房间公布列表并采纳为本机队列（「切换歌单立即同步」）：
+      // 当前歌在列表内 → 定位续播；不在 → 装载不自动播，等 GOTO/
+      // 加入对齐命令选歌（房主端成员刷新循环 ≤10s 也会广播当前歌）
       final List<int> ids = await _svc.fetchRoomPlaylist();
       if (ids.isNotEmpty) {
+        _roomQueueKey = ids.join(',');
         state = state.copyWith(roomSongIds: ids);
+        await _adoptRoomQueue(ids);
         await refreshStatus(silent: true);
       }
       return null;
@@ -633,9 +805,13 @@ class ListenRoomNotifier extends Notifier<ListenRoomState> {
   /// 离开/关闭房间。[end] = 房主关闭（listentogether/end）
   Future<void> leave({bool end = false}) async {
     _stopMemberLoop();
+    _queueSyncDebounce?.cancel();
+    _queueSyncDebounce = null;
     final String? err = await _svc.leave(end: end);
     _lastReportedSongId = null;
     _lastReportedPlaying = null;
+    _lastQueueKey = null;
+    _roomQueueKey = '';
     state = ListenRoomState(
       loggedIn: state.loggedIn,
       nickname: state.nickname,
@@ -657,6 +833,23 @@ class ListenRoomNotifier extends Notifier<ListenRoomState> {
       targetSongId: targetSongId,
       progressMs: progressMs,
       playStatus: playStatus,
+    );
+  }
+
+  /// 立即把本机当前播放进度上报给房间（第二十八批「任何操作都要立即
+  /// 同步」：播放页拖动进度条松手时调用，无需等状态变化监听）
+  Future<void> reportSeekNow() async {
+    if (!state.inRoom) return;
+    final PlayerState ps = ref.read(playerProvider);
+    final int songId = ps.currentTrack?.neteaseId ?? 0;
+    if (songId <= 0) return;
+    final int progressMs =
+        ref.read(audioHandlerProvider).player.position.inMilliseconds;
+    await sendManualCommand(
+      'PROGRESS',
+      targetSongId: songId,
+      progressMs: progressMs,
+      playStatus: ps.playing ? 'PLAY' : 'PAUSE',
     );
   }
 

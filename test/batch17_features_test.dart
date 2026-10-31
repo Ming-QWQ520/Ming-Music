@@ -59,9 +59,9 @@ void main() {
           keywordSuggestFromPayload('{"code":200,"data":{}}');
       expect(s1.isEmpty, isTrue);
 
-      final KeywordSuggest s2 = keywordSuggestFromPayload(
-          '{"code":200,"data":{"suggests":['
-          '{"keyword":"断词","highLightInfo":"not-json"}]}}');
+      final KeywordSuggest s2 =
+          keywordSuggestFromPayload('{"code":200,"data":{"suggests":['
+              '{"keyword":"断词","highLightInfo":"not-json"}]}}');
       expect(s2.words.single.keyword, '断词');
       expect(s2.words.single.segments, isEmpty);
 
@@ -134,8 +134,8 @@ void main() {
     });
 
     test('脏数据兜底：空 map 不抛异常', () {
-      final NeteaseUserPlaylist p = NeteaseUserPlaylist.fromCacheMap(
-          <String, Object?>{});
+      final NeteaseUserPlaylist p =
+          NeteaseUserPlaylist.fromCacheMap(<String, Object?>{});
       expect(p.id, 0);
       expect(p.name, '');
     });

@@ -38,6 +38,7 @@ import 'widgets/song_tile.dart' show VipBadge;
 import '../../../core/widgets/sheet_host.dart' show showMingSheet;
 
 import '../../../core/widgets/app_notify.dart';
+
 class PlaylistDetailPage extends ConsumerStatefulWidget {
   const PlaylistDetailPage._({
     required this.playlistId,
@@ -368,7 +369,8 @@ class _DetailBodyState extends ConsumerState<_DetailBody> {
     }
     if (!mounted) return;
     setState(() => _downloading = false);
-    AppNotify.show('下载完成：$okCount/${widget.tracks.length} 首，已保存到 Music/MingMusic');
+    AppNotify.show(
+        '下载完成：$okCount/${widget.tracks.length} 首，已保存到 Music/MingMusic');
   }
 
   void _showMoreMenu() {

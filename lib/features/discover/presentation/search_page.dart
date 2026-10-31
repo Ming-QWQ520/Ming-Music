@@ -284,7 +284,8 @@ class _SearchPageState extends ConsumerState<SearchPage> {
         bottom: _showResults
             ? PreferredSize(
                 preferredSize: const Size.fromHeight(46),
-                child: _SearchTypeBar(current: _searchType, onSelect: _switchType),
+                child:
+                    _SearchTypeBar(current: _searchType, onSelect: _switchType),
               )
             : null,
       ),
@@ -477,8 +478,8 @@ class _SongResults extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     return ListView.builder(
       // 第十六批：底部留白防 Mini 条遮挡末尾行（单曲/歌词分类共用）
-      padding: EdgeInsets.only(
-          bottom: MediaQuery.paddingOf(context).bottom + 96),
+      padding:
+          EdgeInsets.only(bottom: MediaQuery.paddingOf(context).bottom + 96),
       itemCount: songs.length,
       itemBuilder: (BuildContext context, int index) {
         final Song s = songs[index];
@@ -1287,9 +1288,7 @@ class _HotSearchColumn extends ConsumerWidget {
           return ListView(
             padding: const EdgeInsets.only(bottom: 6),
             children: <Widget>[
-              for (int i = 0;
-                  i < words.length && i < _kChartRowCount;
-                  i++)
+              for (int i = 0; i < words.length && i < _kChartRowCount; i++)
                 _ChartRow(
                   rank: i + 1,
                   text: words[i].word,
@@ -1331,9 +1330,9 @@ class _ChartColumn extends ConsumerWidget {
           ? null
           : () {
               ref.read(playerProvider.notifier).playSongs(
-                    <Track>[for (final Song s in songs) s.toTrack()],
-                    queueTitle: name,
-                  );
+                <Track>[for (final Song s in songs) s.toTrack()],
+                queueTitle: name,
+              );
             },
       child: state.when(
         loading: () => const _ColumnLoading(),
@@ -1343,9 +1342,7 @@ class _ChartColumn extends ConsumerWidget {
           return ListView(
             padding: const EdgeInsets.only(bottom: 6),
             children: <Widget>[
-              for (int i = 0;
-                  i < songs.length && i < _kChartRowCount;
-                  i++)
+              for (int i = 0; i < songs.length && i < _kChartRowCount; i++)
                 _ChartRow(
                   rank: i + 1,
                   text: songs[i].name,
@@ -1556,8 +1553,7 @@ class _ChartRow extends StatelessWidget {
                       ),
                     ),
                     if (subText != null && subText!.isNotEmpty) ...<InlineSpan>[
-                      const WidgetSpan(
-                          child: SizedBox(width: 6)),
+                      const WidgetSpan(child: SizedBox(width: 6)),
                       TextSpan(
                         text: subText,
                         style: TextStyle(
@@ -1663,16 +1659,15 @@ class _SuggestList extends ConsumerWidget {
             onPlay: () {
               final Song s = suggest.directHit!.directHit!;
               ref.read(playerProvider.notifier).playSongs(
-                    <Track>[s.toTrack()],
-                    queueTitle: '搜索直达：${s.name}',
-                  );
+                <Track>[s.toTrack()],
+                queueTitle: '搜索直达：${s.name}',
+              );
             },
           ),
         // ---- 歌手卡（web 联想第 0 位歌手，圆形头像，点击进歌手页） ----
         for (final SearchArtist a in suggest.artists)
           _SuggestArtistCard(artist: a),
-        if (suggest.directHit?.directHit != null ||
-            suggest.artists.isNotEmpty)
+        if (suggest.directHit?.directHit != null || suggest.artists.isNotEmpty)
           const Divider(height: 10, indent: 16, endIndent: 16),
         // ---- 补全词行（需求第二十四批：/search/suggest/mobile 官方
         // 补全词，highLightInfo 红色分段高亮，无类型徽标，与网易云 App
@@ -1787,8 +1782,8 @@ class _SuggestArtistCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
     return InkWell(
-      onTap: () => context
-          .push('/artist/${artist.id}?name=${Uri.encodeComponent(artist.name)}'),
+      onTap: () => context.push(
+          '/artist/${artist.id}?name=${Uri.encodeComponent(artist.name)}'),
       child: Padding(
         padding: const EdgeInsets.fromLTRB(16, 7, 16, 7),
         child: Row(
@@ -1828,8 +1823,7 @@ class _SuggestArtistCard extends StatelessWidget {
             ),
             const SizedBox(width: 8),
             Container(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
               decoration: BoxDecoration(
                 color: AppConstants.brandColor.withValues(alpha: 0.13),
                 borderRadius: BorderRadius.circular(6),
@@ -1866,8 +1860,7 @@ class _SuggestWordRow extends StatelessWidget {
           text: seg.text,
           style: TextStyle(
             fontSize: 14.5,
-            fontWeight:
-                seg.highlighted ? FontWeight.w600 : FontWeight.w400,
+            fontWeight: seg.highlighted ? FontWeight.w600 : FontWeight.w400,
             color: seg.highlighted
                 ? AppConstants.brandColor
                 : theme.colorScheme.onSurface,
@@ -1877,8 +1870,7 @@ class _SuggestWordRow extends StatelessWidget {
       if (word.segments.isEmpty)
         TextSpan(
           text: word.keyword,
-          style: TextStyle(
-              fontSize: 14.5, color: theme.colorScheme.onSurface),
+          style: TextStyle(fontSize: 14.5, color: theme.colorScheme.onSurface),
         ),
     ];
     return ListTile(
@@ -1886,14 +1878,14 @@ class _SuggestWordRow extends StatelessWidget {
       title: RichText(
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
-        text: TextSpan(children: spans, style: DefaultTextStyle.of(context).style),
+        text: TextSpan(
+            children: spans, style: DefaultTextStyle.of(context).style),
       ),
       dense: true,
       trailing: word.tag == null
           ? null
           : Container(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
               decoration: BoxDecoration(
                 color: AppConstants.brandColor.withValues(alpha: 0.13),
                 borderRadius: BorderRadius.circular(6),

@@ -23,6 +23,7 @@ import '../data/netease_repository.dart' show kToplists, ToplistConf;
 import 'package:go_router/go_router.dart';
 
 import '../../../core/widgets/app_notify.dart';
+
 class DiscoverPage extends ConsumerWidget {
   const DiscoverPage({super.key});
 
@@ -1143,16 +1144,16 @@ class _LikedRailSection extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     return ref.watch(likedRailProvider).when(
-      loading: () => const SizedBox.shrink(),
-      error: (Object e, StackTrace st) => const SizedBox.shrink(),
-      data: (List<Song> list) {
-        if (list.isEmpty) return const SizedBox.shrink();
-        return _SectionScaffold(
-          title: '你的红心歌曲和相似推荐',
-          child: _SongRail(songs: list, title: '你的红心歌曲'),
+          loading: () => const SizedBox.shrink(),
+          error: (Object e, StackTrace st) => const SizedBox.shrink(),
+          data: (List<Song> list) {
+            if (list.isEmpty) return const SizedBox.shrink();
+            return _SectionScaffold(
+              title: '你的红心歌曲和相似推荐',
+              child: _SongRail(songs: list, title: '你的红心歌曲'),
+            );
+          },
         );
-      },
-    );
   }
 }
 
@@ -1164,19 +1165,19 @@ class _RecentRailSection extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     return ref.watch(recentListenedProvider).when(
-      loading: () => const SizedBox.shrink(),
-      error: (Object e, StackTrace st) => const SizedBox.shrink(),
-      data: (List<PlayRecordSong> list) {
-        final List<Song> songs = <Song>[
-          for (final PlayRecordSong r in list) r.song,
-        ];
-        if (songs.isEmpty) return const SizedBox.shrink();
-        return _SectionScaffold(
-          title: '最近常听',
-          child: _SongRail(songs: songs, title: '最近常听'),
+          loading: () => const SizedBox.shrink(),
+          error: (Object e, StackTrace st) => const SizedBox.shrink(),
+          data: (List<PlayRecordSong> list) {
+            final List<Song> songs = <Song>[
+              for (final PlayRecordSong r in list) r.song,
+            ];
+            if (songs.isEmpty) return const SizedBox.shrink();
+            return _SectionScaffold(
+              title: '最近常听',
+              child: _SongRail(songs: songs, title: '最近常听'),
+            );
+          },
         );
-      },
-    );
   }
 }
 
@@ -1188,49 +1189,49 @@ class _TopArtistsSection extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     return ref.watch(topArtistsProvider).when(
-      loading: () => const _SectionLoading(),
-      error: (Object e, StackTrace st) => const SizedBox.shrink(),
-      data: (List<SearchArtist> list) {
-        if (list.isEmpty) return const SizedBox.shrink();
-        return _SectionScaffold(
-          title: '热门歌手',
-          child: SizedBox(
-            height: 122,
-            child: ListView.separated(
-              scrollDirection: Axis.horizontal,
-              padding: const EdgeInsets.symmetric(horizontal: 20),
-              itemCount: list.length,
-              separatorBuilder: (_, __) => const SizedBox(width: 16),
-              itemBuilder: (BuildContext context, int index) {
-                final SearchArtist a = list[index];
-                return GestureDetector(
-                  onTap: () => context
-                      .push('/artist/${a.id}?name=${Uri.encodeComponent(a.name)}'),
-                  child: SizedBox(
-                    width: 76,
-                    child: Column(
-                      children: <Widget>[
-                        CoverImage(src: a.picUrl, size: 76, radius: 38),
-                        const SizedBox(height: 6),
-                        Text(
-                          a.name,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            color: Theme.of(context).colorScheme.onSurface,
-                            fontSize: 12,
-                          ),
+          loading: () => const _SectionLoading(),
+          error: (Object e, StackTrace st) => const SizedBox.shrink(),
+          data: (List<SearchArtist> list) {
+            if (list.isEmpty) return const SizedBox.shrink();
+            return _SectionScaffold(
+              title: '热门歌手',
+              child: SizedBox(
+                height: 122,
+                child: ListView.separated(
+                  scrollDirection: Axis.horizontal,
+                  padding: const EdgeInsets.symmetric(horizontal: 20),
+                  itemCount: list.length,
+                  separatorBuilder: (_, __) => const SizedBox(width: 16),
+                  itemBuilder: (BuildContext context, int index) {
+                    final SearchArtist a = list[index];
+                    return GestureDetector(
+                      onTap: () => context.push(
+                          '/artist/${a.id}?name=${Uri.encodeComponent(a.name)}'),
+                      child: SizedBox(
+                        width: 76,
+                        child: Column(
+                          children: <Widget>[
+                            CoverImage(src: a.picUrl, size: 76, radius: 38),
+                            const SizedBox(height: 6),
+                            Text(
+                              a.name,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                color: Theme.of(context).colorScheme.onSurface,
+                                fontSize: 12,
+                              ),
+                            ),
+                          ],
                         ),
-                      ],
-                    ),
-                  ),
-                );
-              },
-            ),
-          ),
+                      ),
+                    );
+                  },
+                ),
+              ),
+            );
+          },
         );
-      },
-    );
   }
 }
 

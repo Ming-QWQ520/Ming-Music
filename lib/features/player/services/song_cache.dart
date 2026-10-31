@@ -253,8 +253,7 @@ class SongCacheService {
         try {
           found.add((
             path: e.path,
-            level: name.substring(
-                prefix.length, name.length - '.done'.length),
+            level: name.substring(prefix.length, name.length - '.done'.length),
             at: e.lastModifiedSync(),
           ));
         } catch (_) {}
@@ -556,7 +555,8 @@ class SongCacheService {
                     .replaceAll('.done', ''),
           };
           final List<String> orphans = <String>[
-            for (final String k in meta.keys) if (!alive.contains(k)) k,
+            for (final String k in meta.keys)
+              if (!alive.contains(k)) k,
           ];
           if (orphans.isNotEmpty) {
             for (final String k in orphans) {

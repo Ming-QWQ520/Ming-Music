@@ -204,8 +204,8 @@ class _MvPlayerPageState extends ConsumerState<MvPlayerPage> {
             child: Row(
               children: <Widget>[
                 IconButton(
-                  icon: const Icon(Icons.arrow_back_rounded,
-                      color: Colors.white),
+                  icon:
+                      const Icon(Icons.arrow_back_rounded, color: Colors.white),
                   onPressed: () => Navigator.of(context).pop(),
                 ),
                 Expanded(
@@ -224,10 +224,9 @@ class _MvPlayerPageState extends ConsumerState<MvPlayerPage> {
                   tooltip: '横屏播放',
                   icon: const Icon(Icons.fullscreen_rounded,
                       color: Colors.white, size: 26),
-                  onPressed:
-                      (_controller?.value.isInitialized ?? false)
-                          ? _toggleLandscape
-                          : null,
+                  onPressed: (_controller?.value.isInitialized ?? false)
+                      ? _toggleLandscape
+                      : null,
                 ),
               ],
             ),
@@ -265,8 +264,7 @@ class _MvPlayerPageState extends ConsumerState<MvPlayerPage> {
                       ),
                     ),
                     Icon(Icons.play_arrow_rounded,
-                        size: 15,
-                        color: Colors.white.withValues(alpha: 0.55)),
+                        size: 15, color: Colors.white.withValues(alpha: 0.55)),
                     const SizedBox(width: 2),
                     Text(
                       '${_formatCount(_playCount)}次播放',

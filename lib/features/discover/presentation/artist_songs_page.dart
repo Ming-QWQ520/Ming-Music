@@ -15,6 +15,7 @@ import '../data/netease_providers.dart' show neteaseRepositoryProvider;
 import 'widgets/song_actions_sheet.dart';
 
 import '../../../core/widgets/app_notify.dart';
+
 class ArtistSongsPage extends ConsumerStatefulWidget {
   const ArtistSongsPage({
     super.key,

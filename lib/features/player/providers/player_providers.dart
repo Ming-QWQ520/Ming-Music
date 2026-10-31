@@ -282,8 +282,33 @@ class PlayerNotifier extends Notifier<PlayerState> {
   /// 最近一次已生效的状态：依赖变化导致重建时恢复现场，避免 UI 跳变
   PlayerState? _lastState;
 
-  /// 播放直链内存缓存（neteaseId → url），队列重播免二次请求
+  /// 播放直链内存缓存（neteaseId → url），队列重播免二次请求。
+  /// 配套 [_urlCacheAt] 时间戳：网易直链实测约 20 分钟过期，超过
+  /// [_urlCacheTtl] 视为陈旧重新解析（否则内核播放过期直链报错停摆
+  /// ——「有时播完不下一首」「搜索中添加的音乐无法播放」的共因）。
   final Map<int, SongUrlInfo> _urlCache = <int, SongUrlInfo>{};
+  final Map<int, DateTime> _urlCacheAt = <int, DateTime>{};
+
+  /// 直链内存缓存有效期（保守取 15 分钟，低于网易直链 20 分钟生命周期）
+  static const Duration _urlCacheTtl = Duration(minutes: 15);
+
+  /// 读缓存：超过 TTL 视为陈旧返回 null（并清掉旧条目）
+  SongUrlInfo? _cachedUrl(int id) {
+    final DateTime? at = _urlCacheAt[id];
+    if (at == null) return null;
+    if (DateTime.now().difference(at) > _urlCacheTtl) {
+      _urlCache.remove(id);
+      _urlCacheAt.remove(id);
+      return null;
+    }
+    return _urlCache[id];
+  }
+
+  /// 写缓存（登记解析时刻）
+  void _storeUrl(int id, SongUrlInfo u) {
+    _urlCache[id] = u;
+    _urlCacheAt[id] = DateTime.now();
+  }
 
   /// 预加载下一首的防抖定时器（快速切歌不重复预热）
   Timer? _preloadTimer;
@@ -364,6 +389,9 @@ class PlayerNotifier extends Notifier<PlayerState> {
 
     // 通知栏的上一首/下一首交给本 Notifier，保证洗牌/循环逻辑一致
     _handler.setSkipHandlers(onNext: next, onPrevious: previous);
+    // 音源加载失败自动恢复（第二十八批）：直链过期/离线空源到达播放点
+    // 时内核报错停摆 —— 重解析当前曲目续播，解析不出自动跳下一首
+    _handler.setRecoveryHandler(_recoverCurrentSource);
 
     // 需求：通知栏红心 —— 注入 toggleLike 回调，喜欢状态变化时同步图标
     _handler.setLikeHandler(() async {
@@ -786,6 +814,7 @@ class PlayerNotifier extends Notifier<PlayerState> {
     int startIndex = 0,
     String? queueTitle,
     bool isFm = false,
+    bool autoPlay = true,
   }) async {
     if (tracks.isEmpty) return;
     final int safeStart = startIndex.clamp(0, tracks.length - 1);
@@ -839,7 +868,11 @@ class PlayerNotifier extends Notifier<PlayerState> {
         isFm: isFm,
       );
       await _handler.loadQueue(resolved, initialIndex: startIdx);
-      await _handler.play();
+      // autoPlay=false：一起听采纳房间队列等场景 —— 只装载不开播，
+      // 等对方 GOTO/加入对齐命令选歌，避免抢播错歌
+      if (autoPlay) {
+        await _handler.play();
+      }
       _schedulePlayStat(resolved[startIdx]);
       _schedulePersist();
       _schedulePreload();
@@ -867,6 +900,7 @@ class PlayerNotifier extends Notifier<PlayerState> {
 
     // 音质变化必须绕过直链缓存重新解析
     _urlCache.clear();
+    _urlCacheAt.clear();
     state = state.copyWith(processing: AppProcessingState.loading);
     try {
       final NeteaseRepository repo = ref.read(neteaseRepositoryProvider);
@@ -891,7 +925,7 @@ class PlayerNotifier extends Notifier<PlayerState> {
             t, // 新音质拿不到链接（如未登录无损）：保留原曲目避免丢队列
       ];
       // 拿到新直链的曲目进缓存
-      urlById.forEach((int id, SongUrlInfo u) => _urlCache[id] = u);
+      urlById.forEach(_storeUrl);
       // 同步真实音质元数据（需求：音质项展示真实频率/真实品质）
       ref.read(songMetaProvider.notifier).upsertAll(urlById);
 
@@ -931,9 +965,20 @@ class PlayerNotifier extends Notifier<PlayerState> {
   Future<String?> insertNext(Track track) async {
     if (!state.hasQueue) return '当前没有播放队列';
     try {
-      List<Track> resolved = await resolveTracks(<Track>[track]);
-      if (resolved.isEmpty) resolved = <Track>[track]; // 离线也允许入队，播放时再解析
-      final Track target = resolved.first;
+      final List<Track> resolved = await resolveTracks(<Track>[track]);
+      final Track target;
+      if (resolved.isEmpty) {
+        // ⚠️ 修复（第二十八批「搜索中添加的音乐无法播放」）：在线却解析
+        // 不出直链（VIP/版权/接口抖动）时绝不把空源塞进内核 —— 空源会
+        // 被内核当 asset 解析报错，到达该曲时整条播放链卡死。只有离线
+        // 降级态才允许未解析曲目入队（播放时再解析，联网自动接续）。
+        if (_offlineFullQueue == null) {
+          return '该歌曲暂时无法播放（VIP/版权受限或网络异常）';
+        }
+        target = track;
+      } else {
+        target = resolved.first;
+      }
       // 离线降级态：内核只保留可播音源，未解析曲目不允许插进内核
       //（空源会被内核当 asset 解析报错），仅提示待联网
       if (_offlineFullQueue != null && target.needsUrlResolve) {
@@ -1030,7 +1075,7 @@ class PlayerNotifier extends Notifier<PlayerState> {
         resolvedById[nid] = t;
         continue;
       }
-      final SongUrlInfo? cached = _urlCache[nid];
+      final SongUrlInfo? cached = _cachedUrl(nid);
       if (cached != null) {
         if (cached.playable) {
           resolvedById[nid] = await _withCacheSource(t, cached);
@@ -1069,7 +1114,7 @@ class PlayerNotifier extends Notifier<PlayerState> {
         for (final SongUrlInfo u in urls) {
           final Track? t = pending[u.id];
           if (t == null) continue;
-          _urlCache[u.id] = u;
+          _storeUrl(u.id, u);
           if (u.playable) {
             resolvedById[u.id] = await _withCacheSource(t, u);
           }
@@ -1166,7 +1211,7 @@ class PlayerNotifier extends Notifier<PlayerState> {
     if (!cache.shouldPreload(key)) return;
     cache.markPreloaded(key);
     try {
-      SongUrlInfo? info = _urlCache[id];
+      SongUrlInfo? info = _cachedUrl(id);
       info ??= await _resolveSingleUrl(id);
       if (info == null || !info.playable) return;
       if (ref.read(listenCacheProvider)) {
@@ -1198,7 +1243,7 @@ class PlayerNotifier extends Notifier<PlayerState> {
         for (final SongUrlInfo u in urls) u.id: u,
       });
       for (final SongUrlInfo u in urls) {
-        _urlCache[u.id] = u;
+        _storeUrl(u.id, u);
         if (u.playable) return u;
       }
     } catch (_) {}
@@ -1621,6 +1666,50 @@ class PlayerNotifier extends Notifier<PlayerState> {
 
   Future<void> seek(Duration position) => _handler.seek(position);
 
+  /// 音源加载失败自动恢复（第二十八批「有时播完歌曲后无法正常播放
+  /// 下一首」「搜索中添加的音乐无法播放」根治）：
+  ///  - 直链约 20 分钟过期：队列长时间播放后，内核自动前进到早已
+  ///    解析的曲目时报错停摆（旧版无任何恢复，听众视角即卡死）；
+  ///  - 离线降级/历史版本插入的未解析曲目到达播放点：空源报错。
+  /// 恢复策略：强制绕过直链缓存重新解析当前曲目 → 原位续播（保留
+  /// 进度）；解析不出（VIP/下架/断网）→ 跳下一首（handler 侧连续
+  /// 失败熔断防全队列灰曲时无限快进）。
+  Future<void> _recoverCurrentSource() async {
+    if (!state.loaded || state.queue.isEmpty) return;
+    final int idx = state.index.clamp(0, state.queue.length - 1);
+    final Track t = state.queue[idx];
+    final int? nid = t.neteaseId;
+    if (nid == null || nid <= 0) {
+      // 本地/空源曲目无法重解析：跳下一首
+      await next();
+      return;
+    }
+    try {
+      // 强制绕过内存缓存（旧直链可能已过期，15 分钟 TTL 之外本就失效）
+      _urlCache.remove(nid);
+      _urlCacheAt.remove(nid);
+      final SongUrlInfo? u = await _resolveSingleUrl(nid);
+      if (u == null || !u.playable) {
+        await next(); // VIP/下架：跳下一首
+        return;
+      }
+      final Track nt = await _withCacheSource(t, u);
+      final List<Track> q = List<Track>.of(state.queue);
+      q[idx] = nt;
+      state = state.copyWith(queue: q);
+      final Duration pos = _handler.player.position;
+      await _handler.loadQueue(q, initialIndex: idx);
+      if (pos > Duration.zero) {
+        await _handler.seek(pos);
+      }
+      await _handler.play();
+      _schedulePreload();
+    } catch (e) {
+      debugPrint('_recoverCurrentSource: 重解析失败，跳下一首：$e');
+      await next();
+    }
+  }
+
   Future<void> toggleShuffle() async {
     state = state.copyWith(shuffle: !state.shuffle);
   }
@@ -1633,9 +1722,15 @@ class PlayerNotifier extends Notifier<PlayerState> {
       RepeatMode.one => RepeatMode.off,
     };
     state = state.copyWith(repeat: nextMode);
-    // single-loop 交给内核循环；其余由上层逻辑负责
-    await _handler.player
-        .setLoopMode(nextMode == RepeatMode.one ? LoopMode.one : LoopMode.off);
+    // 循环语义交内核：one = 单曲循环；all = 列表循环（队列播完自动回头）；
+    // off = 播完停止。⚠️ 修复（第二十八批「有时播完歌曲后无法正常播放
+    // 下一首」）：旧版把 all 映射成 LoopMode.off —— 列表循环模式队列
+    // 播完就停，永远循环不起来。
+    await _handler.player.setLoopMode(switch (nextMode) {
+      RepeatMode.one => LoopMode.one,
+      RepeatMode.all => LoopMode.all,
+      RepeatMode.off => LoopMode.off,
+    });
   }
 
   Future<void> setSpeed(double speed) async {

@@ -20,6 +20,7 @@ import '../../settings/providers/settings_providers.dart'
 import '../../../core/widgets/sheet_host.dart' show showMingSheet;
 
 import '../../../core/widgets/app_notify.dart';
+
 /// 打开「添加至歌单」弹窗。返回操作结果（关闭弹窗后 toast）。
 Future<void> showAddToPlaylistSheet(
   BuildContext context,
@@ -82,8 +83,10 @@ class _AddToPlaylistSheetState extends ConsumerState<_AddToPlaylistSheet> {
               .toList(growable: false));
       if (!mounted) return;
       // 第十六批需求：上次使用的歌单置顶（本地记忆，不改云端排序）
-      _lastUsedId =
-          ref.read(sharedPreferencesProvider).getInt(PrefsKeys.addToPlaylistLast) ?? 0;
+      _lastUsedId = ref
+              .read(sharedPreferencesProvider)
+              .getInt(PrefsKeys.addToPlaylistLast) ??
+          0;
       final List<NeteaseUserPlaylist> ordered = <NeteaseUserPlaylist>[
         for (final NeteaseUserPlaylist p in all)
           if (_lastUsedId > 0 && p.id == _lastUsedId) p,
@@ -254,7 +257,8 @@ class _AddToPlaylistSheetState extends ConsumerState<_AddToPlaylistSheet> {
                                       fontSize: 11.5,
                                       color: p.id == _lastUsedId
                                           ? AppConstants.brandColor
-                                          : theme.colorScheme.onSurfaceVariant)),
+                                          : theme
+                                              .colorScheme.onSurfaceVariant)),
                               trailing: _busyId == p.id
                                   ? const SizedBox(
                                       width: 18,

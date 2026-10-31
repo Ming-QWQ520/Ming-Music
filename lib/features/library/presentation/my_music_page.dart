@@ -39,6 +39,7 @@ import '../../social/providers/message_providers.dart'
 import '../../../core/utils/platform_actions.dart';
 
 import '../../../core/widgets/app_notify.dart';
+
 class MyMusicPage extends ConsumerStatefulWidget {
   const MyMusicPage({super.key});
 
@@ -98,8 +99,7 @@ class _MyMusicPageState extends ConsumerState<MyMusicPage> {
         AuthState? prev,
         AuthState next,
       ) {
-        final bool becameLoggedIn =
-            next.loggedIn && !(prev?.loggedIn ?? false);
+        final bool becameLoggedIn = next.loggedIn && !(prev?.loggedIn ?? false);
         // 主动登出（登录→未登录）：清空页内列表（持久层缓存已在
         // AuthNotifier.logout 同步清除），避免退出后仍直显旧账号歌单
         final bool becameLoggedOut =
@@ -119,10 +119,9 @@ class _MyMusicPageState extends ConsumerState<MyMusicPage> {
 
   /// 读取歌单缓存（登录前/离线时直显；脏数据静默丢弃）
   List<NeteaseUserPlaylist>? _readCachedPlaylists() {
-    final String? raw =
-        ref.read(sharedPreferencesProvider).getString(
-              PrefsKeys.libraryUserPlaylistsCache,
-            );
+    final String? raw = ref.read(sharedPreferencesProvider).getString(
+          PrefsKeys.libraryUserPlaylistsCache,
+        );
     if (raw == null || raw.isEmpty) return null;
     try {
       final Object? decoded = jsonDecode(raw);
@@ -140,12 +139,11 @@ class _MyMusicPageState extends ConsumerState<MyMusicPage> {
 
   void _cachePlaylists(List<NeteaseUserPlaylist> list, int uid) {
     try {
-      ref
-          .read(sharedPreferencesProvider)
-          .setString(PrefsKeys.libraryUserPlaylistsCache,
-              jsonEncode(<Object?>[
-                for (final NeteaseUserPlaylist p in list) p.toCacheMap(),
-              ]));
+      ref.read(sharedPreferencesProvider).setString(
+          PrefsKeys.libraryUserPlaylistsCache,
+          jsonEncode(<Object?>[
+            for (final NeteaseUserPlaylist p in list) p.toCacheMap(),
+          ]));
       // 需求修复（离线直显）：同时记录当前用户 id —— 离线时 profile
       // 校验失败为 null，_createdList/_collectedList 需要用它拆分创建/收藏
       ref.read(sharedPreferencesProvider).setInt(PrefsKeys.lastUserId, uid);
@@ -937,8 +935,7 @@ class _PlaylistGridSection extends StatelessWidget {
                       splashRadius: 20,
                       padding: EdgeInsets.zero,
                       icon: Icon(Icons.add_rounded,
-                          size: 24,
-                          color: theme.colorScheme.onSurfaceVariant),
+                          size: 24, color: theme.colorScheme.onSurfaceVariant),
                     ),
                   ),
               ],

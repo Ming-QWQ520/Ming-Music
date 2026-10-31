@@ -34,6 +34,7 @@ import '../../../core/widgets/sheet_host.dart';
 import 'project_detail_page.dart';
 
 import '../../../core/widgets/app_notify.dart';
+
 class SettingsPage extends ConsumerWidget {
   const SettingsPage({super.key});
 
@@ -721,9 +722,8 @@ class _RadioRow<T extends Object> extends StatelessWidget {
                           color: g.$1 == value
                               ? AppConstants.brandColor
                               : Colors.white.withValues(alpha: 0.88),
-                          fontWeight: g.$1 == value
-                              ? FontWeight.w700
-                              : FontWeight.w400,
+                          fontWeight:
+                              g.$1 == value ? FontWeight.w700 : FontWeight.w400,
                           fontSize: 14.5,
                         ),
                       ),

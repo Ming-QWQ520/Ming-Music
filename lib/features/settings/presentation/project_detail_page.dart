@@ -34,6 +34,7 @@ import 'widgets/update_dialog.dart';
 import '../services/app_update_service.dart';
 
 import '../../../core/widgets/app_notify.dart';
+
 /// 从 repoUrl 解析 owner/repo（AppConstants 单一来源，不另写死）
 (String, String) _parseRepoSlug() {
   final Uri u = Uri.parse(AppConstants.repoUrl);
@@ -79,8 +80,8 @@ class _GithubProjectPageState extends State<GithubProjectPage> {
     // 第十六批修复：三端点独立加载 —— /releases/latest 在仓库无任何
     // release 时返回 404（此前 Future.wait 全部失败，整页报
     // 「GitHub API 404」）；仓库信息为必要数据，其余失败静默降级。
-    final Object? repo = await _getJson(
-        'https://api.github.com/repos/${_slug.$1}/${_slug.$2}');
+    final Object? repo =
+        await _getJson('https://api.github.com/repos/${_slug.$1}/${_slug.$2}');
     final Object? release = await _getJson(
         'https://api.github.com/repos/${_slug.$1}/${_slug.$2}/releases/latest',
         optional: true);
@@ -111,7 +112,8 @@ class _GithubProjectPageState extends State<GithubProjectPage> {
 
   Future<void> _loadReleaseLog() async {
     final List<AppRelease> logs = await AppUpdateService.fetchReleases()
-        .timeout(const Duration(seconds: 25), onTimeout: () => const <AppRelease>[]);
+        .timeout(const Duration(seconds: 25),
+            onTimeout: () => const <AppRelease>[]);
     if (!mounted) return;
     setState(() => _releases = logs);
   }
@@ -122,8 +124,7 @@ class _GithubProjectPageState extends State<GithubProjectPage> {
     if (_checkingUpdate) return;
     setState(() => _checkingUpdate = true);
     try {
-      final AppRelease? latest =
-          await AppUpdateService.fetchLatestRelease();
+      final AppRelease? latest = await AppUpdateService.fetchLatestRelease();
       if (!mounted) return;
       if (latest == null) {
         AppNotify.show('暂未获取到更新信息，请稍后重试');
@@ -821,8 +822,7 @@ class _ReleaseLogCardState extends State<_ReleaseLogCard> {
                       turns: _expanded ? 0.0 : -0.25,
                       duration: const Duration(milliseconds: 200),
                       child: Icon(Icons.expand_more_rounded,
-                          size: 18,
-                          color: theme.colorScheme.onSurfaceVariant),
+                          size: 18, color: theme.colorScheme.onSurfaceVariant),
                     ),
                   ],
                 ),
@@ -834,19 +834,24 @@ class _ReleaseLogCardState extends State<_ReleaseLogCard> {
                       data: body.isEmpty ? '（未提供发布说明）' : body,
                       styleSheet: MarkdownStyleSheet(
                         p: TextStyle(
-                            fontSize: 12.5, height: 1.55,
+                            fontSize: 12.5,
+                            height: 1.55,
                             color: theme.colorScheme.onSurface),
                         listBullet: TextStyle(
-                            fontSize: 12.5, height: 1.5,
+                            fontSize: 12.5,
+                            height: 1.5,
                             color: theme.colorScheme.onSurface),
                         h1: TextStyle(
-                            fontSize: 14.5, fontWeight: FontWeight.w800,
+                            fontSize: 14.5,
+                            fontWeight: FontWeight.w800,
                             color: theme.colorScheme.onSurface),
                         h2: TextStyle(
-                            fontSize: 14, fontWeight: FontWeight.w800,
+                            fontSize: 14,
+                            fontWeight: FontWeight.w800,
                             color: theme.colorScheme.onSurface),
                         h3: TextStyle(
-                            fontSize: 13.5, fontWeight: FontWeight.w700,
+                            fontSize: 13.5,
+                            fontWeight: FontWeight.w700,
                             color: theme.colorScheme.onSurface),
                         code: TextStyle(
                             fontSize: 11.5,
