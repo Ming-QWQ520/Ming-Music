@@ -34,6 +34,8 @@ import '../../settings/providers/settings_providers.dart'
 import '../../player/presentation/cache_songs_page.dart';
 import '../../player/providers/player_providers.dart';
 import '../../listen/providers/listen_room_provider.dart';
+import '../../social/providers/message_providers.dart'
+    show ConversationsState, conversationsProvider;
 import '../../../core/utils/platform_actions.dart';
 
 import '../../../core/widgets/app_notify.dart';
@@ -570,6 +572,7 @@ class _QuickGrid extends ConsumerWidget {
     <Color>[Color(0xFF9BE7A4), Color(0xFF4ADE80)], // 云盘：绿
     <Color>[Color(0xFFC3A5FF), Color(0xFF7C4DFF)], // 好友：紫
     <Color>[Color(0xFFFFB56B), Color(0xFFFF7A3D)], // 一起听：橙
+    <Color>[Color(0xFF8FD6FF), Color(0xFF3AA0FF)], // 私信：天蓝
   ];
 
   @override
@@ -674,6 +677,15 @@ class _QuickGrid extends ConsumerWidget {
               ),
             ],
           ),
+          const SizedBox(height: 10),
+          // 需求（第二十六批）：私信磁贴 —— 副标题展示未读总数
+          Row(
+            children: <Widget>[
+              const Expanded(child: _MessagesTile()),
+              const SizedBox(width: 10),
+              const Expanded(child: SizedBox.shrink()),
+            ],
+          ),
         ],
       ),
     )
@@ -709,6 +721,33 @@ class _CloudDriveTile extends ConsumerWidget {
       title: '音乐云盘',
       subtitle: subtitle,
       onTap: () => context.push('/cloud-drive'),
+    );
+  }
+}
+
+/// 私信宫格 tile（需求第二十六批）：天蓝渐变图标块 + 未读总数副标题，
+/// 未读数来自全局会话列表（conversationsProvider，启动即拉 + 私信页刷新）。
+/// 点击进私信会话列表。
+class _MessagesTile extends ConsumerWidget {
+  const _MessagesTile();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final AuthState auth = ref.watch(authProvider);
+    String subtitle = '登录后可用';
+    if (auth.loggedIn) {
+      final ConversationsState st = ref.watch(conversationsProvider);
+      final int unread = st.unreadTotal;
+      subtitle = unread > 0
+          ? '$unread 条未读消息'
+          : (st.items.isEmpty ? '与好友聊聊歌' : '暂无新消息');
+    }
+    return _QuickHubTile(
+      icon: Icons.chat_bubble_rounded,
+      gradient: const <Color>[Color(0xFF8FD6FF), Color(0xFF3AA0FF)],
+      title: '私信',
+      subtitle: subtitle,
+      onTap: () => context.push('/messages'),
     );
   }
 }

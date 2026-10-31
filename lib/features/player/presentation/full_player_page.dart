@@ -49,6 +49,10 @@ import '../providers/np_settings_providers.dart';
 import '../providers/player_providers.dart';
 import '../../listen/providers/listen_room_provider.dart';
 import '../../listen/presentation/listen_room_sheet.dart';
+import '../../listen/services/listen_together_service.dart'
+    show ListenRoomUser;
+import '../../../core/widgets/user_avatar.dart'
+    show AvatarStack;
 import 'player_more_sheet.dart';
 import 'widgets/cover_art_view.dart' show CoverArtView, kSquareCoverRadiusRatio;
 import 'widgets/cover_viewer.dart';
@@ -824,14 +828,36 @@ class _TopBar extends ConsumerWidget {
                   const SizedBox(height: 1),
                   GestureDetector(
                     onTap: () => unawaited(showListenRoomSheet(context)),
-                    child: Text(
-                      '${room.users.length} 人一起听 · 点击管理',
-                      style: TextStyle(
-                        color: AppConstants.brandColor
-                            .withValues(alpha: 0.95),
-                        fontSize: 9.5,
-                        fontWeight: FontWeight.w600,
-                      ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: <Widget>[
+                        // 需求（第二十六批）：双方头像 —— 成员头像堆叠
+                        // （空成员时不占位，仅文案）
+                        if (room.users.isNotEmpty) ...<Widget>[
+                          AvatarStack(
+                            members: <({String url, String nickname, int userId})>[
+                              for (final ListenRoomUser u in room.users)
+                                (
+                                  url: u.avatarUrl,
+                                  nickname: u.nickname,
+                                  userId: u.userId,
+                                ),
+                            ],
+                            radius: 8.5,
+                            max: 2,
+                          ),
+                          const SizedBox(width: 5),
+                        ],
+                        Text(
+                          '${room.users.length} 人一起听 · 点击管理',
+                          style: TextStyle(
+                            color: AppConstants.brandColor
+                                .withValues(alpha: 0.95),
+                            fontSize: 9.5,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                 ],

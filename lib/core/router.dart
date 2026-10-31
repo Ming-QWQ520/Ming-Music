@@ -47,6 +47,8 @@ import '../features/library/presentation/listen_rank_page.dart';
 import '../features/library/presentation/profile_page.dart';
 import '../features/listen/presentation/listen_together_page.dart';
 import '../features/listen/presentation/friends_page.dart';
+import '../features/social/presentation/messages_page.dart';
+import '../features/social/presentation/chat_page.dart';
 import '../features/player/presentation/full_player_page.dart';
 import '../features/settings/presentation/settings_page.dart';
 import '../features/shell/presentation/main_scaffold.dart';
@@ -231,6 +233,23 @@ final GoRouter appRouter = GoRouter(
           name: 'friends',
           builder: (BuildContext context, GoRouterState state) =>
               const FriendsPage(),
+        ),
+        GoRoute(
+          path: 'messages',
+          name: 'messages',
+          // 需求（第二十六批）：私信 —— 会话列表
+          builder: (BuildContext context, GoRouterState state) =>
+              const MessagesPage(),
+        ),
+        GoRoute(
+          path: 'messages/:uid',
+          name: 'chat',
+          // 私信聊天页：与指定用户对话，邀请消息渲染成点击即加入的卡片
+          builder: (BuildContext context, GoRouterState state) => ChatPage(
+            uid: int.tryParse(state.pathParameters['uid'] ?? '') ?? 0,
+            nickname: state.uri.queryParameters['name'] ?? '',
+            avatarUrl: state.uri.queryParameters['avatar'] ?? '',
+          ),
         ),
       ],
     ),

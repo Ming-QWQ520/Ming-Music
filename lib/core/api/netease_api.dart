@@ -218,10 +218,8 @@ class NeteaseApi {
         request.add(utf8.encode(text));
         final HttpClientResponse response =
             await request.close().timeout(_timeout);
-        final String respText = await response
-            .transform(utf8.decoder)
-            .join()
-            .timeout(_timeout);
+        final String respText =
+            await response.transform(utf8.decoder).join().timeout(_timeout);
         if (response.statusCode != 200) {
           throw ApiException('HTTP ${response.statusCode}',
               code: response.statusCode);
@@ -255,15 +253,22 @@ class NeteaseApi {
     final HttpClientRequest request = await _client.getUrl(Uri.parse(url));
     request.headers.set(HttpHeaders.acceptHeader, 'application/json');
     final HttpClientResponse response = await request.close().timeout(_timeout);
+    final String body =
+        await response.transform(utf8.decoder).join().timeout(_timeout);
     if (response.statusCode != 200) {
-      await response.drain<Object?>();
+      // 第二十六批：网易自定义 HTTP 码（如一起听 488「已失效」）的响应体
+      // 是携带 code/message 的 JSON，直接抛 HTTP 状态码会丢掉真实原因；
+      // 能解析出 JSON 时按正常载荷返回，交给 code!=200 的统一处理
+      // （throwOnCode=false 的调用方可拿到 message 展示给用户）。
+      final Object? payload = _tryDecode(body);
+      if (payload is Map<String, Object?> && payload['code'] != null) {
+        return payload;
+      }
       throw ApiException(
         'HTTP ${response.statusCode}',
         code: response.statusCode,
       );
     }
-    final String body =
-        await response.transform(utf8.decoder).join().timeout(_timeout);
     return jsonDecode(body);
   }
 
@@ -274,16 +279,31 @@ class NeteaseApi {
     request.headers.set(HttpHeaders.acceptHeader, 'application/json');
     request.write(body);
     final HttpClientResponse response = await request.close().timeout(_timeout);
+    final String text =
+        await response.transform(utf8.decoder).join().timeout(_timeout);
     if (response.statusCode != 200) {
-      await response.drain<Object?>();
+      // 同 _getJson：保留网易自定义状态码响应体里的真实错误信息
+      final Object? payload = _tryDecode(text);
+      if (payload is Map<String, Object?> && payload['code'] != null) {
+        return payload;
+      }
       throw ApiException(
         'HTTP ${response.statusCode}',
         code: response.statusCode,
       );
     }
-    final String text =
-        await response.transform(utf8.decoder).join().timeout(_timeout);
     return jsonDecode(text);
+  }
+
+  /// 宽容 JSON 解码（空响应/非 JSON 返回 null，不抛异常）
+  static Object? _tryDecode(String text) {
+    final String s = text.trim();
+    if (s.isEmpty) return null;
+    try {
+      return jsonDecode(s);
+    } catch (_) {
+      return null;
+    }
   }
 
   /// 云盘上传本地音乐（需求：音乐云盘增加上传本地音乐功能）。

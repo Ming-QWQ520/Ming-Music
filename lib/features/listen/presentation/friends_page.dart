@@ -13,9 +13,9 @@ library;
 import 'dart:async' show unawaited;
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart'
-    show Clipboard, ClipboardData;
+import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../../core/api/netease_api.dart' show apiPayload;
 import '../../../core/constants/app_constants.dart';
@@ -59,9 +59,8 @@ class FriendsPage extends ConsumerStatefulWidget {
 
 class _FriendsPageState extends ConsumerState<FriendsPage>
     with SingleTickerProviderStateMixin {
-  late final TabController _tab =
-      TabController(length: 2, vsync: this)
-        ..addListener(_onTabChanged);
+  late final TabController _tab = TabController(length: 2, vsync: this)
+    ..addListener(_onTabChanged);
   List<FriendUser> _follows = const <FriendUser>[];
   List<FriendUser> _followeds = const <FriendUser>[];
   bool _loadingFollows = false;
@@ -187,7 +186,8 @@ class _FriendsPageState extends ConsumerState<FriendsPage>
     final bool? ok = await showDialog<bool>(
       context: context,
       builder: (BuildContext ctx) => AlertDialog(
-        title: Text('邀请 ${friend.nickname.isEmpty ? '好友' : friend.nickname} 一起听'),
+        title:
+            Text('邀请 ${friend.nickname.isEmpty ? '好友' : friend.nickname} 一起听'),
         content: const Text('还没有开启一起听房间，创建后即可把邀请私信给TA，'
             'TA点击链接即可加入同步收听。'),
         actions: <Widget>[
@@ -255,7 +255,8 @@ class _FriendsPageState extends ConsumerState<FriendsPage>
           unselectedLabelColor: theme.colorScheme.onSurfaceVariant,
           indicatorColor: AppConstants.brandColor,
           indicatorSize: TabBarIndicatorSize.label,
-          labelStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
+          labelStyle:
+              const TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
           unselectedLabelStyle:
               const TextStyle(fontSize: 14, fontWeight: FontWeight.w400),
           tabs: const <Widget>[
@@ -344,8 +345,7 @@ class _FriendList extends StatelessWidget {
             child: Text('加载失败：$error',
                 textAlign: TextAlign.center,
                 style: TextStyle(
-                    fontSize: 12.5,
-                    color: theme.colorScheme.onSurfaceVariant)),
+                    fontSize: 12.5, color: theme.colorScheme.onSurfaceVariant)),
           ),
           const SizedBox(height: 14),
           Center(
@@ -364,8 +364,7 @@ class _FriendList extends StatelessWidget {
               size: 40, color: theme.colorScheme.onSurfaceVariant),
           const SizedBox(height: 12),
           const Center(
-            child: Text('这里还没有人',
-                style: TextStyle(fontSize: 13)),
+            child: Text('这里还没有人', style: TextStyle(fontSize: 13)),
           ),
         ],
       );
@@ -376,8 +375,11 @@ class _FriendList extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(16, 10, 16, 32),
       itemCount: users.length,
       separatorBuilder: (_, __) => const SizedBox(height: 8),
-      itemBuilder: (BuildContext context, int index) =>
-          _FriendCard(user: users[index], inRoom: inRoom, inviting: inviting, onInvite: onInvite),
+      itemBuilder: (BuildContext context, int index) => _FriendCard(
+          user: users[index],
+          inRoom: inRoom,
+          inviting: inviting,
+          onInvite: onInvite),
     );
   }
 }
@@ -457,6 +459,21 @@ class _FriendCard extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: 8),
+              // 需求（第二十六批）：私信直达 —— 点击进聊天页
+              // （邀请闭环：聊天页里发/收邀请卡，对方点击即加入）
+              IconButton(
+                tooltip: '发私信',
+                onPressed: () {
+                  context.push('/messages/${user.userId}'
+                      '?name=${Uri.encodeComponent(user.nickname.isEmpty ? '用户${user.userId}' : user.nickname)}'
+                      '&avatar=${Uri.encodeComponent(user.avatarUrl)}');
+                },
+                icon: Icon(
+                  Icons.chat_bubble_outline_rounded,
+                  size: 20,
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
               _InviteBadge(inRoom: inRoom),
             ],
           ),
@@ -512,8 +529,7 @@ class _NotLoggedInCard extends StatelessWidget {
           Icon(Icons.person_search_rounded,
               size: 44, color: theme.colorScheme.onSurfaceVariant),
           const SizedBox(height: 12),
-          const Text('登录后查看关注与粉丝，邀请好友一起听',
-              style: TextStyle(fontSize: 13)),
+          const Text('登录后查看关注与粉丝，邀请好友一起听', style: TextStyle(fontSize: 13)),
           const SizedBox(height: 14),
           FilledButton(
             style: FilledButton.styleFrom(
@@ -625,9 +641,7 @@ class _InviteActionsSheetState extends ConsumerState<_InviteActionsSheet> {
                 title: '系统分享邀请',
                 subtitle: '分享链接到微信/QQ 等任意应用',
                 onTap: () async {
-                  await ref
-                      .read(listenRoomProvider.notifier)
-                      .shareInvite();
+                  await ref.read(listenRoomProvider.notifier).shareInvite();
                 },
               ),
               _ActionRow(
@@ -641,8 +655,7 @@ class _InviteActionsSheetState extends ConsumerState<_InviteActionsSheet> {
                     AppNotify.show('尚未开启房间');
                     return;
                   }
-                  await Clipboard.setData(
-                      ClipboardData(text: '$rid|$inviter'));
+                  await Clipboard.setData(ClipboardData(text: '$rid|$inviter'));
                   AppNotify.success('邀请串已复制');
                 },
               ),

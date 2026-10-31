@@ -12,14 +12,15 @@ library;
 import 'dart:async' show unawaited;
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart'
-    show Clipboard, ClipboardData;
+import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../core/constants/app_constants.dart';
 import '../../../core/widgets/app_notify.dart';
 import '../../../core/widgets/sheet_host.dart' show GlassSheet, showMingSheet;
+import '../../../core/widgets/user_avatar.dart'
+    show UserAvatar, avatarDisplayName;
 import '../../auth/presentation/login_sheet.dart' show showLoginSheet;
 import '../providers/listen_room_provider.dart';
 import '../services/listen_together_service.dart' show ListenRoomUser;
@@ -51,8 +52,7 @@ class _ListenRoomSheetState extends ConsumerState<_ListenRoomSheet> {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      final ListenRoomNotifier notifier =
-          ref.read(listenRoomProvider.notifier);
+      final ListenRoomNotifier notifier = ref.read(listenRoomProvider.notifier);
       unawaited(notifier.refreshLogin());
       unawaited(_detectClipboardInvite());
     });
@@ -75,11 +75,10 @@ class _ListenRoomSheetState extends ConsumerState<_ListenRoomSheet> {
   }
 
   Future<void> _join(ListenInvite invite) async {
-    final String? err =
-        await ref.read(listenRoomProvider.notifier).joinRoom(
-              invite.roomId,
-              invite.inviterId,
-            );
+    final String? err = await ref.read(listenRoomProvider.notifier).joinRoom(
+          invite.roomId,
+          invite.inviterId,
+        );
     if (!mounted) return;
     if (err != null) {
       AppNotify.show(err);
@@ -177,8 +176,7 @@ class _ListenRoomSheetState extends ConsumerState<_ListenRoomSheet> {
                         children: <Widget>[
                           const Text('一起听',
                               style: TextStyle(
-                                  fontSize: 17,
-                                  fontWeight: FontWeight.w800)),
+                                  fontSize: 17, fontWeight: FontWeight.w800)),
                           Text(
                             st.inRoom
                                 ? (st.phase == ListenRoomPhase.host
@@ -225,8 +223,7 @@ class _ListenRoomSheetState extends ConsumerState<_ListenRoomSheet> {
                           _InviteFoundCard(
                             invite: _clipInvite!,
                             onJoin: () => _join(_clipInvite!),
-                            onDismiss: () =>
-                                setState(() => _clipInvite = null),
+                            onDismiss: () => setState(() => _clipInvite = null),
                           ),
                           const SizedBox(height: 12),
                         ],
@@ -252,8 +249,8 @@ class _ListenRoomSheetState extends ConsumerState<_ListenRoomSheet> {
                             borderRadius: BorderRadius.circular(10),
                           ),
                           child: Text(st.notice,
-                              style: const TextStyle(
-                                  fontSize: 12, height: 1.4)),
+                              style:
+                                  const TextStyle(fontSize: 12, height: 1.4)),
                         ),
                       ],
                     ],
@@ -280,7 +277,8 @@ class _LoginCard extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.45),
+        color:
+            theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.45),
         borderRadius: BorderRadius.circular(14),
       ),
       child: Row(
@@ -289,14 +287,12 @@ class _LoginCard extends StatelessWidget {
               size: 20, color: theme.colorScheme.onSurfaceVariant),
           const SizedBox(width: 10),
           const Expanded(
-            child: Text('一起听需要登录网易云账号（双方都要）',
-                style: TextStyle(fontSize: 13)),
+            child: Text('一起听需要登录网易云账号（双方都要）', style: TextStyle(fontSize: 13)),
           ),
           FilledButton(
             style: FilledButton.styleFrom(
               backgroundColor: AppConstants.brandColor,
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
             ),
             onPressed: () => showLoginSheet(context),
             child: const Text('去登录'),
@@ -362,8 +358,7 @@ class _InviteFoundCard extends StatelessWidget {
                 backgroundColor: AppConstants.brandColor,
               ),
               onPressed: onJoin,
-              icon: const Icon(Icons.connect_without_contact_rounded,
-                  size: 17),
+              icon: const Icon(Icons.connect_without_contact_rounded, size: 17),
               label: const Text('立即加入'),
             ),
           ),
@@ -490,8 +485,7 @@ class _FriendsEntry extends StatelessWidget {
           context.push('/friends');
         },
         icon: Icon(Icons.group_rounded,
-            size: 17,
-            color: theme.colorScheme.onSurfaceVariant),
+            size: 17, color: theme.colorScheme.onSurfaceVariant),
         label: Text('打开好友列表，直接私信邀请',
             style: TextStyle(
                 fontSize: 12.5, color: theme.colorScheme.onSurfaceVariant)),
@@ -623,8 +617,7 @@ class _RoomPanel extends ConsumerWidget {
                   AppNotify.show(err ?? '已把当前队列公布到房间');
                 },
                 icon: const Icon(Icons.playlist_add_check_rounded, size: 16),
-                label: const Text('公布当前队列',
-                    style: TextStyle(fontSize: 12.5)),
+                label: const Text('公布当前队列', style: TextStyle(fontSize: 12.5)),
               ),
             ),
             const SizedBox(width: 10),
@@ -648,8 +641,7 @@ class _RoomPanel extends ConsumerWidget {
     );
   }
 
-  int _myUserId(WidgetRef ref) =>
-      ref.read(listenServiceProvider).myUserId;
+  int _myUserId(WidgetRef ref) => ref.read(listenServiceProvider).myUserId;
 }
 
 /// 成员头像堆叠（正常渲染保证：空头像/加载失败/超长昵称都有兜底）
@@ -675,7 +667,7 @@ class _MemberStrip extends StatelessWidget {
       );
     }
     return SizedBox(
-      height: 52,
+      height: 56,
       child: ListView.separated(
         scrollDirection: Axis.horizontal,
         itemCount: users.length,
@@ -684,28 +676,44 @@ class _MemberStrip extends StatelessWidget {
           final ListenRoomUser u = users[index];
           final bool isMe = u.userId == myUserId;
           return SizedBox(
-            width: 56,
+            width: 60,
             child: Column(
               children: <Widget>[
-                CircleAvatar(
-                  radius: 17,
-                  backgroundColor:
-                      theme.colorScheme.primary.withValues(alpha: 0.16),
-                  backgroundImage: u.avatarUrl.isNotEmpty
-                      ? NetworkImage(u.avatarUrl)
-                      : null,
-                  onBackgroundImageError: u.avatarUrl.isEmpty
-                      ? null
-                      : (_, __) {},
-                  child: u.avatarUrl.isEmpty
-                      ? Icon(Icons.person_rounded,
-                          size: 17,
-                          color: theme.colorScheme.onSurfaceVariant)
-                      : null,
+                // 需求（第二十六批）：双方头像 —— UserAvatar 统一兜底
+                // （无头像/加载失败/匿名号昵称为空 → 首字彩色圆）
+                Stack(
+                  clipBehavior: Clip.none,
+                  children: <Widget>[
+                    UserAvatar(
+                      url: u.avatarUrl,
+                      nickname: u.nickname,
+                      userId: u.userId,
+                      radius: 17,
+                    ),
+                    if (isMe)
+                      Positioned(
+                        right: -2,
+                        bottom: -2,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 4, vertical: 1),
+                          decoration: BoxDecoration(
+                            color: AppConstants.brandColor,
+                            borderRadius: BorderRadius.circular(6),
+                            border: Border.all(color: Colors.white, width: 1),
+                          ),
+                          child: const Text('我',
+                              style: TextStyle(
+                                  fontSize: 8,
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.w800)),
+                        ),
+                      ),
+                  ],
                 ),
-                const SizedBox(height: 3),
+                const SizedBox(height: 4),
                 Text(
-                  u.nickname.isEmpty ? '用户${u.userId}' : u.nickname,
+                  avatarDisplayName(u.nickname, u.userId),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(

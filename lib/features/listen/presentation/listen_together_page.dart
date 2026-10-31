@@ -19,6 +19,8 @@ import '../../../core/constants/app_constants.dart';
 import '../../../core/api/netease_models.dart' show Song;
 import '../../../core/widgets/cover_image.dart';
 import '../../../core/widgets/app_notify.dart';
+import '../../../core/widgets/user_avatar.dart'
+    show UserAvatar, avatarDisplayName;
 import '../../auth/presentation/login_sheet.dart' show showLoginSheet;
 import '../../discover/data/netease_providers.dart'
     show neteaseRepositoryProvider;
@@ -41,8 +43,7 @@ class ListenTogetherPage extends ConsumerStatefulWidget {
   final int? initialInviterId;
 
   @override
-  ConsumerState<ListenTogetherPage> createState() =>
-      _ListenTogetherPageState();
+  ConsumerState<ListenTogetherPage> createState() => _ListenTogetherPageState();
 }
 
 class _ListenTogetherPageState extends ConsumerState<ListenTogetherPage> {
@@ -62,8 +63,7 @@ class _ListenTogetherPageState extends ConsumerState<ListenTogetherPage> {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      final ListenRoomNotifier notifier =
-          ref.read(listenRoomProvider.notifier);
+      final ListenRoomNotifier notifier = ref.read(listenRoomProvider.notifier);
       unawaited(notifier.refreshLogin());
       _handleIncomingInvite();
     });
@@ -77,8 +77,7 @@ class _ListenTogetherPageState extends ConsumerState<ListenTogetherPage> {
 
   /// 深链参数优先 → 自动加入；否则读剪贴板识别邀请给出确认卡
   Future<void> _handleIncomingInvite() async {
-    final ListenRoomNotifier notifier =
-        ref.read(listenRoomProvider.notifier);
+    final ListenRoomNotifier notifier = ref.read(listenRoomProvider.notifier);
     final ListenRoomState st = ref.read(listenRoomProvider);
     final String? deepRoom = widget.initialRoomId;
     final int? deepInviter = widget.initialInviterId;
@@ -89,8 +88,7 @@ class _ListenTogetherPageState extends ConsumerState<ListenTogetherPage> {
         !st.inRoom) {
       _autoJoinDone = true;
       _inviteCtrl.text = '$deepRoom|$deepInviter';
-      final String? err =
-          await notifier.joinRoom(deepRoom, deepInviter ?? 0);
+      final String? err = await notifier.joinRoom(deepRoom, deepInviter ?? 0);
       if (!mounted) return;
       if (err != null) {
         AppNotify.show(err);
@@ -176,9 +174,9 @@ class _ListenTogetherPageState extends ConsumerState<ListenTogetherPage> {
     // 房间列表点播：换到该曲并上报 GOTO（其余成员跟随）
     _svc.suppressReportFor(const Duration(seconds: 2));
     await ref.read(playerProvider.notifier).playSongs(
-          <Track>[t],
-          queueTitle: '一起听',
-        );
+      <Track>[t],
+      queueTitle: '一起听',
+    );
   }
 
   Future<void> _leave({bool end = false}) async {
@@ -352,11 +350,11 @@ class _ListenTogetherPageState extends ConsumerState<ListenTogetherPage> {
               roomId: st.roomId,
               inviterId: st.inviterId,
               isCreator: st.phase == ListenRoomPhase.host,
+              myUserId: ref.read(listenServiceProvider).myUserId,
               users: st.users,
               onShare: () =>
                   ref.read(listenRoomProvider.notifier).shareInvite(),
-              onCopy: () =>
-                  ref.read(listenRoomProvider.notifier).copyInvite(),
+              onCopy: () => ref.read(listenRoomProvider.notifier).copyInvite(),
               onInviteFriends: () => context.push('/friends'),
               onRefresh: () => ref
                   .read(listenRoomProvider.notifier)
@@ -389,8 +387,7 @@ class _ListenTogetherPageState extends ConsumerState<ListenTogetherPage> {
           if (st.notice.isNotEmpty) ...<Widget>[
             const SizedBox(height: 14),
             Container(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
               decoration: BoxDecoration(
                 color: theme.colorScheme.surfaceContainerHighest
                     .withValues(alpha: 0.5),
@@ -537,8 +534,8 @@ class _InviteConfirmCard extends StatelessWidget {
               const SizedBox(width: 8),
               const Expanded(
                 child: Text('检测到好友的一起听邀请',
-                    style: TextStyle(
-                        fontSize: 13.5, fontWeight: FontWeight.w700)),
+                    style:
+                        TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700)),
               ),
               GestureDetector(
                 onTap: onDismiss,
@@ -559,8 +556,7 @@ class _InviteConfirmCard extends StatelessWidget {
                 backgroundColor: AppConstants.brandColor,
               ),
               onPressed: onJoin,
-              icon: const Icon(Icons.connect_without_contact_rounded,
-                  size: 17),
+              icon: const Icon(Icons.connect_without_contact_rounded, size: 17),
               label: const Text('立即加入'),
             ),
           ),
@@ -706,6 +702,7 @@ class _RoomCard extends StatelessWidget {
     required this.roomId,
     required this.inviterId,
     required this.isCreator,
+    required this.myUserId,
     required this.users,
     required this.onShare,
     required this.onCopy,
@@ -717,6 +714,7 @@ class _RoomCard extends StatelessWidget {
   final String roomId;
   final int inviterId;
   final bool isCreator;
+  final int myUserId;
   final List<ListenRoomUser> users;
   final VoidCallback onShare;
   final VoidCallback onCopy;
@@ -765,25 +763,41 @@ class _RoomCard extends StatelessWidget {
                       width: 68,
                       child: Column(
                         children: <Widget>[
-                          CircleAvatar(
-                            radius: 18,
-                            backgroundColor: theme.colorScheme.primary
-                                .withValues(alpha: 0.14),
-                            backgroundImage: u.avatarUrl.isNotEmpty
-                                ? NetworkImage(u.avatarUrl)
-                                : null,
-                            onBackgroundImageError: u.avatarUrl.isEmpty
-                                ? null
-                                : (_, __) {},
-                            child: u.avatarUrl.isEmpty
-                                ? const Icon(Icons.person_rounded, size: 18)
-                                : null,
+                          // 需求（第二十六批）：双方头像 —— UserAvatar 统一兜底
+                          Stack(
+                            clipBehavior: Clip.none,
+                            children: <Widget>[
+                              UserAvatar(
+                                url: u.avatarUrl,
+                                nickname: u.nickname,
+                                userId: u.userId,
+                                radius: 18,
+                              ),
+                              if (u.userId == myUserId)
+                                Positioned(
+                                  right: -2,
+                                  bottom: -2,
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 4, vertical: 1),
+                                    decoration: BoxDecoration(
+                                      color: AppConstants.brandColor,
+                                      borderRadius: BorderRadius.circular(6),
+                                      border: Border.all(
+                                          color: Colors.white, width: 1),
+                                    ),
+                                    child: const Text('我',
+                                        style: TextStyle(
+                                            fontSize: 8,
+                                            color: Colors.white,
+                                            fontWeight: FontWeight.w800)),
+                                  ),
+                                ),
+                            ],
                           ),
                           const SizedBox(height: 4),
                           Text(
-                            u.nickname.isEmpty
-                                ? '用户${u.userId}'
-                                : u.nickname,
+                            avatarDisplayName(u.nickname, u.userId),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: const TextStyle(fontSize: 10.5),

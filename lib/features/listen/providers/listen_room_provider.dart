@@ -13,8 +13,7 @@ library;
 
 import 'dart:async';
 
-import 'package:flutter/services.dart'
-    show Clipboard, ClipboardData;
+import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/api/netease_models.dart' show Song;
@@ -71,8 +70,7 @@ ListenInvite? parseListenInvite(String raw) {
   final String s = raw.trim();
   if (s.isEmpty) return null;
   final RegExpMatch? room =
-      RegExp(r'roomId\s*=\s*([^&\s<>]+)', caseSensitive: false)
-          .firstMatch(s);
+      RegExp(r'roomId\s*=\s*([^&\s<>]+)', caseSensitive: false).firstMatch(s);
   final RegExpMatch? inviter =
       RegExp(r'inviterId\s*=\s*([^&\s<>]+)', caseSensitive: false)
           .firstMatch(s);
@@ -83,8 +81,14 @@ ListenInvite? parseListenInvite(String raw) {
       return ListenInvite(roomId: rid, inviterId: inv);
     }
   }
-  final RegExpMatch? pair =
-      RegExp(r'(\d{4,})\s*[|｜]\s*(\d{2,})').firstMatch(s);
+  // 邀请串：房间号|邀请人ID（允许夹在任意文本中，如聊天记录整段复制）。
+  // 第二十六批实测：真实 roomId 是 <hex32>_<时间戳> 形态
+  // （如 057eb172ecb5eff6b23464510a241f79_1793444501），旧正则
+  // (\d{4,})|(只匹配纯数字)会把竖线前的数字尾巴当时房间号，
+  // 丢掉 hex 前缀导致加入必失败 —— 现在优先匹配 hex(+_时间戳)整体。
+  final RegExpMatch? pair = RegExp(
+    r'([0-9a-fA-F]{4,}(?:_[0-9]{6,})?|\d{4,})\s*[|｜]\s*(\d{2,})',
+  ).firstMatch(s);
   if (pair != null) {
     final int inv = int.tryParse(pair.group(2)!) ?? 0;
     if (inv > 0) {
@@ -191,6 +195,7 @@ class ListenRoomNotifier extends Notifier<ListenRoomState> {
     // 回调注册一次（Notifier keepAlive，生命周期=进程）
     _svc.onCommand = _applyCommand;
     _svc.onRoomChanged = _onRoomChanged;
+    _svc.onRoomExpired = _onRoomExpired;
     _svc.statusSupplier = () {
       final PlayerState ps = ref.read(playerProvider);
       return (
@@ -215,8 +220,7 @@ class ListenRoomNotifier extends Notifier<ListenRoomState> {
       _startMemberLoop();
       unawaited(_ensureLogin().then<void>((_) => refreshStatus(silent: true)));
       return ListenRoomState(
-        phase:
-            _svc.isCreator ? ListenRoomPhase.host : ListenRoomPhase.guest,
+        phase: _svc.isCreator ? ListenRoomPhase.host : ListenRoomPhase.guest,
         roomId: _svc.roomId ?? '',
         inviterId: _svc.inviterId,
       );
@@ -295,7 +299,19 @@ class ListenRoomNotifier extends Notifier<ListenRoomState> {
   /// 应用对方命令（GOTO 换歌 / PLAY / PAUSE / PROGRESS 拖动进度）；
   /// 进度按收到时刻补流逝时间（仅播放中），防回环窗口 3s。
   Future<void> _applyCommand(ListenPlayCommand cmd) async {
-    if (!ref.read(playerProvider).loaded) return;
+    final PlayerState ps0 = ref.read(playerProvider);
+    // 加入对齐命令（服务端为新成员合成的 self/clientSeq=0 命令）：
+    // 只对「加入方」生效 —— 房主不被合成命令劫持（否则开房瞬间可能被
+    // 强制切到公布列表第一首）。
+    final bool selfAlignment =
+        cmd.userId == _svc.myUserId && cmd.clientSeq == 0;
+    if (selfAlignment && _svc.isCreator) return;
+    // 未装载过任何歌曲（loaded=false）时：换歌型命令（GOTO/PLAY/seek 指向
+    // 不同歌）仍要应用 —— 新用户点邀请加入应当直接开播房内歌曲；
+    // 播放暂停/seek 类无从作用，照旧忽略。
+    final bool switchType =
+        cmd.targetSongId > 0 && (cmd.isGoto || cmd.isPlay || cmd.isSeek);
+    if (!ps0.loaded && !switchType) return;
     final PlayerNotifier notifier = ref.read(playerProvider.notifier);
     final PlayerState ps = ref.read(playerProvider);
     final int? currentId = ps.currentTrack?.neteaseId;
@@ -327,8 +343,9 @@ class ListenRoomNotifier extends Notifier<ListenRoomState> {
         if (idx >= 0) {
           // 同一队列内跳转（后续上一首/下一首自然同步）
           await notifier.playAt(idx);
-        } else if (cmd.isGoto) {
-          // 队列没有 → 拉歌曲详情单曲入队（保持房内后续命令可跟）
+        } else if (cmd.isGoto || selfAlignment) {
+          // 队列没有 → 拉歌曲详情单曲入队（保持房内后续命令可跟；
+          // 加入对齐命令同理 —— 加入者本地可能还没有房内歌曲）
           final List<Song> songs = await ref
               .read(neteaseRepositoryProvider)
               .songDetails(<int>[cmd.targetSongId]);
@@ -364,12 +381,31 @@ class ListenRoomNotifier extends Notifier<ListenRoomState> {
 
     // ③ 进度（仅同曲 seek）
     if (cmd.isSeek && currentId == cmd.targetSongId) {
-      await notifier
-          .seek(Duration(milliseconds: progressMs.clamp(0, 1 << 31)));
+      await notifier.seek(Duration(milliseconds: progressMs.clamp(0, 1 << 31)));
     }
   }
 
   // ----------------------------------------------------------- 成员
+
+  /// 房间已失效（第二十六批：心跳/轮询/状态返回 488 或 inRoom=false）：
+  /// 停止同步与成员循环，清空本地房间状态并给出可行动提示。
+  /// （房间会话已死亡，不需要再调 /end；也避免后续心跳/轮询空转。）
+  void _onRoomExpired() {
+    if (!state.inRoom) return; // 幂等：轮询与心跳可能同时触发
+    final bool wasCreator = state.phase == ListenRoomPhase.host;
+    _stopMemberLoop();
+    _lastReportedSongId = null;
+    _lastReportedPlaying = null;
+    unawaited(_svc.leave());
+    final String notice =
+        wasCreator ? '一起听房间已失效，请重新创建房间并重新邀请好友' : '一起听房间已失效，请让好友重新发起邀请后再加入';
+    state = ListenRoomState(
+      loggedIn: state.loggedIn,
+      nickname: state.nickname,
+      notice: notice,
+    );
+    AppNotify.show(notice);
+  }
 
   /// 房间状态刷新回调：成员变化 → 广播当前歌（新成员 ≤10s 对齐）
   Future<void> _onRoomChanged(List<ListenRoomUser> users) async {
@@ -492,8 +528,7 @@ class ListenRoomNotifier extends Notifier<ListenRoomState> {
   /// 解析剪贴板中的邀请信息（一起听页/面板打开时调用）
   Future<ListenInvite?> readInviteFromClipboard() async {
     try {
-      final ClipboardData? data =
-          await Clipboard.getData(Clipboard.kTextPlain);
+      final ClipboardData? data = await Clipboard.getData(Clipboard.kTextPlain);
       final String? text = data?.text;
       if (text == null || text.isEmpty) return null;
       return parseListenInvite(text);
@@ -549,12 +584,13 @@ class ListenRoomNotifier extends Notifier<ListenRoomState> {
         '若无法点击，复制邀请串到 MingMusic「一起听 → 加入一起听」粘贴：\n'
         '$rid|${_svc.inviterId}';
     try {
-      final Map<String, Object?> res = await ref
-          .read(neteaseApiProvider)
-          .post('/send/text', <String, String>{
-        'user_ids': '$friendId',
-        'msg': msg,
-      }, throwOnCode: false);
+      final Map<String, Object?> res = await ref.read(neteaseApiProvider).post(
+          '/send/text',
+          <String, String>{
+            'user_ids': '$friendId',
+            'msg': msg,
+          },
+          throwOnCode: false);
       final int code = (res['code'] as num?)?.toInt() ?? 0;
       if (code == 200) {
         AppNotify.success('已把一起听邀请私信给 $friendName');
@@ -570,8 +606,7 @@ class ListenRoomNotifier extends Notifier<ListenRoomState> {
   Future<void> shareInvite() async {
     final String rid = state.roomId;
     if (rid.isEmpty) return;
-    await PlatformActions.shareText(
-        buildListenShareText(rid, _svc.inviterId));
+    await PlatformActions.shareText(buildListenShareText(rid, _svc.inviterId));
   }
 
   /// 复制邀请串（纯 roomId|inviterId）
@@ -583,7 +618,6 @@ class ListenRoomNotifier extends Notifier<ListenRoomState> {
 }
 
 /// 一起听房间全局状态（keepAlive：进程内常驻，页面/面板/播放页共享）
-final NotifierProvider<ListenRoomNotifier, ListenRoomState>
-    listenRoomProvider =
+final NotifierProvider<ListenRoomNotifier, ListenRoomState> listenRoomProvider =
     NotifierProvider<ListenRoomNotifier, ListenRoomState>(
         ListenRoomNotifier.new);
