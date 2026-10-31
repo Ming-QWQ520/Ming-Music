@@ -49,6 +49,12 @@ class NeteaseApi {
   /// 登录用户 cookie 是否存在（用于 UI 判定与请求附加）
   bool get hasUserCookie => _userCookie != null;
 
+  /// 需求第二十三批「被移除设备提示」：登录 cookie 在用前提下，任何
+  /// 接口返回 301（需要登录）即视为登录态失效（设备被从网易云
+  /// 「设备管理」移除 / 账号被顶下线），触发一次全局回调；登录成功时复位。
+  void Function()? onAuthLost;
+  bool _authLostFired = false;
+
   /// 恢复登录态：由 AuthNotifier 启动时调用
   void restoreUserCookie(String? cookie) {
     _userCookie = (cookie == null || cookie.isEmpty) ? null : cookie;
@@ -56,6 +62,7 @@ class NeteaseApi {
 
   void setUserCookie(String cookie) {
     _userCookie = cookie;
+    _authLostFired = false; // 重新登录后允许下一次失效提示
     _prefs.setString(PrefsKeys.userCookie, cookie);
   }
 
@@ -166,6 +173,12 @@ class NeteaseApi {
     }
     final Object? code = decoded['code'];
     if (code is int && code != 200) {
+      // 被移除设备提示（需求第二十三批）：登录态下收到 301 = cookie
+      // 已失效，全局回调一次（提示 + 回落未登录态），由 AuthNotifier 接管
+      if (code == 301 && !_authLostFired && _userCookie != null) {
+        _authLostFired = true;
+        onAuthLost?.call();
+      }
       final bool allowed = allowedCodes != null && allowedCodes.contains(code);
       if (!allowed && throwOnCode) {
         throw ApiException('接口返回错误 $code', code: code);

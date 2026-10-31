@@ -885,6 +885,37 @@ class SuggestWord {
 
   bool get isDirectHit => directHit != null;
 
+  /// 客户端关键词高亮分段（联想演示同款，用于不返回 highLightInfo 的
+  /// 分组式联想接口）：对条目名称做不区分大小写的全命中匹配，命中
+  /// 子串全部标亮 —— 空关键词时整词常规渲染。
+  static List<SuggestSegment> clientHighlight(String text, String kw) {
+    final String k = kw.trim();
+    if (k.isEmpty || text.isEmpty) {
+      return <SuggestSegment>[
+        if (text.isNotEmpty) SuggestSegment(text: text, highlighted: false),
+      ];
+    }
+    final String lower = text.toLowerCase();
+    final String kl = k.toLowerCase();
+    final List<SuggestSegment> out = <SuggestSegment>[];
+    int i = 0;
+    while (i < text.length) {
+      final int idx = lower.indexOf(kl, i);
+      if (idx < 0) {
+        out.add(SuggestSegment(text: text.substring(i), highlighted: false));
+        break;
+      }
+      if (idx > i) {
+        out.add(
+            SuggestSegment(text: text.substring(i, idx), highlighted: false));
+      }
+      out.add(SuggestSegment(
+          text: text.substring(idx, idx + k.length), highlighted: true));
+      i = idx + k.length;
+    }
+    return out;
+  }
+
   static SuggestWord fromJson(Map<String, Object?> j) {
     SuggestSegment seg(Map<String, Object?> s) => SuggestSegment.fromJson(s);
     List<SuggestSegment> parseSegments(Object? raw) {
@@ -974,6 +1005,72 @@ class KeywordSuggest {
       artists.isEmpty &&
       words.isEmpty &&
       recs.isEmpty;
+
+  /// 联想演示（/suggest 页）同款分组式联想解析 —— 官方
+  /// /api/search/suggest/web 与服务代理 /search/suggest 同构：
+  ///  - result.order 声明分组与先后（songs/artists/albums/playlists/
+  ///    mvis/djRadios 子序列），渲染顺序必须以 order 为准；
+  ///  - songs 第 0 条 → 直 hit 歌曲卡，artists 第 0 条 → 歌手卡
+  ///   （各至多一张，与官方 App 观感一致）；
+  ///  - 其余全部条目按 order 顺序转**类型徽标联想词行**（tag = 歌曲/
+  ///    艺人/专辑/歌单/MV/电台），点击回填搜索；
+  ///  - 该接口无 highLightInfo，分段由 [SuggestWord.clientHighlight]
+  ///    客户端生成。
+  static KeywordSuggest fromWebSuggest(Map<String, Object?> res, String kw) {
+    final Object? r = res['result'];
+    if (r is! Map<String, Object?>) return const KeywordSuggest();
+    const Map<String, String> groupLabel = <String, String>{
+      'songs': '歌曲',
+      'artists': '艺人',
+      'albums': '专辑',
+      'playlists': '歌单',
+      'mvis': 'MV',
+      'djRadios': '电台',
+    };
+    Song? hitSong;
+    SearchArtist? hitArtist;
+    final List<SuggestWord> rows = <SuggestWord>[];
+    final List<Object?> order = (r['order'] as List<Object?>?) ?? const <Object?>[];
+    for (final Object? g in order) {
+      if (g is! String) continue;
+      final List<Object?>? items = r[g] as List<Object?>?;
+      if (items == null || items.isEmpty) continue;
+      for (int i = 0; i < items.length; i++) {
+        final Object? it = items[i];
+        if (it is! Map<String, Object?>) continue;
+        // 每分组第 0 条生成实体卡（歌曲卡优先于歌手卡：判定不可调换）
+        if (g == 'songs' && hitSong == null && i == 0) {
+          final Song s = Song.fromCloudJson(it);
+          if (s.id != 0) {
+            hitSong = s;
+            continue;
+          }
+        }
+        if (g == 'artists' && hitArtist == null && i == 0) {
+          final SearchArtist a = SearchArtist.fromJson(it);
+          if (a.id != 0) {
+            hitArtist = a;
+            continue;
+          }
+        }
+        // 其余条目 → 类型徽标联想词行
+        final String name = (it['name'] as String?) ?? '';
+        if (name.isEmpty) continue;
+        rows.add(SuggestWord(
+          keyword: name,
+          segments: SuggestWord.clientHighlight(name, kw),
+          tag: groupLabel[g] ?? g,
+        ));
+      }
+    }
+    return KeywordSuggest(
+      songs: hitSong == null ? const <Song>[] : <Song>[hitSong],
+      artists: hitArtist == null ? const <SearchArtist>[] : <SearchArtist>[hitArtist],
+      words: rows,
+      recTitle: '相关搜索',
+      recs: const <String>[],
+    );
+  }
 }
 
 // ---------------------------------------------------------------- 搜索分类结果

@@ -12,6 +12,7 @@
 library;
 
 import 'dart:async';
+import 'dart:io';
 import 'dart:math';
 
 import 'package:flutter/foundation.dart';
@@ -992,6 +993,12 @@ class PlayerNotifier extends Notifier<PlayerState> {
       // 本地文件源直接放行（缓存音乐列表页点播：路径已验证存在，
       // 不再走网络解析 —— 离线可用且不受当前音质档位影响）
       if (t.source.isNotEmpty && !t.source.startsWith('http')) {
+        // 从缓存文件名 `songId_level.done` 提取真实档位回填音质展示
+        //（与实际播放音频一致；解析不出不影响播放）
+        final String base = t.source.split(Platform.pathSeparator).last;
+        final RegExpMatch? m =
+            RegExp(r'^\d+_([A-Za-z0-9]+)\.done$').firstMatch(base);
+        if (m != null) _markCacheLevelMeta(nid, m.group(1)!);
         resolvedById[nid] = t;
         continue;
       }
@@ -1003,18 +1010,20 @@ class PlayerNotifier extends Notifier<PlayerState> {
         }
         // 需求第二十一批：不可播（VIP 灰曲）不再直接剔除 —— 先查磁盘
         // 缓存，有缓存仍可离线播（修复「有些有缓存的歌曲却无法正常播放」）
-        final String? path = await _cachedSourceAnyLevel(nid);
-        if (path != null && path.isNotEmpty) {
-          resolvedById[nid] = t.copyWith(source: path);
+        final hit = await _cachedSourceAnyLevel(nid);
+        if (hit != null && hit.path.isNotEmpty) {
+          _markCacheLevelMeta(nid, hit.level); // 真实档位回填
+          resolvedById[nid] = t.copyWith(source: hit.path);
         }
         continue;
       }
       // 需求第二十一批：磁盘缓存查找不再受「边听边缓存」开关限制
       //（已缓存文件始终可播，关开关只影响新增缓存）；当前档位未命中
       // 时跨档位兜底（换过音质/请求档回落的历史缓存也能命中）
-      final String? path = await _cachedSourceAnyLevel(nid);
-      if (path != null && path.isNotEmpty) {
-        resolvedById[nid] = t.copyWith(source: path);
+      final hit = await _cachedSourceAnyLevel(nid);
+      if (hit != null && hit.path.isNotEmpty) {
+        _markCacheLevelMeta(nid, hit.level); // 真实档位回填
+        resolvedById[nid] = t.copyWith(source: hit.path);
         continue;
       }
       pending[nid] = t;
@@ -1056,33 +1065,47 @@ class PlayerNotifier extends Notifier<PlayerState> {
     return out;
   }
 
-  /// 磁盘缓存查找：当前音质档位优先，未命中跨档位兜底（最近使用优先）。
-  /// 需求第二十一批：修复「有些有缓存的歌曲却无法正常播放」——
-  /// 历史缓存可能落在其它音质档（换过音质/请求档回落），仅按当前
-  /// 档位查会导致离线时明明有缓存却解析失败。
-  Future<String?> _cachedSourceAnyLevel(int nid) async {
+  /// 磁盘缓存查找（档位感知）：当前音质档位优先，未命中跨档位择优 ——
+  /// 先「高于请求档、距离最近」（本地高档不耗流量只会更好），再
+  /// 「低于请求档、距离最近」（离线可播优先于档位一致）。
+  /// 需求第二十一批：修复「有些有缓存的歌曲却无法正常播放」；
+  /// 需求第二十三批：修复隐藏恶性 bug —— 旧版跨档位按最近使用任取，
+  /// 历史低档缓存（如 64k/标准 MP3）会顶着高音质设置被静默播放且
+  /// 音质展示仍报 URL 响应的高档位。
+  Future<({String path, String level})?> _cachedSourceAnyLevel(int nid) async {
     try {
       final SongCacheService cache = ref.read(songCacheProvider);
       final String level = ref.read(audioQualityProvider).apiValue;
       final String? exact = await cache.cachedPathFor(nid, level);
-      if (exact != null && exact.isNotEmpty) return exact;
-      return await cache.cachedPathAnyLevel(nid);
+      if (exact != null && exact.isNotEmpty) return (path: exact, level: level);
+      return await cache.cachedFileBestFor(nid, level);
     } catch (_) {
       return null;
     }
   }
 
+  /// 播放本地缓存文件时，以文件名中的真实档位回填音质元数据 ——
+  /// 音质展示必须与实际播放的音频一致（sr/br 本地不可知，不虚构，
+  /// 展示层自动只显档位名）。level 为空时不写。
+  void _markCacheLevelMeta(int nid, String level) {
+    if (level.isEmpty) return;
+    ref.read(songMetaProvider.notifier).upsertAll(<int, SongUrlInfo>{
+      nid: SongUrlInfo(id: nid, url: '', level: level),
+    });
+  }
+
   /// 缓存感知的播放源选择：
-  ///  - 磁盘命中（当前档位优先，跨档位兜底）→ 本地文件（秒开省流量）；
+  ///  - 磁盘命中（当前档位优先，跨档位择优）→ 本地文件（秒开省流量）；
   ///  - 未命中：网络 URL（落盘延后到开播时，见 _cacheCurrentTrack）。
   /// 需求第二十一批：不再受「边听边缓存」开关限制 —— 已缓存文件
   /// 始终优先本地播放（关开关只影响新增缓存，不废弃已有缓存）。
   Future<Track> _withCacheSource(Track t, SongUrlInfo u) async {
     final int id = t.neteaseId!;
     try {
-      final String? path = await _cachedSourceAnyLevel(id);
-      if (path != null && path.isNotEmpty) {
-        return t.copyWith(source: path);
+      final hit = await _cachedSourceAnyLevel(id);
+      if (hit != null && hit.path.isNotEmpty) {
+        _markCacheLevelMeta(id, hit.level); // 真实档位回填（恶性 bug 修复）
+        return t.copyWith(source: hit.path);
       }
     } catch (_) {
       // 缓存层异常不影响播放

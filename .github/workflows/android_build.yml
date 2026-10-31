@@ -1,13 +1,8 @@
 name: Android Build
 
+# 需求（第二十三批）：CI 改为仅手动触发（workflow_dispatch），
+# 不再随 push/PR 自动构建。
 on:
-  push:
-    branches: [ main, master ]
-    paths-ignore:
-      - '**.md'
-      - 'screenshots/**'
-  pull_request:
-    branches: [ main, master ]
   workflow_dispatch:
 
 concurrency:
@@ -75,11 +70,28 @@ jobs:
             exit 1
           fi
 
-      - name: Upload APK artifacts
+      # 需求（第二十三批）：编译产物每个架构 APK 分开上传 ——
+      # arm64-v8a / armeabi-v7a / x86_64 各自独立 artifact，便于按设备取用
+      - name: Upload arm64-v8a APK
         uses: actions/upload-artifact@v4
         with:
-          name: ming-music-apk
-          path: |
-            build/app/outputs/flutter-apk/*-release.apk
+          name: ming-music-arm64-v8a
+          path: build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload armeabi-v7a APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: ming-music-armeabi-v7a
+          path: build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload x86_64 APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: ming-music-x86_64
+          path: build/app/outputs/flutter-apk/app-x86_64-release.apk
           if-no-files-found: error
           retention-days: 14

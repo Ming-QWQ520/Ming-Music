@@ -176,9 +176,9 @@ class _SearchPageState extends ConsumerState<SearchPage> {
       });
       return;
     }
-    // 搜索联想词（实时，250ms 防抖；新接口三层兜底，
-    // 进程内记忆命中路径后直达）
-    _debounce = Timer(const Duration(milliseconds: 250), () async {
+    // 搜索联想词（需求第二十三批：对齐联想演示完整用法 —— 官方 web
+    // 联想直连，输入防抖 450ms；竞态保护：响应回来时若输入已变化则丢弃）
+    _debounce = Timer(const Duration(milliseconds: 450), () async {
       try {
         final KeywordSuggest s = await ref
             .read(neteaseRepositoryProvider)
@@ -1893,9 +1893,17 @@ class _SuggestArtistCard extends StatelessWidget {
                     style: const TextStyle(
                         fontSize: 14.5, fontWeight: FontWeight.w600),
                   ),
-                  if (artist.alias.isNotEmpty)
+                  // 副标题（联想演示同款）：别名 + 音乐/专辑作品数
+                  //（接口不返回粉丝数，不虚构）
+                  if (artist.alias.isNotEmpty ||
+                      artist.musicSize != null ||
+                      artist.albumSize != null)
                     Text(
-                      artist.alias,
+                      <String>[
+                        if (artist.alias.isNotEmpty) artist.alias,
+                        if (artist.musicSize != null) '音乐${artist.musicSize}',
+                        if (artist.albumSize != null) '专辑${artist.albumSize}',
+                      ].join(' · '),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(

@@ -20,6 +20,8 @@ import 'package:flutter/foundation.dart';
 import 'package:just_audio/just_audio.dart' as ja;
 import 'package:path_provider/path_provider.dart';
 
+import '../../settings/domain/settings_models.dart' show AudioQualityX;
+
 /// 单条缓存记录元信息（用于大小统计与 LRU）
 class _CacheMeta {
   _CacheMeta({
@@ -208,32 +210,62 @@ class SongCacheService {
     }
   }
 
-  /// 跨音质档位查找已缓存文件（需求第二十一批修复「有些有缓存的歌曲
-  /// 却无法正常播放」：历史缓存可能落在其它音质档（用户换过音质/请求
-  /// 档位回落），按当前档位查不到时扫描该歌曲全部档位，取最近使用的
-  /// 一个 —— 离线可播优先于档位一致）。
-  Future<String?> cachedPathAnyLevel(int songId) async {
+  /// 跨音质档位查找已缓存文件（档位感知版，修复第二十二批反馈的
+  /// 「隐藏恶性 bug」：旧实现按最近使用任取一档 —— 用户切过音质后，
+  /// 历史低档位缓存（如 64k/标准 MP3）会顶着高音质设置被静默播放，
+  /// 播放设置里显示的却是 URL 响应的高档位，音质展示与实际听感不符）。
+  ///
+  /// 档位择优规则：
+  ///  1. 当前请求档位精确命中 → 直接采用；
+  ///  2. 否则优先「高于请求档、距离最近」的缓存（本地播放不耗流量，
+  ///     高档位只会更好）；
+  ///  3. 其次「低于请求档、距离最近」的缓存（离线可用优先于档位一致）；
+  ///  4. 同距离取最近使用；无法识别的档位名最后兜底。
+  /// 返回 null 表示该歌曲无任何缓存。
+  Future<({String path, String level})?> cachedFileBestFor(
+    int songId,
+    String requestedLevel,
+  ) async {
     try {
       final Directory dir = await _ensureDir();
       final String prefix = '${songId}_';
-      File? best;
-      DateTime bestAt = DateTime.fromMillisecondsSinceEpoch(0);
+      // 候选集：path / level / lastModified
+      final List<({String path, String level, DateTime at})> found =
+          <({String path, String level, DateTime at})>[];
       await for (final FileSystemEntity e in dir.list()) {
         if (e is! File) continue;
         final String name = e.path.split(Platform.pathSeparator).last;
         if (!name.startsWith(prefix) || !name.endsWith('.done')) continue;
         try {
-          final DateTime at = e.lastModifiedSync();
-          if (best == null || at.isAfter(bestAt)) {
-            best = e;
-            bestAt = at;
-          }
+          found.add((
+            path: e.path,
+            level: name.substring(
+                prefix.length, name.length - '.done'.length),
+            at: e.lastModifiedSync(),
+          ));
         } catch (_) {}
       }
-      if (best == null) return null;
+      if (found.isEmpty) return null;
+      final int reqIdx = AudioQualityX.fromName(requestedLevel).index;
+      int score(({String path, String level, DateTime at}) c) {
+        final int idx = AudioQualityX.fromName(c.level).index;
+        if (idx < 0 || reqIdx < 0) return 1 << 30; // 档位名不可识别：最后兜底
+        if (idx == reqIdx) return 0; // 精确命中
+        return idx > reqIdx
+            ? idx - reqIdx // 更高档：距离越小越优
+            : 1000 + (reqIdx - idx); // 更低档：次优（离线可播优先）
+      }
+
+      found.sort((a, b) {
+        final int d = score(a).compareTo(score(b));
+        return d != 0 ? d : b.at.compareTo(a.at); // 同距离最近使用优先
+      });
+      final best = found.first;
       // 触碰访问时间（LRU 依据）
-      best.setLastModifiedSync(DateTime.now());
-      return best.path;
+      try {
+        File(best.path).setLastModifiedSync(DateTime.now());
+      } catch (_) {}
+      return (path: best.path, level: best.level);
     } catch (_) {
       return null;
     }

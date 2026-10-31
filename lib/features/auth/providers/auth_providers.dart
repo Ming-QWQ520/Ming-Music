@@ -127,10 +127,33 @@ class AuthNotifier extends Notifier<AuthState> {
     ref.onDispose(() {
       _disposed = true;
       _stopQrPolling();
+      _api.onAuthLost = null;
     });
+    // 需求第二十三批「被移除设备提示」：登录态下任何接口返回 301
+    // （设备被移除/账号顶号下线，cookie 失效）→ 全局提示一次并回到未登录态
+    _api.onAuthLost = _handleAuthLost;
     // 启动恢复（异步校验，不阻塞 UI）
     Future<void>.microtask(_restore);
     return const AuthState(status: AuthStatus.unknown);
+  }
+
+  /// 登录态失效（设备被移除/顶号下线）：清本地登录态 + 系统通知提示。
+  /// 由 NeteaseApi 在收到 301 时触发（单次）；重新登录后重新武装。
+  void _handleAuthLost() {
+    if (_disposed) return;
+    _api.clearUserCookie();
+    state = state.copyWith(
+      status: AuthStatus.guest,
+      clearProfile: true,
+      clearLevel: true,
+      clearVip: true,
+      likedIds: const <int>{},
+    );
+    // 系统通知（与欢迎通知同通道，Android 13+ 权限启动时已申请）
+    unawaited(PlatformActions.postStatusNotice(
+      title: 'MingMusic',
+      text: '登录已失效：当前设备可能已被移除，请重新登录',
+    ));
   }
 
   Future<void> _restore() async {
@@ -150,6 +173,9 @@ class AuthNotifier extends Notifier<AuthState> {
       checkFailed = true;
     }
     if (_disposed) return;
+    // 设备被移除/账号顶号下线：login/status 返回 301 已触发
+    // _handleAuthLost（清 cookie + 提示），此处保持 guest 不再回填登录态
+    if (!_api.hasUserCookie) return;
     if (profile != null) {
       state = state.copyWith(
         status: AuthStatus.loggedIn,
