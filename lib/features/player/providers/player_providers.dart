@@ -292,8 +292,10 @@ class PlayerNotifier extends Notifier<PlayerState> {
   final Map<int, ({SongUrlInfo info, DateTime at})> _urlCache =
       <int, ({SongUrlInfo info, DateTime at})>{};
 
-  /// 直链新鲜窗口（直链实际 20 分钟过期，留 5 分钟余量）
-  static const Duration _urlCacheTtl = Duration(minutes: 15);
+  /// 直链新鲜窗口：官方口径 20 分钟过期，线上实测 CDN 窗口可能更短
+  ///（装载后 ~15 分钟重连即 403），与守卫阈值 [_urlStaleAfter] 一致
+  /// 收紧到 10 分钟
+  static const Duration _urlCacheTtl = Duration(minutes: 10);
 
   SongUrlInfo? _urlCacheGet(int id) {
     final ({SongUrlInfo info, DateTime at})? entry = _urlCache[id];
@@ -815,14 +817,20 @@ class PlayerNotifier extends Notifier<PlayerState> {
   /// 解析当前曲并从当前下标重装内核续播。10s 防抖防循环重试。
   DateTime _recoverGuardUntil = DateTime.fromMillisecondsSinceEpoch(0);
 
+  /// 自愈/恢复守卫共用互斥：两者都是「重取当前曲 + 带进度重装内核」，
+  /// 并发执行会双重 loadQueue 互踩（1.2s 延迟确认的自愈与用户立刻
+  /// 点播放触发的守卫可能重叠）。进行中时后来者直接让路。
+  bool _healInFlight = false;
+
   Future<void> _recoverPlaybackError() async {
-    if (!_ready || !state.loaded) return;
+    if (!_ready || !state.loaded || _healInFlight) return;
     final DateTime now = DateTime.now();
     if (now.isBefore(_recoverGuardUntil)) return;
     _recoverGuardUntil = now.add(const Duration(seconds: 10));
     final Track? cur = state.currentTrack;
     final int? nid = cur?.neteaseId;
     if (cur == null || nid == null || nid <= 0) return;
+    _healInFlight = true;
     try {
       final List<Track> resolved =
           await resolveTracks(<Track>[cur], forceRemote: true);
@@ -832,17 +840,24 @@ class PlayerNotifier extends Notifier<PlayerState> {
       final int idx = state.index.clamp(0, q.length - 1);
       if (q[idx].id == fresh.id) q[idx] = fresh;
       state = state.copyWith(queue: q);
-      // 保留进度续播：卡死前播到哪，自愈后从哪继续
-      final Duration pos = _handler.player.position;
+      // 保留进度续播：卡死前播到哪，自愈后从哪继续。优先用错误到达
+      // 瞬间抓取的进度（fatal 后内核 position 可能已被清零）
+      final Duration errPos = _handler.lastErrorPosition;
+      final Duration pos = errPos > Duration.zero
+          ? errPos
+          : _handler.player.position;
       await _handler.loadQueue(q, initialIndex: idx);
       if (pos > const Duration(seconds: 3) &&
           (pos < (_handler.player.duration ?? Duration.zero))) {
         await _handler.seek(pos);
       }
       await _handler.play();
+      _handler.clearFatalError();
       debugPrint('recover: 当前曲直链已刷新并续播 songId=$nid');
     } catch (_) {
       // 自愈失败静默：状态栏错误提示交给既有错误链路
+    } finally {
+      _healInFlight = false;
     }
   }
 
@@ -850,16 +865,30 @@ class PlayerNotifier extends Notifier<PlayerState> {
   /// 内核重开连接会用装载时的旧链接（已过期）→ 403 停摆。这里在
   /// 用户点击播放时先静默重新获取一次：拿到新链接则带进度重装内核
   ///（当前音源不可原位替换），拿不到则退回旧源由错误自愈兑底。
+  /// 触发条件两条（满足其一）：
+  ///  a) 内核近期发生过 fatal 错误（403 停摆，playPause 恢复路径）——
+  ///     无条件重取：年龄阈值有边界窗口（13~15 分钟获取的链可能已
+  ///     被 CDN 拒绝），停摆后重连旧链必失败；
+  ///  b) 直链年龄超过 [_urlStaleAfter]。
   Future<void> _refreshCurrentSourceIfStale() async {
-    if (_offlineFullQueue != null) return; // 离线降级态：交还原链路
+    if (_offlineFullQueue != null || _healInFlight) return; // 离线降级态：交还原链路
     final Track? cur = state.currentTrack;
     final int? nid = cur?.neteaseId;
     if (cur == null || nid == null || nid <= 0) return;
     if (cur.source.isEmpty || !cur.source.startsWith('http')) return;
-    final DateTime? at = _urlCache[nid]?.at;
-    if (at != null && DateTime.now().difference(at) <= _urlStaleAfter) {
-      return; // 直链仍新鲜：不打扰
+    // a) fatal 停摆标记（5 分钟内有效）：无条件视为过期
+    final DateTime? fatalAt = _handler.lastFatalErrorAt;
+    final bool stalledAfterFatal = fatalAt != null &&
+        DateTime.now().difference(fatalAt) <= const Duration(minutes: 5) &&
+        !_handler.player.playing;
+    if (!stalledAfterFatal) {
+      // b) 常规年龄阈值判断
+      final DateTime? at = _urlCache[nid]?.at;
+      if (at != null && DateTime.now().difference(at) <= _urlStaleAfter) {
+        return; // 直链仍新鲜：不打扰
+      }
     }
+    _healInFlight = true;
     try {
       final List<Track> one =
           await resolveTracks(<Track>[cur], forceRemote: true);
@@ -871,16 +900,23 @@ class PlayerNotifier extends Notifier<PlayerState> {
       final List<Track> q = List<Track>.of(state.queue);
       q[idx] = fresh;
       state = state.copyWith(queue: q);
-      final Duration pos = _handler.player.position;
+      // 优先用错误停摆瞬间抓取的进度（fatal 后内核 position 可能清零）
+      final Duration errPos = _handler.lastErrorPosition;
+      final Duration pos = errPos > Duration.zero
+          ? errPos
+          : _handler.player.position;
       final bool wasPlaying = _handler.player.playing;
       await _handler.loadQueue(q, initialIndex: idx);
       if (pos > const Duration(seconds: 3) &&
           (pos < (_handler.player.duration ?? Duration.zero))) {
         await _handler.seek(pos);
       }
-      if (wasPlaying) await _handler.play();
+      if (wasPlaying || stalledAfterFatal) await _handler.play();
+      _handler.clearFatalError();
     } catch (_) {
       // 刷新失败静默：退回旧源尝试，报错由内核错误自愈兑底
+    } finally {
+      _healInFlight = false;
     }
   }
 
@@ -1783,9 +1819,12 @@ class PlayerNotifier extends Notifier<PlayerState> {
     _schedulePreload();
   }
 
-  /// 跳转目标直链新鲜度阈值：服务端直链约 20 分钟过期，取 15 分钟
-  /// （预加载/预刷新刚获取的下一首必然新鲜，不重复请求）
-  static const Duration _urlStaleAfter = Duration(minutes: 15);
+  /// 跳转/恢复目标直链新鲜度阈值：官方口径直链约 20 分钟过期，但
+  /// 线上日志实测（11-01 13:22 装载的链 13:37 重连即 403，窗口 ≤15
+  /// 分钟）CDN 有效窗口可能更短 —— 收紧到 10 分钟，宁多一次请求
+  ///（带 timestamp 穿透，必拿新链）不赌边界。预加载/预刷新刚获取的
+  /// 下一首年龄仅几分钟，不受影响。
+  static const Duration _urlStaleAfter = Duration(minutes: 10);
 
   /// 跳转前直链新鲜度守卫（403 根治，见 _jumpTo 内注释）
   Future<void> _refreshStaleSourceBeforeJump(int index) async {

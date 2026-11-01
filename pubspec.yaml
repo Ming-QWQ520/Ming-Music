@@ -60,6 +60,8 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^5.0.0
+  # 播放错误自愈单测（test/player_error_selfheal_test.dart）mock 平台层用
+  just_audio_platform_interface: ^4.6.0
 
 flutter:
   uses-material-design: true

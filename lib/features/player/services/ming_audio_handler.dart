@@ -73,12 +73,34 @@ class MingAudioHandler extends BaseAudioHandler with SeekHandler {
   }
 
   /// 内核播放错误回调（第二十九批「播完不下一首/搜过的歌播不出」
-  /// 兕底）：playbackEvent 流报错且**已不在播放**（加载失败停摆，
-  /// 而非播放中的抖动）时通知上层自愈。
+  /// 兕底；403 根治第二阶段改为 errorStream 主通道）：错误确认停摆
+  ///（延迟 1.2s 复核）时通知上层自愈。
   Future<void> Function()? _onPlaybackError;
 
   void setPlaybackErrorHandler(Future<void> Function() handler) {
     _onPlaybackError = handler;
+  }
+
+  /// 最近一次内核 fatal 错误时刻（403 根治第二阶段）：错误到达瞬间
+  /// just_audio 的 playing 尚未翻转（事件先于状态），旧逻辑
+  /// `if (!playing)` 在 403 到达时恒为假 → 自愈被跳过 → 用户手动
+  /// 暂停/播放两次才能恢复。这里在错误到达时立即记录时刻与进度，
+  /// 供上层「恢复播放守卫」识别停摆场景并无条件重取直链。
+  DateTime? _lastFatalErrorAt;
+
+  /// [lastFatalErrorAt] 时刻的播放进度（fatal 后 position 可能被
+  /// 内核清零，续播进度以此为准）。
+  Duration _lastErrorPosition = Duration.zero;
+
+  DateTime? get lastFatalErrorAt => _lastFatalErrorAt;
+
+  /// 错误停摆时的播放进度（>Duration.zero 时可用于续播定位）
+  Duration get lastErrorPosition => _lastErrorPosition;
+
+  /// 自愈/恢复成功后清除 fatal 标记（避免后续每次播放都强制重取）
+  void clearFatalError() {
+    _lastFatalErrorAt = null;
+    _lastErrorPosition = Duration.zero;
   }
 
   /// 在当前下标原位替换音源（不触碰当前播放曲目）。
@@ -103,20 +125,48 @@ class MingAudioHandler extends BaseAudioHandler with SeekHandler {
     _broadcastState(_player.playbackEvent);
   }
 
+  /// 内核错误统一入口（403 播放中停摆根治）：记录 fatal 标记与进度，
+  /// 延迟 1.2s 确认停摆后回调上层自愈。
+  ///
+  /// ⚠️ just_audio 0.10.x 错误模型：播放错误**不再**经
+  /// playbackEventStream.onError 传递（其 onError 处理器为空实现），
+  /// 而是被包进 PlaybackEvent.errorCode/errorMessage 后转为
+  /// [ja.PlayerException] 从 errorStream 广播 —— 第二十九批自愈挂在
+  /// playbackEventStream.onError 上从未触发过，403 后一直无人自愈。
+  /// 这里以 errorStream 为主通道、playbackEventStream.onError 为兜底。
+  ///
+  /// 延迟确认的理由：fatal（过期直链 403）错误到达后内核必然停摆
+  ///（!playing 或 idle）；而抖动性错误内核自行缓冲恢复，届时仍在
+  /// 播放 → 跳过自愈，不打断正常播放。
+  void _handleKernelError(String tag, [Object? e]) {
+    debugPrint('MingAudioHandler kernel error($tag): $e');
+    // 错误到达瞬间立即记录 fatal 标记与进度（此时 position 仍是停摆前
+    // 播放位置；延迟后内核可能已清零）
+    _lastFatalErrorAt = DateTime.now();
+    _lastErrorPosition = _player.position;
+    Future<void>.delayed(const Duration(milliseconds: 1200), () {
+      final bool stalled = !_player.playing ||
+          _player.processingState == ja.ProcessingState.idle;
+      if (!stalled) return;
+      final Future<void> Function()? cb = _onPlaybackError;
+      if (cb != null) {
+        Future<void>.microtask(() => cb());
+      }
+    });
+  }
+
   void _bindEventStreams() {
     _player.playbackEventStream.listen(
       _broadcastState,
-      onError: (Object e, StackTrace st) {
-        debugPrint('MingAudioHandler playbackEvent error: $e');
-        // 仅在「已不在播放」时上报自愈：加载失败（过期直链等）会让
-        // 播放直接停摆；播放中的抖动性错误内核会自行缓冲重试。
-        if (!_player.playing) {
-          final Future<void> Function()? cb = _onPlaybackError;
-          if (cb != null) {
-            Future<void>.microtask(() => cb());
-          }
-        }
-      },
+      onError: (Object e, StackTrace st) =>
+          _handleKernelError('playbackEvent', e),
+    );
+    // 主通道：just_audio 0.10.x 播放错误经 errorStream 广播（见
+    // _handleKernelError 注释）
+    _player.errorStream.listen(
+      (ja.PlayerException error) => _handleKernelError(
+          'playerException code=${error.code} idx=${error.index}',
+          error.message),
     );
     // 装载完成后补执行挂起的 seek（需求修复：切歌瞬间拖动进度条丢失；
     // 15s TTL 防陈旧位置落到新曲目上）
