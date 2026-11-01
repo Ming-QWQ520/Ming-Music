@@ -636,6 +636,12 @@ class NeteaseRepository {
           <String, String>{
             'id': chunk.join(','),
             'level': level,
+            // 直链缓存穿透（403 根治）：实测服务端对相同 query 在缓存
+            // 窗口内恒定回显同一条直链 —— 客户端「重新获取」也拿旧链接，
+            // 直链约 20 分钟过期，排到队列后段播放时内核报 403 停摆。
+            // 按官方约定附加 timestamp 参数绕开缓存，保证每次解析都拿到
+            // 新生成的直链。
+            'timestamp': '${DateTime.now().millisecondsSinceEpoch}',
           },
           cookieKv: cookieKv);
       final Object? data = res['data'];

@@ -1,10 +1,9 @@
-/// 歌曲条目组件：封面/序号 + 标题 + 副标题（歌手 + VIP 徽章）。
+/// 歌曲条目组件：封面/序号 + 标题 + 副标题（VIP 徽章 + 歌手）。
 /// 需求：所有歌曲支持长按弹出统一操作菜单（onLongPress）；
 /// 需求修正「无缓存暗淡」：仅无网且未缓存时整行暗淡（歌名/歌手/VIP/封面），
 /// 有网一律正常；正在播放行保持红色高亮不受暗淡影响。
-/// 需求（第二十四批）：① VIP 徽章从歌名右侧移至歌手名称右侧
-/// （歌名下方副标题行尾）；② 可选爱心喜欢键（showLike），置于三点
-/// 菜单键左侧，红心态实时跟随 authProvider.likedIds。
+/// 需求：VIP 徽章紧贴歌手名称左侧（歌手行行首）；可选爱心喜欢键
+/// （showLike），置于三点菜单键左侧，红心态实时跟随 authProvider.likedIds。
 library;
 
 import 'package:flutter/material.dart';
@@ -205,10 +204,17 @@ class SongTile extends ConsumerWidget {
                     ],
                   ),
                   const SizedBox(height: 3),
-                  // 需求（第二十四批）：VIP 徽章移至歌手名称右侧
-                  // （歌名下方副标题行尾；徽章不与超长歌手/专辑文案争宽）
+                  // 需求：VIP 徽章紧贴歌手名称左侧（歌手行行首；
+                  // 徽章不与超长歌手/专辑文案争宽）
                   Row(
                     children: <Widget>[
+                      if (song.isVipOnly) ...<Widget>[
+                        Opacity(
+                          opacity: normal ? 1 : 0.38,
+                          child: const VipBadge(),
+                        ),
+                        const SizedBox(width: 5),
+                      ],
                       Expanded(
                         child: Text(
                           song.album.isEmpty
@@ -222,13 +228,6 @@ class SongTile extends ConsumerWidget {
                           ),
                         ),
                       ),
-                      if (song.isVipOnly) ...<Widget>[
-                        const SizedBox(width: 6),
-                        Opacity(
-                          opacity: normal ? 1 : 0.38,
-                          child: const VipBadge(),
-                        ),
-                      ],
                     ],
                   ),
                 ],

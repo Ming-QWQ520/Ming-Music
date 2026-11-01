@@ -832,11 +832,55 @@ class PlayerNotifier extends Notifier<PlayerState> {
       final int idx = state.index.clamp(0, q.length - 1);
       if (q[idx].id == fresh.id) q[idx] = fresh;
       state = state.copyWith(queue: q);
+      // 保留进度续播：卡死前播到哪，自愈后从哪继续
+      final Duration pos = _handler.player.position;
       await _handler.loadQueue(q, initialIndex: idx);
+      if (pos > const Duration(seconds: 3) &&
+          (pos < (_handler.player.duration ?? Duration.zero))) {
+        await _handler.seek(pos);
+      }
       await _handler.play();
       debugPrint('recover: 当前曲直链已刷新并续播 songId=$nid');
     } catch (_) {
       // 自愈失败静默：状态栏错误提示交给既有错误链路
+    }
+  }
+
+  /// 恢复播放前当前曲直链新鲜度守卫（403 根治）：长时间暂停/后台后
+  /// 内核重开连接会用装载时的旧链接（已过期）→ 403 停摆。这里在
+  /// 用户点击播放时先静默重新获取一次：拿到新链接则带进度重装内核
+  ///（当前音源不可原位替换），拿不到则退回旧源由错误自愈兑底。
+  Future<void> _refreshCurrentSourceIfStale() async {
+    if (_offlineFullQueue != null) return; // 离线降级态：交还原链路
+    final Track? cur = state.currentTrack;
+    final int? nid = cur?.neteaseId;
+    if (cur == null || nid == null || nid <= 0) return;
+    if (cur.source.isEmpty || !cur.source.startsWith('http')) return;
+    final DateTime? at = _urlCache[nid]?.at;
+    if (at != null && DateTime.now().difference(at) <= _urlStaleAfter) {
+      return; // 直链仍新鲜：不打扰
+    }
+    try {
+      final List<Track> one =
+          await resolveTracks(<Track>[cur], forceRemote: true);
+      if (one.isEmpty || one.first.source.isEmpty) return;
+      final Track fresh = one.first;
+      if (fresh.source == cur.source) return;
+      final int idx = state.index.clamp(0, state.queue.length - 1);
+      if (state.queue[idx].id != cur.id) return;
+      final List<Track> q = List<Track>.of(state.queue);
+      q[idx] = fresh;
+      state = state.copyWith(queue: q);
+      final Duration pos = _handler.player.position;
+      final bool wasPlaying = _handler.player.playing;
+      await _handler.loadQueue(q, initialIndex: idx);
+      if (pos > const Duration(seconds: 3) &&
+          (pos < (_handler.player.duration ?? Duration.zero))) {
+        await _handler.seek(pos);
+      }
+      if (wasPlaying) await _handler.play();
+    } catch (_) {
+      // 刷新失败静默：退回旧源尝试，报错由内核错误自愈兑底
     }
   }
 
@@ -1634,6 +1678,10 @@ class PlayerNotifier extends Notifier<PlayerState> {
       // 播完自然停止后再次点击 → 从头播放
       if (s.processing == AppProcessingState.completed) {
         await _handler.seek(Duration.zero);
+      } else {
+        // 挂起后恢复：当前曲直链可能已过期（长时间暂停/后台后内核
+        // 重开连接报 403），先静默重新获取一次（带进度重装内核）再恢复
+        await _refreshCurrentSourceIfStale();
       }
       await _handler.play();
     }
@@ -1686,6 +1734,12 @@ class PlayerNotifier extends Notifier<PlayerState> {
         return;
       }
     }
+    // 直链新鲜度守卫（403 根治）：队列装载时批量解析的直链约 20 分钟
+    // 过期 —— 跳到「预刷新窗口之外」的歌直接复用旧链接，内核打开时
+    // 报 403 停摆。这里对直链年龄超过阈值（或无获取记录）的目标**重新
+    // 获取一次**（song/url 带 timestamp 穿透，必拿新链接），并原位替换
+    // 内核音源；下一首由临近结束预刷新保持新鲜，不重复请求。
+    await _refreshStaleSourceBeforeJump(safe);
     // 内核空兜底（无网启动从未装载成功、联网后直接点歌/切歌）：
     // 先就绪直链并装载内核，否则空队列 seek(index:) 直接抛错
     if (_handler.player.audioSources.isEmpty) {
@@ -1727,6 +1781,42 @@ class PlayerNotifier extends Notifier<PlayerState> {
     _schedulePlayStat(state.queue[safe2]);
     _schedulePersist();
     _schedulePreload();
+  }
+
+  /// 跳转目标直链新鲜度阈值：服务端直链约 20 分钟过期，取 15 分钟
+  /// （预加载/预刷新刚获取的下一首必然新鲜，不重复请求）
+  static const Duration _urlStaleAfter = Duration(minutes: 15);
+
+  /// 跳转前直链新鲜度守卫（403 根治，见 _jumpTo 内注释）
+  Future<void> _refreshStaleSourceBeforeJump(int index) async {
+    final List<Track> q = state.queue;
+    if (index < 0 || index >= q.length) return;
+    final Track target = q[index];
+    final int? nid = target.neteaseId;
+    if (nid == null || nid <= 0) return; // 本地/自定义曲目：源不过期
+    if (target.source.isEmpty || !target.source.startsWith('http')) {
+      return; // 本地缓存文件/待解析源：不在此处理
+    }
+    final DateTime? at = _urlCache[nid]?.at;
+    if (at != null && DateTime.now().difference(at) <= _urlStaleAfter) {
+      return; // 预加载/预刷新刚获取的（含下一首）：直接用
+    }
+    try {
+      final List<Track> one =
+          await resolveTracks(<Track>[target], forceRemote: true);
+      if (one.isEmpty || one.first.source.isEmpty) return;
+      final Track fresh = one.first;
+      if (fresh.source == target.source) return; // 服务端仍回显同链：无可替换
+      if (index >= state.queue.length || state.queue[index].id != target.id) {
+        return; // 队列已被并发修改
+      }
+      final List<Track> q2 = List<Track>.of(state.queue);
+      q2[index] = fresh;
+      state = state.copyWith(queue: q2);
+      await _handler.replaceSourceAt(index, fresh); // 原位替换内核音源
+    } catch (_) {
+      // 重新获取失败：退回旧链接尝试，报错由内核错误自愈兑底
+    }
   }
 
   Future<void> seek(Duration position) => _handler.seek(position);

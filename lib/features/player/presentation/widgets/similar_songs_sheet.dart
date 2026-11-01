@@ -162,8 +162,12 @@ class _SimilarSongsSheetState extends ConsumerState<_SimilarSongsSheet> {
                               ),
                             ),
                           ),
+                        ],
+                      ),
+                      // VIP 紧贴歌手名称左侧（需求）
+                      subtitle: Row(
+                        children: <Widget>[
                           if (s.isVipOnly) ...<Widget>[
-                            const SizedBox(width: 6),
                             Container(
                               padding: const EdgeInsets.symmetric(
                                   horizontal: 4, vertical: 1),
@@ -177,16 +181,19 @@ class _SimilarSongsSheetState extends ConsumerState<_SimilarSongsSheet> {
                                       fontSize: 9,
                                       fontWeight: FontWeight.w800)),
                             ),
+                            const SizedBox(width: 5),
                           ],
+                          Expanded(
+                            child: Text(
+                              s.artists,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                  fontSize: 12.5,
+                                  color: theme.colorScheme.onSurfaceVariant),
+                            ),
+                          ),
                         ],
-                      ),
-                      subtitle: Text(
-                        s.artists,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                            fontSize: 12.5,
-                            color: theme.colorScheme.onSurfaceVariant),
                       ),
                       trailing: busy
                           ? const SizedBox(

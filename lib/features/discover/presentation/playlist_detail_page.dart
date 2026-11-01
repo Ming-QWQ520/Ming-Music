@@ -34,6 +34,7 @@ import '../../social/presentation/share_to_friend_sheet.dart'
     show showShareToFriendSheet;
 import '../../player/providers/cache_providers.dart';
 import '../../player/providers/player_providers.dart';
+import '../../player/presentation/widgets/eq_bars.dart';
 import '../data/netease_providers.dart';
 import 'widgets/song_actions_sheet.dart';
 import 'widgets/song_tile.dart' show VipBadge;
@@ -1188,35 +1189,46 @@ class _SwipeSongRow extends ConsumerWidget {
                           ),
                         ),
                       ),
+                    ],
+                  ),
+                  const SizedBox(height: 3),
+                  // VIP 紧贴歌手名称左侧（需求）；未缓存同规则暗淡
+                  Row(
+                    children: <Widget>[
                       if (song.isVipOnly) ...<Widget>[
-                        // 未缓存 VIP 同步暗淡
-                        const SizedBox(width: 6),
                         Opacity(
                           opacity: normal ? 1 : 0.38,
                           child: const VipBadge(),
                         ),
+                        const SizedBox(width: 5),
                       ],
+                      Expanded(
+                        child: Text(
+                          song.album.isEmpty
+                              ? song.artists
+                              : '${song.artists} - ${song.album}',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: subtitleColor,
+                            fontSize: 12.5,
+                          ),
+                        ),
+                      ),
                     ],
-                  ),
-                  const SizedBox(height: 3),
-                  Text(
-                    song.album.isEmpty
-                        ? song.artists
-                        : '${song.artists} - ${song.album}',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      color: subtitleColor,
-                      fontSize: 12.5,
-                    ),
                   ),
                 ],
               ),
             ),
             const SizedBox(width: 8),
-            // 当前播放：带光圈的动态播放图标；其余行：⋮
+            // 当前播放：与播放列表弹窗左侧同款均衡器条纹动效（需求统一）；
+            // 其余行：⋮
             if (playingNow)
-              const _PlayingBadge()
+              const SizedBox(
+                width: 30,
+                height: 30,
+                child: Center(child: EqBars(playing: true)),
+              )
             else
               IconButton(
                 visualDensity: VisualDensity.compact,
@@ -1260,51 +1272,6 @@ class _SwipeSongRow extends ConsumerWidget {
     );
 
     return swipeable;
-  }
-}
-
-/// 当前播放标识：光圈 + 跳动播放图标
-class _PlayingBadge extends StatefulWidget {
-  const _PlayingBadge();
-
-  @override
-  State<_PlayingBadge> createState() => _PlayingBadgeState();
-}
-
-class _PlayingBadgeState extends State<_PlayingBadge>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _ctrl = AnimationController(
-    vsync: this,
-    duration: const Duration(milliseconds: 1200),
-  )..repeat(reverse: true);
-
-  @override
-  void dispose() {
-    _ctrl.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AnimatedBuilder(
-      animation: _ctrl,
-      builder: (BuildContext ctx, Widget? _) {
-        final double glow = 0.35 + 0.45 * _ctrl.value;
-        return Container(
-          width: 30,
-          height: 30,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            border: Border.all(
-              color: AppConstants.brandColor.withValues(alpha: glow),
-              width: 1.6,
-            ),
-          ),
-          child: const Icon(Icons.graphic_eq_rounded,
-              size: 15, color: AppConstants.brandColor),
-        );
-      },
-    );
   }
 }
 

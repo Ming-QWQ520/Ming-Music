@@ -114,16 +114,11 @@ class _ArtistSongsPageState extends ConsumerState<ArtistSongsPage> {
                     ],
                   ],
                 ),
-                subtitle: Text(
-                  s.artists,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                      fontSize: 12.5,
-                      color: theme.colorScheme.onSurfaceVariant),
-                ),
-                trailing: s.isVipOnly
-                    ? Container(
+                subtitle: Row(
+                  children: <Widget>[
+                    // VIP 紧贴歌手名称左侧（需求）
+                    if (s.isVipOnly) ...<Widget>[
+                      Container(
                         padding: const EdgeInsets.symmetric(
                             horizontal: 4, vertical: 1),
                         decoration: BoxDecoration(
@@ -135,8 +130,21 @@ class _ArtistSongsPageState extends ConsumerState<ArtistSongsPage> {
                                 color: Colors.white,
                                 fontSize: 9,
                                 fontWeight: FontWeight.w800)),
-                      )
-                    : null,
+                      ),
+                      const SizedBox(width: 5),
+                    ],
+                    Expanded(
+                      child: Text(
+                        s.artists,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                            fontSize: 12.5,
+                            color: theme.colorScheme.onSurfaceVariant),
+                      ),
+                    ),
+                  ],
+                ),
                 onTap: () => _play(s),
                 // 需求：所有歌曲长按弹出统一操作菜单
                 onLongPress: () => showSongActionsSheet(context, s.toTrack()),

@@ -1,18 +1,16 @@
 /// 播放列表底部弹窗（第十六批按参考图重做）：
 ///  - 「当前播放」与「历史播放」左右滑动切换（PageView，文字 tab + 下划线
 ///    指示器同步，计数以上标小字跟随在标签右上，如图「当前播放⁶⁴」）；
-///  - 当前播放行：从左到右 = 当前播放标识（抖动条纹）→ VIP 标识
-///    （是才显示）→ 「歌名 - 歌手」（歌手紧靠歌名，左右各一空格）；
+///  - 当前播放行：行首当前播放标识（均衡器条纹动效），
+///    「歌名 [VIP] - 歌手」单行（VIP 紧贴歌手名称左侧）；
 ///    行尾拖动按键（ReorderableListView 自定义排序）；
 ///  - 定位修复（第十六批）：打开弹窗/点击定位键 —— ListView.builder
 ///    懒构建导致深处行无 BuildContext，改两段式（估高跳转 → 锚点构建后
 ///    ensureVisible 精调）；
 ///  - 历史播放（参考图）：每个队列快照一个分组 —— 组头「来源名 + 删除」、
-///    「继续播放：X」副标题、编号行「N. 歌名 · 歌手（VIP）」，
+///    「继续播放：X」副标题、编号行「N. 歌名（VIP） · 歌手」，
 ///    点行恢复该队列并从该行继续播放；
 library;
-
-import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -27,6 +25,7 @@ import '../../providers/cache_providers.dart'
     show cachedSongIdsProvider, networkAvailableProvider;
 import '../../providers/player_providers.dart';
 import '../../services/queue_persistence.dart' show QueueSnapshot;
+import 'eq_bars.dart';
 
 /// 打开播放列表弹窗
 ///
@@ -444,106 +443,6 @@ class _CurrentPaneState extends ConsumerState<_CurrentPane> {
   }
 }
 
-// ---------------------------------------------------------------- 抖动条纹
-
-/// 当前播放标识：三根跳动的均衡器条纹（暂停时静止低幅）
-class _EqBars extends StatefulWidget {
-  const _EqBars({required this.playing});
-
-  final bool playing;
-
-  @override
-  State<_EqBars> createState() => _EqBarsState();
-}
-
-class _EqBarsState extends State<_EqBars> with SingleTickerProviderStateMixin {
-  late final AnimationController _ctrl = AnimationController(
-    vsync: this,
-    duration: const Duration(milliseconds: 900),
-  );
-
-  @override
-  void initState() {
-    super.initState();
-    if (widget.playing) _ctrl.repeat();
-  }
-
-  @override
-  void didUpdateWidget(_EqBars oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (widget.playing) {
-      if (!_ctrl.isAnimating) _ctrl.repeat();
-    } else {
-      _ctrl.stop();
-    }
-  }
-
-  @override
-  void dispose() {
-    _ctrl.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      width: 16,
-      height: 16,
-      child: AnimatedBuilder(
-        animation: _ctrl,
-        builder: (BuildContext ctx, Widget? _) {
-          return CustomPaint(
-            painter: _EqBarsPainter(
-              phase: _ctrl.value,
-              playing: widget.playing,
-            ),
-          );
-        },
-      ),
-    );
-  }
-}
-
-class _EqBarsPainter extends CustomPainter {
-  const _EqBarsPainter({
-    required this.phase,
-    required this.playing,
-  });
-
-  final double phase;
-  final bool playing;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    const int bars = 3;
-    final double bw = size.width / (bars * 2 - 1); // 条宽 = 间隙宽
-    final Paint p = Paint()..color = AppConstants.brandColor;
-    for (int i = 0; i < bars; i++) {
-      double f;
-      if (playing) {
-        // 三根条纹按相位错开正弦跳动
-        f = 0.30 +
-            0.70 * (0.5 + 0.5 * math.sin((phase + i * 0.28) * 2 * math.pi));
-      } else {
-        f = 0.32;
-      }
-      final double h = size.height * f.clamp(0.12, 1.0);
-      final double x = i * bw * 2;
-      canvas.drawRRect(
-        RRect.fromRectAndRadius(
-          Rect.fromLTWH(x, size.height - h, bw, h),
-          Radius.circular(bw / 2),
-        ),
-        p,
-      );
-    }
-  }
-
-  @override
-  bool shouldRepaint(_EqBarsPainter oldDelegate) =>
-      oldDelegate.phase != phase || oldDelegate.playing != playing;
-}
-
 // ---------------------------------------------------------------- 历史播放
 
 /// 历史播放分组列表（第十六批按参考图重做）：
@@ -692,13 +591,6 @@ class _HistoryPane extends StatelessWidget {
                                     .withValues(alpha: isContinue ? 1 : 0.88),
                               ),
                             ),
-                            TextSpan(
-                              text: ' · ${t.artist}',
-                              style: TextStyle(
-                                fontSize: 12.5,
-                                color: Colors.white.withValues(alpha: 0.45),
-                              ),
-                            ),
                             if (t.isVipOnly)
                               const TextSpan(
                                 text: '（VIP）',
@@ -707,6 +599,13 @@ class _HistoryPane extends StatelessWidget {
                                   color: Colors.white38,
                                 ),
                               ),
+                            TextSpan(
+                              text: ' · ${t.artist}',
+                              style: TextStyle(
+                                fontSize: 12.5,
+                                color: Colors.white.withValues(alpha: 0.45),
+                              ),
+                            ),
                           ],
                         ),
                         maxLines: 1,
@@ -794,15 +693,11 @@ class _QueueRow extends ConsumerWidget {
             SizedBox(
               width: 16,
               height: 16,
-              child: current ? _EqBars(playing: playing) : null,
+              child: current ? EqBars(playing: playing) : null,
             ),
             const SizedBox(width: 8),
-            // ② VIP 标识（是才显示；无网未缓存同规则暗淡）
-            if (track.isVipOnly) ...<Widget>[
-              Opacity(opacity: dim ? 0.38 : 1.0, child: VipBadge(height: 13)),
-              const SizedBox(width: 6),
-            ],
-            // ③ 「歌名 - 歌手」：歌手紧靠歌名，左右各一空格（单行 ellipsis）
+            // ② 「歌名 [VIP] - 歌手」：VIP 紧贴歌手名称左侧（需求），
+            // 歌手紧靠歌名，单行 ellipsis
             Expanded(
               child: Text.rich(
                 TextSpan(
@@ -815,6 +710,17 @@ class _QueueRow extends ConsumerWidget {
                         fontWeight: current ? FontWeight.w600 : FontWeight.w400,
                       ),
                     ),
+                    if (track.isVipOnly)
+                      WidgetSpan(
+                        alignment: PlaceholderAlignment.middle,
+                        child: Padding(
+                          padding: const EdgeInsets.only(left: 6, right: 6),
+                          child: Opacity(
+                            opacity: dim ? 0.38 : 1.0,
+                            child: VipBadge(height: 13),
+                          ),
+                        ),
+                      ),
                     const TextSpan(
                       text: ' - ',
                       style: TextStyle(
