@@ -1,18 +1,28 @@
-/// 私信分享给好友（需求第二十九批：阅读文档
-/// https://musicapi.mingqwq.top/docs/#/?id=发送私信带歌曲 / 带专辑 / 带歌单
-/// 后接入的发送侧 —— POST /send/song、/send/album、/send/playlist）。
+/// 分享面板（需求第二十八批：按用户提供的参考样式重构 ——
+/// 仿网易云「分享至」面板，**最顶部是好友**）。
 ///
-/// 底部面板 = 联系人选择器（私信会话 + 关注列表合并去重），选中即发送；
-/// 玩家更多面板（歌曲）、歌单详情页（歌单）、专辑页（专辑）三处入口复用。
+/// 结构（自上而下，与参考图对应）：
+///  1. 标题「分享至」；
+///  2. **好友行（最顶部）**：联系人（私信会话 + 关注列表合并去重，
+///     沿用第二十九批数据源）头像横滚（头像 + 昵称），点击即通过
+///     网易云官方私信接口发送资源卡片（/send/song、/send/album、
+///     /send/playlist）；行尾「更多」深色圆钮（三点）进好友页；
+///  3. 渠道行：系统分享（绿）/ 复制链接（蓝）—— 深色圆形图标 +
+///     底部文字，与参考图渠道行同构（App 未接入微信/QQ SDK，
+///     实际可用的系统级渠道映射到这两项）；
+///  4. 「你还可以分享」：邀请好友一起听（点击进一起听页，
+///     仅歌曲分享显示，歌单/专辑分享不展示）。
 library;
 
 import 'dart:async' show unawaited;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../../core/api/netease_api.dart' show NeteaseApi, apiPayload;
-import '../../../core/constants/app_constants.dart';
+import '../../../core/utils/platform_actions.dart';
 import '../../../core/widgets/app_notify.dart';
 import '../../../core/widgets/sheet_host.dart' show GlassSheet, showMingSheet;
 import '../../../core/widgets/user_avatar.dart';
@@ -37,6 +47,7 @@ Future<void> showShareToFriendSheet(
   }
   await showMingSheet<void>(
     context,
+    isScrollControlled: true,
     builder: (BuildContext ctx) => _ShareToFriendSheet(
       kind: kind,
       id: id,
@@ -79,6 +90,16 @@ class _ShareToFriendSheetState extends State<_ShareToFriendSheet> {
         'album' => '专辑',
         _ => '歌单',
       };
+
+  /// 资源链接（系统分享 / 复制链接统一文案）
+  String get _shareText {
+    final String link = switch (widget.kind) {
+      'song' => 'https://music.163.com/#/song?id=${widget.id}',
+      'album' => 'https://music.163.com/#/album?id=${widget.id}',
+      _ => 'https://music.163.com/#/playlist?id=${widget.id}',
+    };
+    return '${widget.name} $link';
+  }
 
   @override
   void initState() {
@@ -144,6 +165,7 @@ class _ShareToFriendSheetState extends State<_ShareToFriendSheet> {
     });
   }
 
+  /// 点击好友 → 网易云官方私信发送资源卡片
   Future<void> _send(int userId, String nickname) async {
     if (_sending.contains(userId)) return;
     setState(() => _sending.add(userId));
@@ -162,138 +184,394 @@ class _ShareToFriendSheetState extends State<_ShareToFriendSheet> {
       return;
     }
     AppNotify.success('已把$_kindLabel私信给 $display');
+    Navigator.of(context).pop();
   }
 
   @override
   Widget build(BuildContext context) {
-    final ThemeData theme = Theme.of(context);
+    final bool dark = Theme.of(context).brightness == Brightness.dark;
+    final Color subText =
+        dark ? Colors.white54 : Colors.black.withValues(alpha: 0.5);
+
     return GlassSheet(
       borderRadius: 24,
+      maxHeight: MediaQuery.of(context).size.height * 0.62,
+      padding: const EdgeInsets.fromLTRB(0, 8, 0, 0),
       child: SafeArea(
         top: false,
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(20, 10, 20, 18),
+          padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
-              Center(
-                child: Container(
-                  width: 36,
-                  height: 4,
-                  decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.2),
-                    borderRadius: BorderRadius.circular(2),
-                  ),
-                ),
+              // ---------- 标题 ----------
+              const Padding(
+                padding: EdgeInsets.only(top: 6, bottom: 14),
+                child: Text('分享至',
+                    style: TextStyle(
+                        fontSize: 17.5, fontWeight: FontWeight.w700)),
               ),
-              const SizedBox(height: 14),
-              Text('私信分享$_kindLabel',
-                  style: const TextStyle(
-                      fontSize: 16, fontWeight: FontWeight.w800)),
-              const SizedBox(height: 4),
-              Text(widget.name,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                      fontSize: 12, color: theme.colorScheme.onSurfaceVariant)),
-              const SizedBox(height: 10),
-              if (_loading)
-                const Padding(
-                  padding: EdgeInsets.symmetric(vertical: 32),
-                  child: Center(
-                    child: SizedBox(
-                        width: 26,
-                        height: 26,
-                        child: CircularProgressIndicator(strokeWidth: 2.4)),
-                  ),
-                )
-              else if (_error.isNotEmpty)
-                Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 28),
-                  child: Center(
-                    child: Text(_error,
-                        style: TextStyle(
-                            fontSize: 12.5,
-                            color: theme.colorScheme.onSurfaceVariant)),
-                  ),
-                )
-              else
-                Flexible(
-                  child: ListView.builder(
-                    shrinkWrap: true,
-                    itemCount: _contacts.length,
-                    itemBuilder: (BuildContext ctx, int i) {
-                      final ({
-                        int userId,
-                        String nickname,
-                        String avatarUrl
-                      }) c = _contacts[i];
-                      final bool sending = _sending.contains(c.userId);
-                      return Padding(
-                        padding: const EdgeInsets.only(bottom: 2),
-                        child: Material(
-                          color: Colors.transparent,
-                          child: InkWell(
-                            borderRadius: BorderRadius.circular(12),
-                            onTap: sending
-                                ? null
-                                : () => unawaited(_send(c.userId, c.nickname)),
-                            child: Padding(
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 4, vertical: 7),
-                              child: Row(
-                                children: <Widget>[
-                                  UserAvatar(
-                                    url: c.avatarUrl,
-                                    nickname: c.nickname,
-                                    userId: c.userId,
-                                    radius: 19,
-                                  ),
-                                  const SizedBox(width: 11),
-                                  Expanded(
-                                    child: Text(
-                                      avatarDisplayName(c.nickname, c.userId),
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: const TextStyle(
-                                          fontSize: 13.5,
-                                          fontWeight: FontWeight.w600),
-                                    ),
-                                  ),
-                                  sending
-                                      ? const SizedBox(
-                                          width: 18,
-                                          height: 18,
-                                          child: CircularProgressIndicator(
-                                              strokeWidth: 2.2))
-                                      : Container(
-                                          padding: const EdgeInsets.symmetric(
-                                              horizontal: 12, vertical: 5),
-                                          decoration: BoxDecoration(
-                                            color: AppConstants.brandColor
-                                                .withValues(alpha: 0.14),
-                                            borderRadius:
-                                                BorderRadius.circular(14),
-                                          ),
-                                          child: const Text('发送',
-                                              style: TextStyle(
-                                                  fontSize: 11.5,
-                                                  fontWeight: FontWeight.w700,
-                                                  color:
-                                                      AppConstants.brandColor)),
-                                        ),
-                                ],
-                              ),
-                            ),
-                          ),
-                        ),
-                      );
+              // ---------- 好友行（最顶部，参考图第一位） ----------
+              _buildFriendsRow(subText),
+              const SizedBox(height: 16),
+              // ---------- 渠道行 ----------
+              Row(
+                children: <Widget>[
+                  _ChannelIcon(
+                    color: const Color(0xFF5AC864),
+                    icon: Icons.ios_share_rounded,
+                    label: '系统分享',
+                    onTap: () async {
+                      Navigator.of(context).pop();
+                      unawaited(_systemShare());
                     },
                   ),
+                  const SizedBox(width: 22),
+                  _ChannelIcon(
+                    color: const Color(0xFF3D8AF7),
+                    icon: Icons.link_rounded,
+                    label: '复制链接',
+                    onTap: () async {
+                      Navigator.of(context).pop();
+                      await Clipboard.setData(ClipboardData(text: _shareText));
+                      AppNotify.show('已复制分享链接');
+                    },
+                  ),
+                ],
+              ),
+              if (widget.kind == 'song') ...<Widget>[
+                const SizedBox(height: 18),
+                Divider(
+                    height: 1, color: dark ? Colors.white10 : Colors.black12),
+                const SizedBox(height: 12),
+                // ---------- 你还可以分享 ----------
+                Text('你还可以分享',
+                    style: const TextStyle(
+                        fontSize: 14.5, fontWeight: FontWeight.w600)),
+                const SizedBox(height: 10),
+                _ExtraCard(
+                  title: '邀请好友一起听',
+                  subtitle: '创建房间并转发邀请，实时同步播放进度',
+                  icon: Icons.headphones_rounded,
+                  gradient: const <Color>[
+                    Color(0xFF6C5CE7),
+                    Color(0xFF45B5AA),
+                  ],
+                  onTap: () {
+                    Navigator.of(context).pop();
+                    context.push('/listen');
+                  },
                 ),
+              ],
             ],
           ),
+        ),
+      ),
+    );
+  }
+
+  /// 系统分享（shareText 失败不可用时提示：链接可经复制链接兜底）
+  Future<void> _systemShare() async {
+    try {
+      final bool ok = await PlatformActions.shareText(_shareText);
+      if (!ok) AppNotify.show('分享不可用，可复制链接后粘贴发送');
+    } catch (_) {
+      AppNotify.show('分享不可用，可复制链接后粘贴发送');
+    }
+  }
+
+  /// 好友行：联系人头像横滚 + 「更多」圆钮（参考图：最顶部是好友）
+  Widget _buildFriendsRow(Color subText) {
+    if (_loading) {
+      return const SizedBox(
+        height: 84,
+        child: Center(
+          child: SizedBox(
+            width: 22,
+            height: 22,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          ),
+        ),
+      );
+    }
+    final List<({int userId, String nickname, String avatarUrl})> contacts =
+        _contacts;
+    if (contacts.isEmpty) {
+      return SizedBox(
+        height: 84,
+        child: Row(
+          children: <Widget>[
+            Expanded(
+              child: Text(
+                _error.isEmpty ? '暂无联系人' : _error,
+                style: TextStyle(fontSize: 13, color: subText),
+              ),
+            ),
+            _MoreFriendsButton(onTap: () {
+              Navigator.of(context).pop();
+              context.push('/friends');
+            }),
+          ],
+        ),
+      );
+    }
+    return SizedBox(
+      height: 84,
+      child: Row(
+        children: <Widget>[
+          Expanded(
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              itemCount: contacts.length,
+              separatorBuilder: (BuildContext ctx, int i) =>
+                  const SizedBox(width: 18),
+              itemBuilder: (BuildContext ctx, int i) {
+                final ({int userId, String nickname, String avatarUrl}) c =
+                    contacts[i];
+                return _FriendAvatar(
+                  userId: c.userId,
+                  nickname: c.nickname,
+                  avatarUrl: c.avatarUrl,
+                  busy: _sending.contains(c.userId),
+                  onTap: () => unawaited(_send(c.userId, c.nickname)),
+                );
+              },
+            ),
+          ),
+          const SizedBox(width: 10),
+          _MoreFriendsButton(onTap: () {
+            Navigator.of(context).pop();
+            context.push('/friends');
+          }),
+        ],
+      ),
+    );
+  }
+}
+
+/// 好友头像项（圆头像 + 昵称，参考图样式）
+class _FriendAvatar extends StatelessWidget {
+  const _FriendAvatar({
+    required this.userId,
+    required this.nickname,
+    required this.avatarUrl,
+    required this.onTap,
+    this.busy = false,
+  });
+
+  final int userId;
+  final String nickname;
+  final String avatarUrl;
+  final VoidCallback onTap;
+  final bool busy;
+
+  @override
+  Widget build(BuildContext context) {
+    final bool dark = Theme.of(context).brightness == Brightness.dark;
+    return GestureDetector(
+      onTap: busy ? null : onTap,
+      behavior: HitTestBehavior.opaque,
+      child: SizedBox(
+        width: 60,
+        child: Column(
+          children: <Widget>[
+            Stack(
+              alignment: Alignment.center,
+              children: <Widget>[
+                UserAvatar(
+                  url: avatarUrl,
+                  nickname: nickname,
+                  userId: userId,
+                  radius: 26,
+                ),
+                if (busy)
+                  const SizedBox(
+                    width: 52,
+                    height: 52,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            Text(
+              nickname.isEmpty ? '好友' : avatarDisplayName(nickname, userId),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 12,
+                color: dark ? Colors.white70 : Colors.black87,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// 「更多」圆钮（深色圆 + 三点，参考图行尾样式）
+class _MoreFriendsButton extends StatelessWidget {
+  const _MoreFriendsButton({required this.onTap});
+
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final bool dark = Theme.of(context).brightness == Brightness.dark;
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: SizedBox(
+        width: 60,
+        child: Column(
+          children: <Widget>[
+            Container(
+              width: 52,
+              height: 52,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: dark
+                    ? Colors.white.withValues(alpha: 0.10)
+                    : Colors.black.withValues(alpha: 0.06),
+              ),
+              child: Icon(Icons.more_horiz_rounded,
+                  size: 24, color: dark ? Colors.white70 : Colors.black54),
+            ),
+            const SizedBox(height: 6),
+            Text('更多',
+                style: TextStyle(
+                    fontSize: 12,
+                    color: dark ? Colors.white70 : Colors.black87)),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// 分享渠道图标（深色圆底 + 彩色图标 + 底部文字，参考图渠道行样式）
+class _ChannelIcon extends StatelessWidget {
+  const _ChannelIcon({
+    required this.color,
+    required this.icon,
+    required this.label,
+    required this.onTap,
+  });
+
+  final Color color;
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final bool dark = Theme.of(context).brightness == Brightness.dark;
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: SizedBox(
+        width: 64,
+        child: Column(
+          children: <Widget>[
+            Container(
+              width: 52,
+              height: 52,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: <Color>[color, Color.lerp(color, Colors.black, 0.18)!],
+                ),
+                boxShadow: <BoxShadow>[
+                  BoxShadow(
+                    color: color.withValues(alpha: 0.30),
+                    blurRadius: 10,
+                    offset: const Offset(0, 3),
+                  ),
+                ],
+              ),
+              child: Icon(icon, size: 24, color: Colors.white),
+            ),
+            const SizedBox(height: 6),
+            Text(label,
+                style: TextStyle(
+                    fontSize: 12,
+                    color: dark ? Colors.white70 : Colors.black87)),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// 「你还可以分享」扩展卡（邀请好友一起听）
+class _ExtraCard extends StatelessWidget {
+  const _ExtraCard({
+    required this.title,
+    required this.subtitle,
+    required this.icon,
+    required this.gradient,
+    required this.onTap,
+  });
+
+  final String title;
+  final String subtitle;
+  final IconData icon;
+  final List<Color> gradient;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(14),
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: gradient,
+          ),
+        ),
+        child: Row(
+          children: <Widget>[
+            Container(
+              width: 42,
+              height: 42,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: Colors.white.withValues(alpha: 0.22),
+              ),
+              child: Icon(icon, size: 22, color: Colors.white),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Text(title,
+                      style: const TextStyle(
+                          fontSize: 14.5,
+                          fontWeight: FontWeight.w700,
+                          color: Colors.white)),
+                  const SizedBox(height: 2),
+                  Text(subtitle,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                          fontSize: 12,
+                          color: Colors.white.withValues(alpha: 0.85))),
+                ],
+              ),
+            ),
+            const Icon(Icons.chevron_right_rounded,
+                size: 22, color: Colors.white70),
+          ],
         ),
       ),
     );

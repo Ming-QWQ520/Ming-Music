@@ -31,6 +31,9 @@ class PrefsKeys {
   /// 预加载下一首（默认开启）
   static const String preloadNext = 'player.preloadNext';
 
+  /// 音乐获取方式（onDemand 按需 / redirect 重定向；默认按需）
+  static const String musicFetchMode = 'player.musicFetchMode';
+
   /// LRU 缓存容量上限（字节；需求：默认 3GB，缓存音乐页可改）
   static const String cacheMaxBytes = 'player.cacheMaxBytes';
 

@@ -19,6 +19,8 @@ import '../../../comments/providers/comments_providers.dart'
 import '../../../library/data/download_service.dart';
 import '../../../library/domain/track.dart';
 import '../../../player/providers/player_providers.dart';
+import '../../../social/presentation/share_to_friend_sheet.dart'
+    show showShareToFriendSheet;
 import '../../data/netease_providers.dart';
 import '../../../../core/widgets/sheet_host.dart' show showMingSheet;
 
@@ -248,15 +250,27 @@ class _SongActionsSheetState extends ConsumerState<_SongActionsSheet> {
               _ActionRow(
                 icon: Icons.share_rounded,
                 label: '分享',
-                onTap: () async {
-                  final int? id = widget.track.neteaseId;
-                  final String text = id != null && id > 0
-                      ? '${widget.track.title} - ${widget.track.artist} '
-                          'https://music.163.com/#/song?id=$id'
-                      : '${widget.track.title} - ${widget.track.artist}';
-                  final bool ok = await PlatformActions.shareText(text);
-                  if (!ok && mounted) _toast('分享不可用');
-                },
+                // 需求第二十八批：统一走参考图样式分享面板（最顶部好友，
+                // 点击好友发官方歌曲卡片私信；系统分享/复制链接兜底）
+                onTap: widget.track.neteaseId != null &&
+                        widget.track.neteaseId! > 0
+                    ? () {
+                        Navigator.of(context).pop();
+                        showShareToFriendSheet(
+                          context,
+                          ref,
+                          kind: 'song',
+                          id: widget.track.neteaseId!,
+                          name:
+                              '${widget.track.title} - ${widget.track.artist}',
+                        );
+                      }
+                    : () async {
+                        final String text =
+                            '${widget.track.title} - ${widget.track.artist}';
+                        final bool ok = await PlatformActions.shareText(text);
+                        if (!ok && mounted) _toast('分享不可用');
+                      },
               ),
               _ActionRow(
                 icon: Icons.person_outline_rounded,

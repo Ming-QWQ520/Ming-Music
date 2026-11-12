@@ -78,11 +78,11 @@ class LiquidGlassContainer extends ConsumerWidget {
               ),
             ),
           )
-        // 降级：纯半透明背景，零 GPU 滤镜
+        // 降级：纯半透明背景，零 GPU 滤镜（需求第二十八批：透明度 70% —— alpha 0xB3）
         : Container(
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(borderRadius),
-              color: const Color(0xCC16121F),
+              color: const Color(0xB316121F),
               border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
             ),
             child: content,
@@ -133,10 +133,9 @@ class LiquidGlassBarPanel extends ConsumerWidget {
     // 填充：无色中性玻璃 —— 暗色 0xFF14101B@0.26 / 浅色 白@0.38
     //（用户诉求「100% 透明」：旧默认填充 0.35 仍显闷，本批降低到
     // 接近全透，靠 BackdropFilter 模糊保证前景可读）；
-    // 降级（玻璃关闭）：按主题深浅的高不透明实底保证可读
+    // 降级（玻璃关闭）：需求第二十八批 —— 透明度统一 70% 保证可读
     final Color tint = dark ? const Color(0xFF14101B) : Colors.white;
-    final double fillAlpha =
-        glass ? (dark ? 0.26 : 0.38) : (dark ? 0.90 : 0.96);
+    final double fillAlpha = glass ? (dark ? 0.26 : 0.38) : 0.70;
 
     final Widget content = Container(
       decoration: BoxDecoration(

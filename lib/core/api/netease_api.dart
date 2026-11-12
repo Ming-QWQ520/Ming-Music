@@ -94,6 +94,31 @@ class NeteaseApi {
           throwOnCode: throwOnCode,
           cookieKv: cookieKv);
 
+  /// 构造带 cookie（登录态优先，游客兜底）与时间戳防缓存的完整 GET
+  /// URL —— 供播放器直接请求的端点使用（需求第二十八批：302 重定向
+  /// 播放源 `/song/url/v1/302?id=&level=`，播放内核每次连接该 URL，
+  /// 服务端实时 302 到当次有效直链，直链在客户端侧永不过期）。
+  ///
+  /// 与 [get] 同样的 query 拼 cookie 语义（服务端从 query 取 cookie）；
+  /// 杜比档位请调用方经 [cookieKv] 传 os=pc。
+  Future<String> buildGetUrl(
+    String path,
+    Map<String, String> params, {
+    Map<String, String>? cookieKv,
+  }) async {
+    final Map<String, String> payload = Map<String, String>.of(params);
+    final String? cookie = _mergeCookie(await effectiveCookie, cookieKv);
+    if (cookie != null) payload['cookie'] = cookie;
+    // 与 get() 一致：服务端 2 分钟缓存，时间戳防缓存
+    payload['timestamp'] = DateTime.now().millisecondsSinceEpoch.toString();
+    final StringBuffer sb = StringBuffer('$baseUrl$path?');
+    payload.forEach((String k, String v) {
+      sb.write('${Uri.encodeQueryComponent(k)}='
+          '${Uri.encodeQueryComponent(v)}&');
+    });
+    return sb.toString().substring(0, sb.length - 1);
+  }
+
   /// 统一 POST（form-urlencoded，用于登录与评论写操作）
   Future<Map<String, Object?>> post(
     String path,

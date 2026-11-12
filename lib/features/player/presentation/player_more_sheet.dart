@@ -298,7 +298,9 @@ class _PlayerMoreSheetState extends ConsumerState<_PlayerMoreSheet> {
                   ],
                 ),
               ),
-            // ---------- 横向快捷操作（5 图标） ----------
+            // ---------- 横向快捷操作（4 图标，需求第二十八批：
+            // 顶部栏只保留收藏/下载/分享/一起听，横屏移入下方功能列表；
+            // 分享改为参考图样式分享面板 —— 最顶部好友，点击即私信歌曲） ----------
             if (track != null)
               Padding(
                 padding: const EdgeInsets.fromLTRB(12, 8, 12, 2),
@@ -320,19 +322,8 @@ class _PlayerMoreSheetState extends ConsumerState<_PlayerMoreSheet> {
                     _QuickIcon(
                       icon: Icons.share_rounded,
                       label: '分享',
-                      onTap: () async {
-                        final int? id = track.neteaseId;
-                        await PlatformActions.shareText(
-                          '${track.title} - ${track.artist}'
-                          '${id != null && id > 0 ? ' https://music.163.com/#/song?id=$id' : ''}',
-                        );
-                      },
-                    ),
-                    // 需求（第二十九批）：私信分享当前歌曲给好友
-                    //（POST /send/song，好友选择器复用私信分享面板）
-                    _QuickIcon(
-                      icon: Icons.mail_outline_rounded,
-                      label: '私信',
+                      // 需求第二十八批：仿网易云分享面板（最顶部好友，
+                      // 点击好友即发官方歌曲卡片私信；系统分享/复制链接兜底）
                       onTap: () {
                         final int id = track.neteaseId ?? 0;
                         Navigator.of(context).pop();
@@ -344,11 +335,6 @@ class _PlayerMoreSheetState extends ConsumerState<_PlayerMoreSheet> {
                           name: '${track.title} - ${track.artist}',
                         );
                       },
-                    ),
-                    _QuickIcon(
-                      icon: Icons.screen_rotation_rounded,
-                      label: '横屏',
-                      onTap: _toggleLandscape,
                     ),
                     _QuickIcon(
                       icon: Icons.groups_rounded,
@@ -520,6 +506,12 @@ class _PlayerMoreSheetState extends ConsumerState<_PlayerMoreSheet> {
                     },
                   ),
                   const _SectionLabel('更多功能'),
+                  _MoreRow(
+                    icon: Icons.screen_rotation_rounded,
+                    label: '横屏播放',
+                    // 需求第二十八批：横屏从顶部快捷栏移入功能列表
+                    onTap: _toggleLandscape,
+                  ),
                   _MoreRow(
                     icon: Icons.notifications_active_outlined,
                     label: '设为铃声',

@@ -109,7 +109,7 @@ class GlassSheet extends ConsumerWidget {
       decoration: BoxDecoration(
         color: glass
             ? const Color(0x80131018) // 需求：弹出框透明度统一 50%（玻璃态深色）
-            : AppSheetColors.fallback, // 降级：同为 50% 透明深色
+            : AppSheetColors.fallback, // 降级：70% 透明度深色（需求第二十八批）
         borderRadius: BorderRadius.vertical(top: Radius.circular(borderRadius)),
         border: Border(
           top: BorderSide(
@@ -127,6 +127,6 @@ class GlassSheet extends ConsumerWidget {
 class AppSheetColors {
   AppSheetColors._();
 
-  /// 液态玻璃降级底色（需求：弹出框透明度统一 50% —— alpha 0x80）
-  static const Color fallback = Color(0x8018141F);
+  /// 液态玻璃降级底色（需求第二十八批：关闭液态玻璃时透明度统一 70% —— alpha 0xB3）
+  static const Color fallback = Color(0xB318141F);
 }

@@ -26,7 +26,8 @@ import '../../auth/providers/auth_providers.dart';
 import '../../player/domain/np_settings.dart';
 import '../../player/presentation/np_settings_sheet.dart';
 import '../../player/providers/np_settings_providers.dart';
-import '../../player/providers/player_providers.dart' show songCacheProvider;
+import '../../player/providers/player_providers.dart'
+    show playerProvider, songCacheProvider;
 import '../../player/services/song_cache.dart';
 import '../domain/settings_models.dart';
 import '../providers/settings_providers.dart';
@@ -46,6 +47,7 @@ class SettingsPage extends ConsumerWidget {
     final bool glassEnabled = ref.watch(glassEnabledProvider);
     final BackgroundConfig bg = ref.watch(backgroundProvider);
     final AudioQuality quality = ref.watch(audioQualityProvider);
+    final MusicFetchMode fetchMode = ref.watch(musicFetchModeProvider);
     final AuthState auth = ref.watch(authProvider);
     final NpPlayerSettings np = ref.watch(npSettingsProvider);
     // 需求：应用图片背景（除播放页外）
@@ -132,6 +134,23 @@ class SettingsPage extends ConsumerWidget {
                 value: quality,
                 onChanged: (AudioQuality v) =>
                     ref.read(audioQualityProvider.notifier).set(v),
+              ),
+              // 需求第二十八批：音乐获取方式（根治直链 expi≈20min 过期
+              // 导致的播放暂停）—— 切换时全队列按新模式重解析（保留进度）
+              _RadioRow<MusicFetchMode>(
+                label: '音乐获取',
+                subtitle: fetchMode.subtitle,
+                groups: const <(MusicFetchMode, String)>[
+                  (MusicFetchMode.onDemand, '按需'),
+                  (MusicFetchMode.redirect, '重定向'),
+                ],
+                value: fetchMode,
+                onChanged: (MusicFetchMode v) async {
+                  final String? err = await ref
+                      .read(playerProvider.notifier)
+                      .applyFetchMode(v);
+                  if (err != null) AppNotify.show('切换失败：$err');
+                },
               ),
               ListTile(
                 contentPadding:

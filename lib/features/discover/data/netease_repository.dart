@@ -654,6 +654,22 @@ class NeteaseRepository {
     return out;
   }
 
+  /// 302 重定向播放源（需求第二十八批：「音乐获取-重定向」模式）。
+  ///
+  /// 返回 `/song/url/v1/302?id=&level=` 端点的完整 URL（自带 cookie 与
+  /// 时间戳防缓存，与 JSON 接口同语义）。播放器把该 URL 当作音源直连：
+  /// 服务端对每次连接实时 302 到当次有效的音乐直链，播放内核每次
+  /// 重连/seek 都会重新走 302 —— 直链在客户端侧永不驻留、永不过期。
+  /// 仅支持单个 id（文档「302到音乐 url - 新版」，实测 302 → CDN 直链）。
+  Future<String> songUrlRedirect(int id, {String level = 'standard'}) {
+    final Map<String, String>? cookieKv =
+        level == 'dolby' ? <String, String>{'os': 'pc'} : null;
+    return _api.buildGetUrl('/song/url/v1/302', <String, String>{
+      'id': '$id',
+      'level': level,
+    }, cookieKv: cookieKv);
+  }
+
   /// 歌词：一次请求拿 yrc（逐字）+ lrc + 翻译 + 音译
   Future<LyricData> lyric(int id) async {
     final Map<String, Object?> res =

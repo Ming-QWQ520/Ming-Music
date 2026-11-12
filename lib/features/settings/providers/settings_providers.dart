@@ -200,7 +200,7 @@ class ThemeModeNotifier extends Notifier<ThemeMode> {
       case 'dark':
         return ThemeMode.dark;
       default:
-        return ThemeMode.dark; // 沉浸式默认深色
+        return ThemeMode.system; // 需求第二十八批：默认跟随系统
     }
   }
 
@@ -268,6 +268,32 @@ class PreloadNextNotifier extends Notifier<bool> {
   void set(bool on) {
     state = on;
     _prefs.setBool(PrefsKeys.preloadNext, on);
+  }
+}
+
+// ---------------------------------------------------------------- 音乐获取方式
+
+/// 音乐获取方式（需求第二十八批：根治直链 expi=1200s 过期导致播放暂停 ——
+/// 按需：播放时现取直链、临近过期自动续取；重定向：播放器直接请求
+/// /song/url/v1/302 端点，每次连接服务端实时 302 到当次有效直链。
+/// **默认按需**；两种模式都保留本地缓存优先逻辑，互不影响缓存）。
+final NotifierProvider<MusicFetchModeNotifier, MusicFetchMode>
+    musicFetchModeProvider =
+    NotifierProvider<MusicFetchModeNotifier, MusicFetchMode>(
+        MusicFetchModeNotifier.new);
+
+class MusicFetchModeNotifier extends Notifier<MusicFetchMode> {
+  late SharedPreferences _prefs;
+
+  @override
+  MusicFetchMode build() {
+    _prefs = ref.watch(sharedPreferencesProvider);
+    return MusicFetchModeX.fromName(_prefs.getString(PrefsKeys.musicFetchMode));
+  }
+
+  void set(MusicFetchMode mode) {
+    state = mode;
+    _prefs.setString(PrefsKeys.musicFetchMode, mode.name);
   }
 }
 

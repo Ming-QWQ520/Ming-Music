@@ -152,6 +152,38 @@ extension AudioQualityX on AudioQuality {
       );
 }
 
+/// 音乐获取方式（需求第二十八批：根治「播放约 20 分钟后暂停」——
+/// 网易云直链 expi=1200 秒过期，403 拉断播放）。
+///
+///  - [onDemand] 按需（默认）：入队/切歌时经 /song/url/v1 现取直链，
+///    临近过期自动续取（timestamp 穿透 + 守卫阈值 + 错误自愈三层防护）；
+///  - [redirect] 重定向：播放器直接请求 `/song/url/v1/302?id=&level=`
+///    端点，服务端每次连接实时 302 到当次有效直链 —— 播放器每次
+///    重连/seek 都会拿到新鲜直链，从根本上不存在直链过期。
+enum MusicFetchMode {
+  onDemand,
+  redirect,
+}
+
+extension MusicFetchModeX on MusicFetchMode {
+  String get label => switch (this) {
+        MusicFetchMode.onDemand => '按需',
+        MusicFetchMode.redirect => '重定向',
+      };
+
+  String get subtitle => switch (this) {
+        MusicFetchMode.onDemand =>
+          '播放时现取直链，临近过期（约 20 分钟）自动续取',
+        MusicFetchMode.redirect => '播放器直接请求 302 端点，直链永不过期',
+      };
+
+  static MusicFetchMode fromName(String? name) =>
+      MusicFetchMode.values.firstWhere(
+        (MusicFetchMode m) => m.name == name,
+        orElse: () => MusicFetchMode.onDemand,
+      );
+}
+
 /// /song/url/v1 返回的 level（实际下发档位）→ 展示名。
 /// 用于播放设置「音质」项展示当前播放歌曲的**真实品质**
 ///（请求档位因权限回落时与请求值不同，如未登录请求无损实际返回极高）。

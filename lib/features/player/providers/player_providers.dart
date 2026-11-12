@@ -27,12 +27,13 @@ import '../../discover/data/netease_repository.dart';
 import '../../library/domain/track.dart';
 import '../../../core/api/netease_models.dart' show Song, SongUrlInfo;
 import '../../settings/domain/settings_models.dart'
-    show AudioQuality, AudioQualityX;
+    show AudioQuality, AudioQualityX, MusicFetchMode;
 import '../../settings/providers/settings_providers.dart'
     show
         audioQualityProvider,
         cacheLimitProvider,
         listenCacheProvider,
+        musicFetchModeProvider,
         preloadNextProvider,
         sharedPreferencesProvider;
 import '../domain/player_state.dart';
@@ -872,6 +873,8 @@ class PlayerNotifier extends Notifier<PlayerState> {
   ///  b) 直链年龄超过 [_urlStaleAfter]。
   Future<void> _refreshCurrentSourceIfStale() async {
     if (_offlineFullQueue != null || _healInFlight) return; // 离线降级态：交还原链路
+    // 需求第二十八批：重定向模式音源永不过期，无需续取
+    if (ref.read(musicFetchModeProvider) == MusicFetchMode.redirect) return;
     final Track? cur = state.currentTrack;
     final int? nid = cur?.neteaseId;
     if (cur == null || nid == null || nid <= 0) return;
@@ -1056,6 +1059,8 @@ class PlayerNotifier extends Notifier<PlayerState> {
 
     // 音质变化必须绕过直链缓存重新解析
     _urlCache.clear();
+    final bool redirectMode =
+        ref.read(musicFetchModeProvider) == MusicFetchMode.redirect;
     state = state.copyWith(processing: AppProcessingState.loading);
     try {
       final NeteaseRepository repo = ref.read(neteaseRepositoryProvider);
@@ -1075,7 +1080,8 @@ class PlayerNotifier extends Notifier<PlayerState> {
           if (t.neteaseId == null)
             t
           else if (urlById[t.neteaseId!]?.playable ?? false)
-            t.copyWith(source: urlById[t.neteaseId!]!.url)
+            await _withCacheSource(t, urlById[t.neteaseId!]!,
+                redirectMode: redirectMode)
           else
             t, // 新音质拿不到链接（如未登录无损）：保留原曲目避免丢队列
       ];
@@ -1198,9 +1204,14 @@ class PlayerNotifier extends Notifier<PlayerState> {
   /// 需求「只缓存播放的歌」：解析不再触发预下载（开播时才落盘）。
   /// 直链批量请求失败（断网/接口异常）不再整体抛出：返回已命中的部分，
   /// 播放队列/离线场景保留可用曲目。
+  /// 需求第二十八批：「音乐获取 = 重定向」模式下，音源改用
+  /// /song/url/v1/302 端点 URL —— 播放内核每次连接都由服务端实时
+  /// 302 到当次有效直链，客户端侧直链永不过期。
   Future<List<Track>> resolveTracks(List<Track> tracks,
       {bool forceRemote = false}) async {
     final String level = ref.read(audioQualityProvider).apiValue;
+    final bool redirectMode =
+        ref.read(musicFetchModeProvider) == MusicFetchMode.redirect;
 
     final Map<int, Track> resolvedById = <int, Track>{};
     final Map<int, Track> pending = <int, Track>{};
@@ -1223,7 +1234,8 @@ class PlayerNotifier extends Notifier<PlayerState> {
       final SongUrlInfo? cached = forceRemote ? null : _urlCacheGet(nid);
       if (cached != null) {
         if (cached.playable) {
-          resolvedById[nid] = await _withCacheSource(t, cached);
+          resolvedById[nid] =
+              await _withCacheSource(t, cached, redirectMode: redirectMode);
           continue;
         }
         // 需求第二十一批：不可播（VIP 灰曲）不再直接剔除 —— 先查磁盘
@@ -1261,7 +1273,8 @@ class PlayerNotifier extends Notifier<PlayerState> {
           if (t == null) continue;
           _urlCachePut(u.id, u);
           if (u.playable) {
-            resolvedById[u.id] = await _withCacheSource(t, u);
+            resolvedById[u.id] =
+                await _withCacheSource(t, u, redirectMode: redirectMode);
           }
         }
       } catch (e) {
@@ -1317,7 +1330,14 @@ class PlayerNotifier extends Notifier<PlayerState> {
   ///  - 未命中：网络 URL（落盘延后到开播时，见 _cacheCurrentTrack）。
   /// 需求第二十一批：不再受「边听边缓存」开关限制 —— 已缓存文件
   /// 始终优先本地播放（关开关只影响新增缓存，不废弃已有缓存）。
-  Future<Track> _withCacheSource(Track t, SongUrlInfo u) async {
+  /// 需求第二十八批：[redirectMode] = true（音乐获取=重定向）且未命中
+  /// 本地缓存时，音源改用 /song/url/v1/302 端点 URL —— 播放内核每次
+  /// 连接由服务端实时 302 到当次有效直链，客户端侧直链永不过期。
+  Future<Track> _withCacheSource(
+    Track t,
+    SongUrlInfo u, {
+    bool redirectMode = false,
+  }) async {
     final int id = t.neteaseId!;
     try {
       final hit = await _cachedSourceAnyLevel(id);
@@ -1327,6 +1347,19 @@ class PlayerNotifier extends Notifier<PlayerState> {
       }
     } catch (_) {
       // 缓存层异常不影响播放
+    }
+    if (redirectMode) {
+      try {
+        final NeteaseRepository repo = ref.read(neteaseRepositoryProvider);
+        final String redUrl = await repo.songUrlRedirect(
+          id,
+          level: ref.read(audioQualityProvider).apiValue,
+        );
+        return t.copyWith(source: redUrl);
+      } catch (_) {
+        // 302 端点 URL 构造失败（极少：本地拼 URL 仅 cookie 读取）：
+        // 回落 JSON 直链，仍有按需模式的时效校验兜底
+      }
     }
     return t.copyWith(source: u.url);
   }
@@ -1830,6 +1863,8 @@ class PlayerNotifier extends Notifier<PlayerState> {
   Future<void> _refreshStaleSourceBeforeJump(int index) async {
     final List<Track> q = state.queue;
     if (index < 0 || index >= q.length) return;
+    // 需求第二十八批：重定向模式音源永不过期，无需续取
+    if (ref.read(musicFetchModeProvider) == MusicFetchMode.redirect) return;
     final Track target = q[index];
     final int? nid = target.neteaseId;
     if (nid == null || nid <= 0) return; // 本地/自定义曲目：源不过期
@@ -1855,6 +1890,54 @@ class PlayerNotifier extends Notifier<PlayerState> {
       await _handler.replaceSourceAt(index, fresh); // 原位替换内核音源
     } catch (_) {
       // 重新获取失败：退回旧链接尝试，报错由内核错误自愈兑底
+    }
+  }
+
+  /// 音乐获取方式切换（需求第二十八批）：保存偏好并全队列按新模式
+  /// 重解析音源（保留进度与播放状态）；重解析期间显示 loading。
+  /// 返回 null 表示成功，否则为错误文案。
+  Future<String?> applyFetchMode(MusicFetchMode mode) async {
+    ref.read(musicFetchModeProvider.notifier).set(mode);
+    if (!state.hasQueue) return null;
+    final Duration pos = _handler.player.position;
+    final bool wasPlaying = state.playing;
+    final List<Track> queue = state.queue;
+    final int index = state.index.clamp(0, queue.length - 1);
+
+    _urlCache.clear();
+    state = state.copyWith(processing: AppProcessingState.loading);
+    try {
+      final List<Track> rebuilt =
+          await resolveTracks(queue, forceRemote: true);
+      final Map<int, Track> byId = <int, Track>{
+        for (final Track t in rebuilt)
+          if (t.neteaseId != null) t.neteaseId!: t,
+      };
+      // 非破坏性合并：解析失败的曲目保留原位（离线场景不丢歌）
+      final List<Track> merged = <Track>[
+        for (final Track t in queue) byId[t.neteaseId] ?? t,
+      ];
+      int newIndex = index;
+      final Track target = queue[index];
+      final int found = merged.indexWhere((Track t) => t.id == target.id);
+      if (found >= 0) newIndex = found;
+      state = state.copyWith(
+        queue: merged,
+        index: newIndex,
+        processing: AppProcessingState.buffering,
+      );
+      await _handler.loadQueue(merged, initialIndex: newIndex);
+      if (pos > Duration.zero) await _handler.seek(pos);
+      if (wasPlaying) await _handler.play();
+      _schedulePersist();
+      _schedulePreload();
+      return null;
+    } catch (e) {
+      state = state.copyWith(
+        processing: AppProcessingState.idle,
+        error: '切换音乐获取方式失败：$e',
+      );
+      return '$e';
     }
   }
 
